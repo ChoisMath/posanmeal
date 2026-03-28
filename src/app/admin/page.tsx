@@ -108,7 +108,7 @@ export default function AdminPage() {
 
   async function handleEditUser() {
     if (!editUser) return;
-    const body: Record<string, unknown> = { id: editUser.id, name: editForm.name };
+    const body: Record<string, unknown> = { id: editUser.id, name: editForm.name, email: editForm.email };
     if (editUser.role === "STUDENT") {
       body.grade = parseInt(editForm.grade); body.classNum = parseInt(editForm.classNum);
       body.number = parseInt(editForm.number);
@@ -295,7 +295,7 @@ export default function AdminPage() {
           <DialogHeader><DialogTitle>사용자 편집</DialogTitle></DialogHeader>
           {editUser && (
             <div className="space-y-3">
-              <div><Label>이메일 (수정 불가)</Label><Input value={editForm.email} disabled /></div>
+              <div><Label>이메일</Label><Input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} /></div>
               <div><Label>이름</Label><Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
               {editUser.role === "STUDENT" && (
                 <>
