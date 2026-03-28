@@ -23,37 +23,31 @@ interface CheckInResult {
 
 export default function CheckPage() {
   const [result, setResult] = useState<CheckInResult | null>(null);
-  const [scanning, setScanning] = useState(true);
   const processingRef = useRef(false);
 
-  const handleScan = useCallback(
-    async (data: string) => {
-      if (processingRef.current) return;
-      processingRef.current = true;
-      setScanning(false);
+  const handleScan = useCallback(async (data: string) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
 
-      try {
-        const res = await fetch("/api/checkin", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: data }),
-        });
-        const json = await res.json();
-        setResult(json);
-      } catch (err) {
-        console.error("Check-in fetch error:", err);
-        setResult({ success: false, error: "서버 연결 오류" });
-      }
+    try {
+      const res = await fetch("/api/checkin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: data }),
+      });
+      const json = await res.json();
+      setResult(json);
+    } catch (err) {
+      console.error("Check-in fetch error:", err);
+      setResult({ success: false, error: "서버 연결 오류" });
+    }
 
-      // Reset after 2 seconds
-      setTimeout(() => {
-        setResult(null);
-        setScanning(true);
-        processingRef.current = false;
-      }, 2000);
-    },
-    []
-  );
+    // Reset after 2 seconds
+    setTimeout(() => {
+      setResult(null);
+      processingRef.current = false;
+    }, 2000);
+  }, []);
 
   const formatCheckedAt = (checkedAt: string) => {
     const d = new Date(checkedAt);
@@ -84,15 +78,10 @@ export default function CheckPage() {
         <ThemeToggle />
       </div>
 
-      {/* Camera Area */}
+      {/* Camera Area — always active */}
       <div className="bg-gray-900 p-4">
         <div className="max-w-md mx-auto">
-          <QRScanner onScan={handleScan} scanning={scanning} />
-          {!scanning && !result && (
-            <div className="flex items-center justify-center h-64 text-white">
-              처리 중...
-            </div>
-          )}
+          <QRScanner onScan={handleScan} />
         </div>
       </div>
 
