@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { signOut } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,19 +49,20 @@ export default function AdminPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ ...emptyForm });
 
-  const fetchUsers = useCallback(async () => {
+  async function fetchUsers() {
     const res = await fetch(`/api/admin/users?role=${userFilter}`);
     const data = await res.json();
     setUsers(data.users || []);
-  }, [userFilter]);
+  }
 
-  const fetchDashboard = useCallback(async () => {
+  async function fetchDashboard() {
     const res = await fetch("/api/admin/dashboard");
     const data = await res.json();
     setDashboard(data);
-  }, []);
+  }
 
-  useEffect(() => { void fetchUsers(); void fetchDashboard(); }, [fetchUsers, fetchDashboard]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchUsers(); fetchDashboard(); }, [userFilter]);
 
   async function handleImport() {
     setImporting(true); setImportMessage("");
