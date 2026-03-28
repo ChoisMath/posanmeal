@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -37,9 +37,15 @@ export function MonthlyCalendar() {
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
 
+  const checkInMap = useMemo(() => {
+    const map = new Map<string, CheckInRecord>();
+    checkIns.forEach((c) => map.set(c.date.slice(0, 10), c));
+    return map;
+  }, [checkIns]);
+
   const getCheckIn = (day: number) => {
     const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    return checkIns.find((c) => c.date.startsWith(dateStr));
+    return checkInMap.get(dateStr);
   };
 
   const formatTime = (checkedAt: string) => {

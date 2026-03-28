@@ -38,10 +38,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async signIn({ user, account }) {
       if (account?.provider === "google") {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: user.email! },
-        });
-        if (!dbUser) return false;
+        const count = await prisma.user.count({ where: { email: user.email! } });
+        return count > 0;
       }
       return true;
     },
@@ -49,13 +47,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account?.provider === "google" && user?.email) {
         const dbUser = await prisma.user.findUnique({
           where: { email: user.email },
+          select: { id: true, role: true },
         });
         if (dbUser) {
           token.dbUserId = dbUser.id;
           token.role = dbUser.role;
         }
       }
-      if (account?.provider === "admin-login" && user) {
+      if (account?.provider === "admin-login") {
         token.role = "ADMIN";
         token.dbUserId = 0;
       }

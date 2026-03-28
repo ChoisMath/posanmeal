@@ -10,6 +10,7 @@ export async function GET(request: Request) {
 
   const teacher = await prisma.user.findUnique({
     where: { id: session.user.dbUserId },
+    select: { homeroom: true },
   });
 
   if (!teacher?.homeroom) {
@@ -29,10 +30,12 @@ export async function GET(request: Request) {
 
   const students = await prisma.user.findMany({
     where: { role: "STUDENT", grade, classNum },
-    include: {
-      mealPeriod: true,
+    select: {
+      id: true, name: true, number: true, photoUrl: true,
+      mealPeriod: { select: { startDate: true, endDate: true } },
       checkIns: {
         where: { date: { gte: startDate, lte: endDate } },
+        select: { date: true, checkedAt: true },
         orderBy: { date: "asc" },
       },
     },

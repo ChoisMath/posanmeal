@@ -7,21 +7,39 @@ export async function GET(request: Request) {
   const dateParam = searchParams.get("date") || todayKST();
   const targetDate = new Date(dateParam);
 
-  const checkIns = await prisma.checkIn.findMany({
-    where: { date: targetDate },
-    include: { user: { select: { name: true, role: true, grade: true, classNum: true, number: true } } },
-    orderBy: { checkedAt: "asc" },
+  // Parallel: groupBy for counts + findMany for records
+  const [counts, records] = await Promise.all([
+    prisma.checkIn.groupBy({
+      by: ["type"],
+      where: { date: targetDate },
+      _count: { id: true },
+    }),
+    prisma.checkIn.findMany({
+      where: { date: targetDate },
+      select: {
+        type: true,
+        checkedAt: true,
+        user: { select: { name: true, role: true, grade: true, classNum: true, number: true } },
+      },
+      orderBy: { checkedAt: "asc" },
+    }),
+  ]);
+
+  const countMap = Object.fromEntries(counts.map((c) => [c.type, c._count.id]));
+
+  return NextResponse.json({
+    date: dateParam,
+    studentCount: countMap.STUDENT || 0,
+    teacherWorkCount: countMap.WORK || 0,
+    teacherPersonalCount: countMap.PERSONAL || 0,
+    records: records.map((c) => ({
+      userName: c.user.name,
+      role: c.user.role,
+      type: c.type,
+      checkedAt: c.checkedAt.toISOString(),
+      grade: c.user.grade,
+      classNum: c.user.classNum,
+      number: c.user.number,
+    })),
   });
-
-  const studentCount = checkIns.filter((c) => c.type === "STUDENT").length;
-  const teacherWorkCount = checkIns.filter((c) => c.type === "WORK").length;
-  const teacherPersonalCount = checkIns.filter((c) => c.type === "PERSONAL").length;
-
-  const records = checkIns.map((c) => ({
-    userName: c.user.name, role: c.user.role, type: c.type,
-    checkedAt: c.checkedAt.toISOString(),
-    grade: c.user.grade, classNum: c.user.classNum, number: c.user.number,
-  }));
-
-  return NextResponse.json({ date: dateParam, studentCount, teacherWorkCount, teacherPersonalCount, records });
 }

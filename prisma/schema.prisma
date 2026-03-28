@@ -42,6 +42,8 @@ model User {
 
   mealPeriod MealPeriod?
   checkIns   CheckIn[]
+
+  @@index([role, grade, classNum, number])
 }
 
 model MealPeriod {
@@ -65,4 +67,6 @@ model CheckIn {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, date])
+  @@index([date])
+  @@index([userId])
 }

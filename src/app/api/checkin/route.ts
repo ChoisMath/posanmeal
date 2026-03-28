@@ -27,53 +27,41 @@ export async function POST(request: Request) {
     const today = todayKST();
     const todayDate = new Date(today);
 
-    if (payload.role === "STUDENT") {
-      const mealPeriod = await prisma.mealPeriod.findUnique({
-        where: { userId: payload.userId },
-      });
-
-      if (!mealPeriod) {
-        return NextResponse.json(
-          { success: false, error: "석식 신청 기간이 없습니다." },
-          { status: 400 }
-        );
-      }
-
-      if (todayDate < mealPeriod.startDate || todayDate > mealPeriod.endDate) {
-        return NextResponse.json(
-          { success: false, error: "석식 신청 기간이 아닙니다." },
-          { status: 400 }
-        );
-      }
-    }
-
-    const existing = await prisma.checkIn.findUnique({
-      where: {
-        userId_date: {
-          userId: payload.userId,
-          date: todayDate,
-        },
-      },
-    });
-
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        grade: true,
-        classNum: true,
-        number: true,
-        photoUrl: true,
-      },
-    });
+    // Parallel queries: mealPeriod + existing checkIn + user info
+    const [mealPeriod, existing, user] = await Promise.all([
+      payload.role === "STUDENT"
+        ? prisma.mealPeriod.findUnique({ where: { userId: payload.userId } })
+        : null,
+      prisma.checkIn.findUnique({
+        where: { userId_date: { userId: payload.userId, date: todayDate } },
+      }),
+      prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: { id: true, name: true, role: true, grade: true, classNum: true, number: true, photoUrl: true },
+      }),
+    ]);
 
     if (!user) {
       return NextResponse.json(
         { success: false, error: "사용자를 찾을 수 없습니다." },
         { status: 404 }
       );
+    }
+
+    // Student meal period validation
+    if (payload.role === "STUDENT") {
+      if (!mealPeriod) {
+        return NextResponse.json(
+          { success: false, error: "석식 신청 기간이 없습니다." },
+          { status: 400 }
+        );
+      }
+      if (todayDate < mealPeriod.startDate || todayDate > mealPeriod.endDate) {
+        return NextResponse.json(
+          { success: false, error: "석식 신청 기간이 아닙니다." },
+          { status: 400 }
+        );
+      }
     }
 
     if (existing) {

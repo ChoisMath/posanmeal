@@ -34,25 +34,37 @@ export async function POST(request: Request) {
 
     const csv = await res.text();
     const rows = csvToRows(csv);
-    for (let i = 1; i < rows.length; i++) {
-      const [email, grade, classNum, number, name, startDate, endDate] = rows[i];
-      if (!email || !name) continue;
+    const validRows = rows.slice(1).filter(([email, , , , name]) => email && name);
 
-      const user = await prisma.user.upsert({
-        where: { email },
-        update: { name, grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
-        create: { email, name, role: "STUDENT", grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
-      });
+    // Batch upsert students in a single transaction
+    const upsertedUsers = await prisma.$transaction(
+      validRows.map(([email, grade, classNum, number, name]) =>
+        prisma.user.upsert({
+          where: { email },
+          update: { name, grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
+          create: { email, name, role: "STUDENT", grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
+        })
+      )
+    );
 
-      if (startDate && endDate) {
-        await prisma.mealPeriod.upsert({
-          where: { userId: user.id },
-          update: { startDate: new Date(startDate), endDate: new Date(endDate) },
-          create: { userId: user.id, startDate: new Date(startDate), endDate: new Date(endDate) },
-        });
-      }
-      studentCount++;
+    // Batch upsert meal periods in a single transaction
+    const mealPeriodOps = validRows
+      .map((row, i) => ({ userId: upsertedUsers[i].id, startDate: row[5], endDate: row[6] }))
+      .filter((mp) => mp.startDate && mp.endDate);
+
+    if (mealPeriodOps.length > 0) {
+      await prisma.$transaction(
+        mealPeriodOps.map((mp) =>
+          prisma.mealPeriod.upsert({
+            where: { userId: mp.userId },
+            update: { startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
+            create: { userId: mp.userId, startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
+          })
+        )
+      );
     }
+
+    studentCount = validRows.length;
   }
 
   if (teacherSheetUrl) {
@@ -66,17 +78,20 @@ export async function POST(request: Request) {
 
     const csv = await res.text();
     const rows = csvToRows(csv);
-    for (let i = 1; i < rows.length; i++) {
-      const [email, subject, homeroom, position, name] = rows[i];
-      if (!email || !name) continue;
+    const validRows = rows.slice(1).filter(([email, , , , name]) => email && name);
 
-      await prisma.user.upsert({
-        where: { email },
-        update: { name, subject, homeroom: homeroom || null, position },
-        create: { email, name, role: "TEACHER", subject, homeroom: homeroom || null, position },
-      });
-      teacherCount++;
-    }
+    // Batch upsert teachers in a single transaction
+    await prisma.$transaction(
+      validRows.map(([email, subject, homeroom, position, name]) =>
+        prisma.user.upsert({
+          where: { email },
+          update: { name, subject, homeroom: homeroom || null, position },
+          create: { email, name, role: "TEACHER", subject, homeroom: homeroom || null, position },
+        })
+      )
+    );
+
+    teacherCount = validRows.length;
   }
 
   return NextResponse.json({ message: `학생 ${studentCount}명, 교사 ${teacherCount}명 등록 완료`, studentCount, teacherCount });

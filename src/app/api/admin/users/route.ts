@@ -7,7 +7,12 @@ export async function GET(request: Request) {
   const where = role ? { role } : {};
   const users = await prisma.user.findMany({
     where,
-    include: { mealPeriod: true },
+    select: {
+      id: true, email: true, name: true, role: true,
+      grade: true, classNum: true, number: true,
+      subject: true, homeroom: true, position: true,
+      mealPeriod: { select: { startDate: true, endDate: true } },
+    },
     orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }, { name: "asc" }],
   });
   return NextResponse.json({ users });
