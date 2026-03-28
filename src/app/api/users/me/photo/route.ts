@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const filepath = path.join(UPLOAD_DIR, filename);
   await writeFile(filepath, resized);
 
-  const photoUrl = `/uploads/${filename}?t=${Date.now()}`;
+  const photoUrl = `/api/uploads/${filename}?t=${Date.now()}`;
   await prisma.user.update({
     where: { id: session.user.dbUserId },
     data: { photoUrl },
