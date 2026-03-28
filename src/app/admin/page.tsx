@@ -61,7 +61,7 @@ export default function AdminPage() {
     setDashboard(data);
   }, []);
 
-  useEffect(() => { fetchUsers(); fetchDashboard(); }, [fetchUsers, fetchDashboard]);
+  useEffect(() => { void fetchUsers(); void fetchDashboard(); }, [fetchUsers, fetchDashboard]);
 
   async function handleImport() {
     setImporting(true); setImportMessage("");
