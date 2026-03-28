@@ -1,0 +1,124 @@
+<h2>주요 화면 와이어프레임</h2>
+<p class="subtitle">각 역할별 메인 화면 구성입니다</p>
+
+<div class="section">
+  <h3>1. 학생 페이지 (/student)</h3>
+  <div class="mockup">
+    <div class="mockup-header">학생 - 3개 탭 구성</div>
+    <div class="mockup-body" style="padding:0;">
+      <!-- Tab bar -->
+      <div style="display:flex; border-bottom:2px solid #e2e8f0;">
+        <div style="flex:1; padding:12px; text-align:center; background:#3b82f6; color:white; font-weight:bold;">QR</div>
+        <div style="flex:1; padding:12px; text-align:center; color:#64748b;">개인정보</div>
+        <div style="flex:1; padding:12px; text-align:center; color:#64748b;">확인</div>
+      </div>
+      <!-- QR Tab Content -->
+      <div style="padding:24px; text-align:center;">
+        <div style="margin:0 auto; width:180px; height:180px; border:3px solid #1e293b; border-radius:12px; display:flex; align-items:center; justify-content:center; background:#f8fafc;">
+          <div style="font-size:14px; color:#64748b;">QR Code<br/>(매일 갱신)</div>
+        </div>
+        <p style="margin-top:16px; font-weight:600; color:#1e293b;">2학년 3반 15번 김민수</p>
+        <p style="margin-top:4px; font-size:13px; color:#64748b;">석식 신청 기간: 2026-03-01 ~ 2026-03-31</p>
+        <div style="margin-top:12px; padding:8px 16px; background:#dcfce7; color:#166534; border-radius:8px; display:inline-block; font-size:13px;">석식 신청 기간입니다</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>2. 교사 페이지 (/teacher) — 담임교사</h3>
+  <div class="mockup">
+    <div class="mockup-header">담임교사 - 4개 탭 구성</div>
+    <div class="mockup-body" style="padding:0;">
+      <!-- Tab bar -->
+      <div style="display:flex; border-bottom:2px solid #e2e8f0; font-size:13px;">
+        <div style="flex:1; padding:12px; text-align:center; background:#3b82f6; color:white; font-weight:bold;">개인석식</div>
+        <div style="flex:1; padding:12px; text-align:center; color:#64748b;">근무</div>
+        <div style="flex:1; padding:12px; text-align:center; color:#64748b;">학생관리</div>
+        <div style="flex:1; padding:12px; text-align:center; color:#64748b;">개인정보</div>
+      </div>
+      <!-- Personal meal tab -->
+      <div style="padding:24px; text-align:center;">
+        <div style="margin:0 auto; width:180px; height:180px; border:3px solid #f59e0b; border-radius:12px; display:flex; align-items:center; justify-content:center; background:#fffbeb;">
+          <div style="font-size:14px; color:#92400e;">QR Code<br/>(개인석식)</div>
+        </div>
+        <p style="margin-top:16px; font-weight:600; color:#1e293b;">수학과 최영삼 선생님</p>
+        <p style="margin-top:4px; font-size:13px; color:#f59e0b; font-weight:600;">개인 석식용 QR</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>3. QR 체크인 페이지 (/check)</h3>
+  <div class="mockup">
+    <div class="mockup-header">식당 입구 태블릿 — QR 스캔</div>
+    <div class="mockup-body" style="padding:0;">
+      <!-- Camera area -->
+      <div style="background:#1e293b; padding:40px; text-align:center;">
+        <div style="margin:0 auto; width:220px; height:160px; border:2px dashed #60a5fa; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+          <div style="color:#60a5fa; font-size:14px;">📷 카메라 영역<br/>QR 스캔 대기중...</div>
+        </div>
+      </div>
+      <!-- Result area -->
+      <div style="padding:20px; text-align:center; background:#dcfce7;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:16px;">
+          <div style="width:64px; height:64px; background:#e2e8f0; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; color:#64748b;">사진</div>
+          <div style="text-align:left;">
+            <p style="font-weight:700; font-size:18px; color:#1e293b;">2-3 15번 김민수</p>
+            <p style="color:#166534; font-size:14px; margin-top:4px;">✅ 석식 체크인 되었습니다</p>
+            <p style="color:#64748b; font-size:12px; margin-top:2px;">03월 28일 17:32</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>4. 관리자 페이지 (/admin)</h3>
+  <div class="mockup">
+    <div class="mockup-header">관리자 대시보드</div>
+    <div class="mockup-body" style="padding:16px;">
+      <!-- Spreadsheet import -->
+      <div style="padding:12px; background:#f1f5f9; border-radius:8px; margin-bottom:16px;">
+        <p style="font-size:12px; color:#64748b; margin-bottom:8px;">Google Spreadsheet URL</p>
+        <div style="display:flex; gap:8px;">
+          <div style="flex:1; padding:8px; background:white; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; color:#94a3b8;">https://docs.google.com/spreadsheets/d/...</div>
+          <div style="padding:8px 16px; background:#3b82f6; color:white; border-radius:6px; font-size:12px; font-weight:600;">Data 호출</div>
+        </div>
+      </div>
+      <!-- Tabs -->
+      <div style="display:flex; gap:8px; margin-bottom:16px; font-size:12px;">
+        <div style="padding:6px 12px; background:#1e293b; color:white; border-radius:6px;">학생 관리</div>
+        <div style="padding:6px 12px; background:#e2e8f0; color:#64748b; border-radius:6px;">교사 관리</div>
+        <div style="padding:6px 12px; background:#e2e8f0; color:#64748b; border-radius:6px;">석식 현황</div>
+        <div style="padding:6px 12px; background:#e2e8f0; color:#64748b; border-radius:6px;">+ 추가</div>
+      </div>
+      <!-- Table preview -->
+      <div style="border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; font-size:11px;">
+        <div style="display:flex; background:#f8fafc; border-bottom:1px solid #e2e8f0; font-weight:600; color:#475569;">
+          <div style="flex:1; padding:8px;">이름</div>
+          <div style="flex:1; padding:8px;">학년-반-번호</div>
+          <div style="flex:1; padding:8px;">신청기간</div>
+          <div style="flex:1; padding:8px;">오늘체크</div>
+        </div>
+        <div style="display:flex; border-bottom:1px solid #f1f5f9; color:#334155;">
+          <div style="flex:1; padding:8px;">김민수</div>
+          <div style="flex:1; padding:8px;">2-3-15</div>
+          <div style="flex:1; padding:8px;">03/01~03/31</div>
+          <div style="flex:1; padding:8px;">✅ 17:32</div>
+        </div>
+        <div style="display:flex; border-bottom:1px solid #f1f5f9; color:#334155;">
+          <div style="flex:1; padding:8px;">이서연</div>
+          <div style="flex:1; padding:8px;">2-3-08</div>
+          <div style="flex:1; padding:8px;">03/01~03/31</div>
+          <div style="flex:1; padding:8px;">—</div>
+        </div>
+      </div>
+      <div style="margin-top:12px; text-align:right;">
+        <span style="padding:6px 12px; background:#16a34a; color:white; border-radius:6px; font-size:11px;">📥 Excel 다운로드</span>
+      </div>
+    </div>
+  </div>
+</div>

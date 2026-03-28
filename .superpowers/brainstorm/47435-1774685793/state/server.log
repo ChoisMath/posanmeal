@@ -1,0 +1,4 @@
+{"type":"server-started","port":56491,"host":"0.0.0.0","url_host":"localhost","url":"http://localhost:56491","screen_dir":"/workspaces/posanmeal/.superpowers/brainstorm/47435-1774685793/content","state_dir":"/workspaces/posanmeal/.superpowers/brainstorm/47435-1774685793/state"}
+{"type":"screen-added","file":"/workspaces/posanmeal/.superpowers/brainstorm/47435-1774685793/content/wireframes-overview.html"}
+{"type":"screen-added","file":"/workspaces/posanmeal/.superpowers/brainstorm/47435-1774685793/content/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}
