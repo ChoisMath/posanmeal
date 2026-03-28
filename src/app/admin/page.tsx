@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { signOut } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,19 +49,19 @@ export default function AdminPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ ...emptyForm });
 
-  useEffect(() => { fetchUsers(); fetchDashboard(); }, [userFilter]);
-
-  async function fetchUsers() {
+  const fetchUsers = useCallback(async () => {
     const res = await fetch(`/api/admin/users?role=${userFilter}`);
     const data = await res.json();
     setUsers(data.users || []);
-  }
+  }, [userFilter]);
 
-  async function fetchDashboard() {
+  const fetchDashboard = useCallback(async () => {
     const res = await fetch("/api/admin/dashboard");
     const data = await res.json();
     setDashboard(data);
-  }
+  }, []);
+
+  useEffect(() => { fetchUsers(); fetchDashboard(); }, [fetchUsers, fetchDashboard]);
 
   async function handleImport() {
     setImporting(true); setImportMessage("");
@@ -148,7 +148,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b p-4 flex items-center justify-between">
-        <h1 className="font-bold text-lg">포산밀 관리자</h1>
+        <h1 className="font-bold text-lg">PosanDinner Admin</h1>
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <Button variant="ghost" size="icon" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-5 w-5" /></Button>
