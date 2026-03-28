@@ -21,8 +21,8 @@ export default async function HomePage() {
       </div>
       <Card className="w-full max-w-md mx-4">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">포산밀</CardTitle>
-          <p className="text-muted-foreground">포산고등학교 석식 관리 시스템</p>
+          <CardTitle className="text-2xl font-bold">포산고등학교</CardTitle>
+          <p className="text-muted-foreground">SMART-QR 석식 관리 시스템</p>
         </CardHeader>
         <CardContent className="space-y-4">
           <form

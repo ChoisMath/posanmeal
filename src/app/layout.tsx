@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "포산밀 - 석식 관리",
-  description: "포산고등학교 석식 관리 시스템",
+  title: "포산고-석식 관리",
+  description: "포산고등학교 Smart QR 석식 관리 시스템",
 };
 
 export default function RootLayout({
