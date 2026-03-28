@@ -49,3 +49,5 @@ public/uploads/*
 
 # superpowers
 .superpowers/
+
+/src/generated/prisma

@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+}
+
+enum CheckInType {
+  STUDENT
+  WORK
+  PERSONAL
+}
+
+model Admin {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  role      Role
+  grade     Int?
+  classNum  Int?
+  number    Int?
+  subject   String?
+  homeroom  String?
+  position  String?
+  photoUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mealPeriod MealPeriod?
+  checkIns   CheckIn[]
+}
+
+model MealPeriod {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CheckIn {
+  id        Int         @id @default(autoincrement())
+  userId    Int
+  date      DateTime    @db.Date
+  checkedAt DateTime    @default(now())
+  type      CheckInType
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
