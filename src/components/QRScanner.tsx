@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
-import jsQR from "jsqr";
+import { useEffect, useRef } from "react";
+import QrScanner from "qr-scanner";
 
 interface QRScannerProps {
   onScan: (data: string) => void;
@@ -9,115 +9,69 @@ interface QRScannerProps {
 
 export function QRScanner({ onScan }: QRScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const scannerRef = useRef<QrScanner | null>(null);
   const onScanRef = useRef(onScan);
   const cooldownRef = useRef(false);
-  const animFrameRef = useRef<number>(0);
-  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     onScanRef.current = onScan;
   }, [onScan]);
 
-  const scan = useCallback(() => {
+  useEffect(() => {
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
-      animFrameRef.current = requestAnimationFrame(scan);
-      return;
-    }
+    if (!video) return;
 
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      animFrameRef.current = requestAnimationFrame(scan);
-      return;
-    }
+    const scanner = new QrScanner(
+      video,
+      (result) => {
+        if (cooldownRef.current) return;
+        console.log("QR decoded:", result.data.substring(0, 30) + "...");
+        cooldownRef.current = true;
+        onScanRef.current(result.data);
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        // Beep sound
+        try {
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.value = 1200;
+          gain.gain.value = 0.3;
+          osc.start();
+          osc.stop(ctx.currentTime + 0.1);
+        } catch {}
 
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: "attemptBoth",
+        // Vibrate
+        try { navigator.vibrate(100); } catch {}
+
+        // Cooldown 2 seconds
+        setTimeout(() => {
+          cooldownRef.current = false;
+        }, 2000);
+      },
+      {
+        preferredCamera: "environment",
+        maxScansPerSecond: 25,
+        highlightScanRegion: true,
+        highlightCodeOutline: true,
+        returnDetailedScanResult: true,
+      }
+    );
+
+    scannerRef.current = scanner;
+    scanner.start().then(() => {
+      console.log("QR Scanner started (nimiq/qr-scanner)");
+    }).catch((err) => {
+      console.error("QR Scanner start error:", err);
     });
 
-    if (code && code.data && !cooldownRef.current) {
-      console.log("QR decoded:", code.data.substring(0, 30) + "...");
-      cooldownRef.current = true;
-      onScanRef.current(code.data);
-
-      // Cooldown: ignore scans for 2.5 seconds
-      setTimeout(() => {
-        cooldownRef.current = false;
-      }, 2500);
-    }
-
-    animFrameRef.current = requestAnimationFrame(scan);
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
-
-        if (!mounted) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-
-        streamRef.current = stream;
-        const video = videoRef.current;
-        if (video) {
-          video.srcObject = stream;
-          video.setAttribute("playsinline", "true");
-          await video.play();
-          console.log("Camera started, scanning for QR codes...");
-          animFrameRef.current = requestAnimationFrame(scan);
-        }
-      } catch (err) {
-        console.error("Camera access error:", err);
-        // Retry without facingMode constraint
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-          });
-
-          if (!mounted) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-
-          streamRef.current = stream;
-          const video = videoRef.current;
-          if (video) {
-            video.srcObject = stream;
-            video.setAttribute("playsinline", "true");
-            await video.play();
-            console.log("Camera started (fallback), scanning for QR codes...");
-            animFrameRef.current = requestAnimationFrame(scan);
-          }
-        } catch (retryErr) {
-          console.error("Camera fallback error:", retryErr);
-        }
-      }
-    }
-
-    startCamera();
-
     return () => {
-      mounted = false;
-      cancelAnimationFrame(animFrameRef.current);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
+      scanner.stop();
+      scanner.destroy();
+      scannerRef.current = null;
     };
-  }, [scan]);
+  }, []);
 
   return (
     <div className="relative w-full max-w-md mx-auto">
@@ -125,14 +79,7 @@ export function QRScanner({ onScan }: QRScannerProps) {
         ref={videoRef}
         className="w-full rounded-lg"
         style={{ maxHeight: "400px", objectFit: "cover" }}
-        muted
-        playsInline
       />
-      <canvas ref={canvasRef} className="hidden" />
-      {/* Scan guide overlay */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-56 h-56 border-2 border-white/60 rounded-xl" />
-      </div>
     </div>
   );
 }
