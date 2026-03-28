@@ -129,7 +129,7 @@ export default function AdminPage() {
                     <Button variant={userFilter === "TEACHER" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("TEACHER")}>교사</Button>
                   </div>
                   <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-                    <DialogTrigger asChild><Button size="sm"><Plus className="h-4 w-4 mr-1" /> 추가</Button></DialogTrigger>
+                    <DialogTrigger render={<Button size="sm" />}><Plus className="h-4 w-4 mr-1" /> 추가</DialogTrigger>
                     <DialogContent>
                       <DialogHeader><DialogTitle>사용자 추가</DialogTitle></DialogHeader>
                       <div className="space-y-3">
