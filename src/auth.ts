@@ -1,8 +1,10 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
-import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -17,23 +19,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.username || !credentials?.password) return null;
 
-        const admin = await prisma.admin.findUnique({
-          where: { username: credentials.username as string },
-        });
-
-        if (!admin) return null;
-
-        const isValid = await bcrypt.compare(
-          credentials.password as string,
-          admin.passwordHash
-        );
-
-        if (!isValid) return null;
+        if (
+          credentials.username !== ADMIN_USERNAME ||
+          credentials.password !== ADMIN_PASSWORD
+        ) {
+          return null;
+        }
 
         return {
-          id: `admin-${admin.id}`,
-          name: admin.username,
-          email: `admin-${admin.id}@posanmeal.local`,
+          id: "admin-1",
+          name: ADMIN_USERNAME,
+          email: "admin@posanmeal.local",
           role: "ADMIN" as const,
         };
       },
