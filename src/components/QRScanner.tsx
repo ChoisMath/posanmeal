@@ -42,9 +42,6 @@ export function QRScanner({ onScan }: QRScannerProps) {
           osc.stop(ctx.currentTime + 0.1);
         } catch {}
 
-        // Vibrate
-        try { navigator.vibrate(100); } catch {}
-
         // Cooldown 2 seconds
         setTimeout(() => {
           cooldownRef.current = false;
