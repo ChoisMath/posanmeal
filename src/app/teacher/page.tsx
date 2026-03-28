@@ -60,7 +60,7 @@ export default function TeacherPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b p-4 flex items-center justify-between">
-        <h1 className="font-bold text-lg">포산밀</h1>
+        <h1 className="font-bold text-lg">PosanDinner</h1>
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <Button variant="ghost" size="icon" onClick={() => signOut({ callbackUrl: "/" })}>
