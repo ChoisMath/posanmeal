@@ -39,7 +39,7 @@ export function QRScanner({ onScan }: QRScannerProps) {
 
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: "dontInvert",
+      inversionAttempts: "attemptBoth",
     });
 
     if (code && code.data && !cooldownRef.current) {
@@ -62,7 +62,7 @@ export function QRScanner({ onScan }: QRScannerProps) {
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
         });
 
         if (!mounted) {
@@ -84,7 +84,7 @@ export function QRScanner({ onScan }: QRScannerProps) {
         // Retry without facingMode constraint
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 } },
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } },
           });
 
           if (!mounted) {
