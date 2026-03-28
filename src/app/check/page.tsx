@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { QRScanner } from "@/components/QRScanner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -24,19 +24,12 @@ interface CheckInResult {
 export default function CheckPage() {
   const [result, setResult] = useState<CheckInResult | null>(null);
   const [scanning, setScanning] = useState(true);
-  const [processing, setProcessing] = useState(false);
-
-  const resetAfterDelay = useCallback(() => {
-    setTimeout(() => {
-      setResult(null);
-      setScanning(true);
-    }, 2000);
-  }, []);
+  const processingRef = useRef(false);
 
   const handleScan = useCallback(
     async (data: string) => {
-      if (processing) return;
-      setProcessing(true);
+      if (processingRef.current) return;
+      processingRef.current = true;
       setScanning(false);
 
       try {
@@ -47,14 +40,19 @@ export default function CheckPage() {
         });
         const json = await res.json();
         setResult(json);
-      } catch {
+      } catch (err) {
+        console.error("Check-in fetch error:", err);
         setResult({ success: false, error: "서버 연결 오류" });
       }
 
-      setProcessing(false);
-      resetAfterDelay();
+      // Reset after 2 seconds
+      setTimeout(() => {
+        setResult(null);
+        setScanning(true);
+        processingRef.current = false;
+      }, 2000);
     },
-    [processing, resetAfterDelay]
+    []
   );
 
   const formatCheckedAt = (checkedAt: string) => {
@@ -86,6 +84,7 @@ export default function CheckPage() {
         <ThemeToggle />
       </div>
 
+      {/* Camera Area */}
       <div className="bg-gray-900 p-4">
         <div className="max-w-md mx-auto">
           <QRScanner onScan={handleScan} scanning={scanning} />
@@ -97,6 +96,7 @@ export default function CheckPage() {
         </div>
       </div>
 
+      {/* Result Area */}
       <div className="p-6 max-w-md mx-auto">
         {result && (
           <div className="flex items-center gap-4 bg-white/90 dark:bg-gray-800/90 rounded-xl p-4">
@@ -117,11 +117,11 @@ export default function CheckPage() {
                   {result.user.grade}-{result.user.classNum}{" "}
                   {result.user.number}번 {result.user.name}
                 </p>
-              ) : (
+              ) : result.user ? (
                 <p className="font-bold text-lg text-gray-900 dark:text-white">
-                  {result.user?.name} 선생님
+                  {result.user.name} 선생님
                 </p>
-              )}
+              ) : null}
 
               {result.success && (
                 <p className="text-green-700 dark:text-green-300 text-sm mt-1">

@@ -10,19 +10,16 @@ interface QRScannerProps {
 
 export function QRScanner({ onScan, scanning }: QRScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const onScanRef = useRef(onScan);
   const [error, setError] = useState<string>("");
-  const mountedRef = useRef(true);
 
+  // Keep onScan ref up to date without causing re-renders
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+    onScanRef.current = onScan;
+  }, [onScan]);
 
   useEffect(() => {
     if (!scanning) {
-      // Stop scanner if it's running
       if (scannerRef.current) {
         scannerRef.current.stop().catch(() => {});
         scannerRef.current = null;
@@ -30,90 +27,81 @@ export function QRScanner({ onScan, scanning }: QRScannerProps) {
       return;
     }
 
-    let stopped = false;
+    let cancelled = false;
 
     async function startScanner() {
-      // Wait for DOM element to be ready
-      await new Promise((r) => setTimeout(r, 300));
-      if (stopped || !mountedRef.current) return;
+      // Wait for DOM
+      await new Promise((r) => setTimeout(r, 500));
+      if (cancelled) return;
 
       const el = document.getElementById("qr-reader");
-      if (!el) return;
+      if (!el) {
+        console.error("QR reader element not found");
+        return;
+      }
+
+      // Clean up any previous instance
+      if (scannerRef.current) {
+        try { await scannerRef.current.stop(); } catch {}
+        scannerRef.current = null;
+      }
 
       const scanner = new Html5Qrcode("qr-reader");
       scannerRef.current = scanner;
 
-      // Try to get available cameras first
-      let cameraId: string | { facingMode: string } = { facingMode: "environment" };
-
+      // Get available cameras
+      let cameraConfig: string | { facingMode: string };
       try {
         const cameras = await Html5Qrcode.getCameras();
-        if (cameras && cameras.length > 0) {
-          // Prefer back camera, fallback to first available
-          const backCamera = cameras.find(
-            (c) =>
-              c.label.toLowerCase().includes("back") ||
-              c.label.toLowerCase().includes("rear") ||
-              c.label.toLowerCase().includes("environment")
-          );
-          cameraId = backCamera ? backCamera.id : cameras[0].id;
+        if (!cameras || cameras.length === 0) {
+          if (!cancelled) setError("카메라를 찾을 수 없습니다.");
+          return;
         }
+        const backCam = cameras.find(
+          (c) =>
+            c.label.toLowerCase().includes("back") ||
+            c.label.toLowerCase().includes("rear") ||
+            c.label.toLowerCase().includes("environment")
+        );
+        cameraConfig = backCam ? backCam.id : cameras[0].id;
       } catch {
-        // getCameras failed, fall back to facingMode
-        cameraId = { facingMode: "environment" };
+        // Fallback to facingMode
+        cameraConfig = { facingMode: "environment" };
       }
 
-      if (stopped || !mountedRef.current) return;
+      if (cancelled) return;
+
+      const scanConfig = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+      };
+
+      const successCallback = (decodedText: string) => {
+        console.log("QR scanned:", decodedText.substring(0, 20) + "...");
+        onScanRef.current(decodedText);
+      };
 
       try {
-        await scanner.start(
-          cameraId,
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-          },
-          (decodedText) => {
-            if (mountedRef.current) {
-              onScan(decodedText);
-            }
-          },
-          () => {}
-        );
-        if (mountedRef.current) setError("");
+        await scanner.start(cameraConfig, scanConfig, successCallback, () => {});
+        if (!cancelled) setError("");
+        console.log("QR Scanner started successfully");
       } catch (err) {
-        console.error("QR Scanner start error:", err);
-        // If environment camera failed, try without facingMode constraint
-        if (typeof cameraId === "object") {
+        console.error("QR Scanner start failed:", err);
+        // Retry with first available camera if facingMode failed
+        if (typeof cameraConfig === "object") {
           try {
             const cameras = await Html5Qrcode.getCameras();
-            if (cameras && cameras.length > 0 && !stopped && mountedRef.current) {
-              await scanner.start(
-                cameras[0].id,
-                {
-                  fps: 10,
-                  qrbox: { width: 250, height: 250 },
-                  aspectRatio: 1.0,
-                },
-                (decodedText) => {
-                  if (mountedRef.current) {
-                    onScan(decodedText);
-                  }
-                },
-                () => {}
-              );
-              if (mountedRef.current) setError("");
-            } else if (mountedRef.current) {
-              setError("카메라를 찾을 수 없습니다.");
+            if (cameras?.length > 0 && !cancelled) {
+              await scanner.start(cameras[0].id, scanConfig, successCallback, () => {});
+              if (!cancelled) setError("");
+              console.log("QR Scanner started with fallback camera");
             }
           } catch (retryErr) {
-            console.error("QR Scanner retry error:", retryErr);
-            if (mountedRef.current) {
-              setError("카메라를 시작할 수 없습니다. 카메라 권한을 확인해 주세요.");
-            }
+            console.error("QR Scanner fallback failed:", retryErr);
+            if (!cancelled) setError("카메라를 시작할 수 없습니다. 권한을 확인해 주세요.");
           }
-        } else if (mountedRef.current) {
-          setError("카메라를 시작할 수 없습니다. 카메라 권한을 확인해 주세요.");
+        } else if (!cancelled) {
+          setError("카메라를 시작할 수 없습니다. 권한을 확인해 주세요.");
         }
       }
     }
@@ -121,13 +109,13 @@ export function QRScanner({ onScan, scanning }: QRScannerProps) {
     startScanner();
 
     return () => {
-      stopped = true;
+      cancelled = true;
       if (scannerRef.current) {
         scannerRef.current.stop().catch(() => {});
         scannerRef.current = null;
       }
     };
-  }, [scanning, onScan]);
+  }, [scanning]);
 
   return (
     <div>

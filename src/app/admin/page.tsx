@@ -7,11 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2 } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil } from "lucide-react";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -25,6 +25,12 @@ interface DashboardData {
   records: { userName: string; role: string; type: string; checkedAt: string; grade?: number; classNum?: number; number?: number; }[];
 }
 
+const emptyForm = {
+  role: "STUDENT" as "STUDENT" | "TEACHER",
+  email: "", name: "", grade: "", classNum: "", number: "",
+  subject: "", homeroom: "", position: "", startDate: "", endDate: "",
+};
+
 export default function AdminPage() {
   const [studentSheetUrl, setStudentSheetUrl] = useState("");
   const [teacherSheetUrl, setTeacherSheetUrl] = useState("");
@@ -33,12 +39,15 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+
+  // Add dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [addForm, setAddForm] = useState({
-    role: "STUDENT" as "STUDENT" | "TEACHER",
-    email: "", name: "", grade: "", classNum: "", number: "",
-    subject: "", homeroom: "", position: "", startDate: "", endDate: "",
-  });
+  const [addForm, setAddForm] = useState({ ...emptyForm });
+
+  // Edit dialog
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editUser, setEditUser] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState({ ...emptyForm });
 
   useEffect(() => { fetchUsers(); fetchDashboard(); }, [userFilter]);
 
@@ -75,7 +84,49 @@ export default function AdminPage() {
     }
     await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     setAddDialogOpen(false);
-    setAddForm({ role: "STUDENT", email: "", name: "", grade: "", classNum: "", number: "", subject: "", homeroom: "", position: "", startDate: "", endDate: "" });
+    setAddForm({ ...emptyForm });
+    fetchUsers();
+  }
+
+  function openEditDialog(user: User) {
+    setEditUser(user);
+    setEditForm({
+      role: user.role as "STUDENT" | "TEACHER",
+      email: user.email,
+      name: user.name,
+      grade: user.grade?.toString() || "",
+      classNum: user.classNum?.toString() || "",
+      number: user.number?.toString() || "",
+      subject: user.subject || "",
+      homeroom: user.homeroom || "",
+      position: user.position || "",
+      startDate: user.mealPeriod ? user.mealPeriod.startDate.slice(0, 10) : "",
+      endDate: user.mealPeriod ? user.mealPeriod.endDate.slice(0, 10) : "",
+    });
+    setEditDialogOpen(true);
+  }
+
+  async function handleEditUser() {
+    if (!editUser) return;
+    const body: Record<string, unknown> = { id: editUser.id, name: editForm.name };
+    if (editUser.role === "STUDENT") {
+      body.grade = parseInt(editForm.grade); body.classNum = parseInt(editForm.classNum);
+      body.number = parseInt(editForm.number);
+    } else {
+      body.subject = editForm.subject; body.homeroom = editForm.homeroom; body.position = editForm.position;
+    }
+    await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+    // Update meal period if student
+    if (editUser.role === "STUDENT" && editForm.startDate && editForm.endDate) {
+      await fetch("/api/admin/meal-periods", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: editUser.id, startDate: editForm.startDate, endDate: editForm.endDate }),
+      });
+    }
+
+    setEditDialogOpen(false);
+    setEditUser(null);
     fetchUsers();
   }
 
@@ -104,6 +155,7 @@ export default function AdminPage() {
         </div>
       </header>
       <div className="max-w-4xl mx-auto p-4 space-y-6">
+        {/* Spreadsheet Import */}
         <Card>
           <CardHeader><CardTitle className="text-base">Google Spreadsheet 가져오기</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -128,43 +180,9 @@ export default function AdminPage() {
                     <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
                     <Button variant={userFilter === "TEACHER" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("TEACHER")}>교사</Button>
                   </div>
-                  <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-                    <DialogTrigger render={<Button size="sm" />}><Plus className="h-4 w-4 mr-1" /> 추가</DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader><DialogTitle>사용자 추가</DialogTitle></DialogHeader>
-                      <div className="space-y-3">
-                        <div><Label>역할</Label>
-                          <Select value={addForm.role} onValueChange={(v) => setAddForm({ ...addForm, role: v as "STUDENT" | "TEACHER" })}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent><SelectItem value="STUDENT">학생</SelectItem><SelectItem value="TEACHER">교사</SelectItem></SelectContent>
-                          </Select>
-                        </div>
-                        <div><Label>이메일</Label><Input value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} /></div>
-                        <div><Label>이름</Label><Input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} /></div>
-                        {addForm.role === "STUDENT" && (
-                          <>
-                            <div className="grid grid-cols-3 gap-2">
-                              <div><Label>학년</Label><Input type="number" value={addForm.grade} onChange={(e) => setAddForm({ ...addForm, grade: e.target.value })} /></div>
-                              <div><Label>반</Label><Input type="number" value={addForm.classNum} onChange={(e) => setAddForm({ ...addForm, classNum: e.target.value })} /></div>
-                              <div><Label>번호</Label><Input type="number" value={addForm.number} onChange={(e) => setAddForm({ ...addForm, number: e.target.value })} /></div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div><Label>석식 시작일</Label><Input type="date" value={addForm.startDate} onChange={(e) => setAddForm({ ...addForm, startDate: e.target.value })} /></div>
-                              <div><Label>석식 종료일</Label><Input type="date" value={addForm.endDate} onChange={(e) => setAddForm({ ...addForm, endDate: e.target.value })} /></div>
-                            </div>
-                          </>
-                        )}
-                        {addForm.role === "TEACHER" && (
-                          <>
-                            <div><Label>교과명</Label><Input value={addForm.subject} onChange={(e) => setAddForm({ ...addForm, subject: e.target.value })} /></div>
-                            <div><Label>담임 (예: 2-6)</Label><Input value={addForm.homeroom} onChange={(e) => setAddForm({ ...addForm, homeroom: e.target.value })} /></div>
-                            <div><Label>직책</Label><Input value={addForm.position} onChange={(e) => setAddForm({ ...addForm, position: e.target.value })} /></div>
-                          </>
-                        )}
-                        <Button onClick={handleAddUser} className="w-full">추가</Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                  <Button size="sm" onClick={() => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); }}>
+                    <Plus className="h-4 w-4 mr-1" /> 추가
+                  </Button>
                 </div>
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
@@ -173,7 +191,7 @@ export default function AdminPage() {
                         <th className="p-2 text-left">이름</th>
                         <th className="p-2 text-left">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
                         <th className="p-2 text-left">{userFilter === "STUDENT" ? "신청기간" : "직책"}</th>
-                        <th className="p-2 text-center w-16">삭제</th>
+                        <th className="p-2 text-center w-24">관리</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -182,7 +200,12 @@ export default function AdminPage() {
                           <td className="p-2">{u.name}</td>
                           <td className="p-2">{u.role === "STUDENT" ? `${u.grade}-${u.classNum}-${u.number}` : `${u.subject || "-"} / ${u.homeroom || "비담임"}`}</td>
                           <td className="p-2">{u.role === "STUDENT" ? (u.mealPeriod ? `${new Date(u.mealPeriod.startDate).toLocaleDateString("ko-KR")} ~ ${new Date(u.mealPeriod.endDate).toLocaleDateString("ko-KR")}` : "미신청") : u.position || "-"}</td>
-                          <td className="p-2 text-center"><Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button></td>
+                          <td className="p-2 text-center">
+                            <div className="flex justify-center gap-1">
+                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}><Pencil className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -227,6 +250,78 @@ export default function AdminPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Add User Dialog */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>사용자 추가</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>역할</Label>
+              <Select value={addForm.role} onValueChange={(v) => setAddForm({ ...addForm, role: v as "STUDENT" | "TEACHER" })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="STUDENT">학생</SelectItem><SelectItem value="TEACHER">교사</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div><Label>이메일</Label><Input value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} /></div>
+            <div><Label>이름</Label><Input value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} /></div>
+            {addForm.role === "STUDENT" && (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <div><Label>학년</Label><Input type="number" value={addForm.grade} onChange={(e) => setAddForm({ ...addForm, grade: e.target.value })} /></div>
+                  <div><Label>반</Label><Input type="number" value={addForm.classNum} onChange={(e) => setAddForm({ ...addForm, classNum: e.target.value })} /></div>
+                  <div><Label>번호</Label><Input type="number" value={addForm.number} onChange={(e) => setAddForm({ ...addForm, number: e.target.value })} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label>석식 시작일</Label><Input type="date" value={addForm.startDate} onChange={(e) => setAddForm({ ...addForm, startDate: e.target.value })} /></div>
+                  <div><Label>석식 종료일</Label><Input type="date" value={addForm.endDate} onChange={(e) => setAddForm({ ...addForm, endDate: e.target.value })} /></div>
+                </div>
+              </>
+            )}
+            {addForm.role === "TEACHER" && (
+              <>
+                <div><Label>교과명</Label><Input value={addForm.subject} onChange={(e) => setAddForm({ ...addForm, subject: e.target.value })} /></div>
+                <div><Label>담임 (예: 2-6)</Label><Input value={addForm.homeroom} onChange={(e) => setAddForm({ ...addForm, homeroom: e.target.value })} /></div>
+                <div><Label>직책</Label><Input value={addForm.position} onChange={(e) => setAddForm({ ...addForm, position: e.target.value })} /></div>
+              </>
+            )}
+            <Button onClick={handleAddUser} className="w-full">추가</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>사용자 편집</DialogTitle></DialogHeader>
+          {editUser && (
+            <div className="space-y-3">
+              <div><Label>이메일 (수정 불가)</Label><Input value={editForm.email} disabled /></div>
+              <div><Label>이름</Label><Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
+              {editUser.role === "STUDENT" && (
+                <>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div><Label>학년</Label><Input type="number" value={editForm.grade} onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })} /></div>
+                    <div><Label>반</Label><Input type="number" value={editForm.classNum} onChange={(e) => setEditForm({ ...editForm, classNum: e.target.value })} /></div>
+                    <div><Label>번호</Label><Input type="number" value={editForm.number} onChange={(e) => setEditForm({ ...editForm, number: e.target.value })} /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><Label>석식 시작일</Label><Input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} /></div>
+                    <div><Label>석식 종료일</Label><Input type="date" value={editForm.endDate} onChange={(e) => setEditForm({ ...editForm, endDate: e.target.value })} /></div>
+                  </div>
+                </>
+              )}
+              {editUser.role === "TEACHER" && (
+                <>
+                  <div><Label>교과명</Label><Input value={editForm.subject} onChange={(e) => setEditForm({ ...editForm, subject: e.target.value })} /></div>
+                  <div><Label>담임 (예: 2-6)</Label><Input value={editForm.homeroom} onChange={(e) => setEditForm({ ...editForm, homeroom: e.target.value })} /></div>
+                  <div><Label>직책</Label><Input value={editForm.position} onChange={(e) => setEditForm({ ...editForm, position: e.target.value })} /></div>
+                </>
+              )}
+              <Button onClick={handleEditUser} className="w-full">저장</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
