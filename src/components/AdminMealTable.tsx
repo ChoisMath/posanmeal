@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -37,29 +37,37 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  const isWeekend = (day: number) => {
-    const d = new Date(year, month - 1, day).getDay();
-    return d === 0 || d === 6;
-  };
+  const weekendSet = useMemo(() => {
+    const set = new Set<number>();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dow = new Date(year, month - 1, d).getDay();
+      if (dow === 0 || dow === 6) set.add(d);
+    }
+    return set;
+  }, [year, month, daysInMonth]);
 
-  // 일자별 합계 계산
-  const dailyTotals = Array.from({ length: daysInMonth }, (_, i) => {
-    const day = i + 1;
-    let total = 0;
-    let work = 0;
-    let personal = 0;
-    users.forEach((user) => {
-      const checkIn = user.checkIns.find((c) => new Date(c.date).getDate() === day);
-      if (checkIn) {
-        total++;
-        if (checkIn.type === "WORK") work++;
-        else personal++;
-      }
+  const isWeekend = (day: number) => weekendSet.has(day);
+
+  // 일자별 합계 계산 (memoized)
+  const { dailyTotals, grandTotal } = useMemo(() => {
+    const totals = Array.from({ length: daysInMonth }, (_, i) => {
+      const day = i + 1;
+      let total = 0;
+      let work = 0;
+      let personal = 0;
+      users.forEach((user) => {
+        const checkIn = user.checkIns.find((c) => new Date(c.date).getDate() === day);
+        if (checkIn) {
+          total++;
+          if (checkIn.type === "WORK") work++;
+          else personal++;
+        }
+      });
+      return { total, work, personal };
     });
-    return { total, work, personal };
-  });
-
-  const grandTotal = users.reduce((sum, u) => sum + u.checkIns.length, 0);
+    const grand = users.reduce((sum, u) => sum + u.checkIns.length, 0);
+    return { dailyTotals: totals, grandTotal: grand };
+  }, [users, daysInMonth]);
 
   if (users.length === 0) {
     return <p className="text-center text-muted-foreground py-8 text-sm">데이터가 없습니다.</p>;

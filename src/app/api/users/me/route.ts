@@ -10,7 +10,13 @@ export async function GET() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.dbUserId },
-    include: { mealPeriod: true },
+    select: {
+      id: true, email: true, name: true, role: true,
+      grade: true, classNum: true, number: true,
+      subject: true, homeroom: true, position: true,
+      photoUrl: true,
+      mealPeriod: { select: { startDate: true, endDate: true } },
+    },
   });
 
   return NextResponse.json({ user });
@@ -23,26 +29,25 @@ export async function PUT(request: Request) {
   }
 
   const body = await request.json();
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.dbUserId },
-  });
 
-  if (!user) {
+  // 단일 쿼리로 role 확인 + 업데이트 (findUnique 제거)
+  const updated = await prisma.user.update({
+    where: { id: session.user.dbUserId },
+    data: {
+      name: body.name,
+      subject: body.subject,
+      homeroom: body.homeroom,
+      position: body.position,
+    },
+  }).catch(() => null);
+
+  if (!updated) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  if (user.role === "TEACHER") {
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        name: body.name ?? user.name,
-        subject: body.subject ?? user.subject,
-        homeroom: body.homeroom ?? user.homeroom,
-        position: body.position ?? user.position,
-      },
-    });
-    return NextResponse.json({ user: updated });
+  if (updated.role !== "TEACHER") {
+    return NextResponse.json({ error: "수정 권한이 없습니다." }, { status: 403 });
   }
 
-  return NextResponse.json({ error: "수정 권한이 없습니다." }, { status: 403 });
+  return NextResponse.json({ user: updated });
 }

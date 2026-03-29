@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import ExcelJS from "exceljs";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -16,7 +15,8 @@ export async function GET(request: Request) {
     orderBy: [{ date: "asc" }, { checkedAt: "asc" }],
   });
 
-  const workbook = new ExcelJS.Workbook();
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.default.Workbook();
   const sheet = workbook.addWorksheet(`${year}년 ${month}월 석식 현황`);
 
   sheet.columns = [

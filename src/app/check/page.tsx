@@ -21,10 +21,18 @@ interface CheckInResult {
   checkedAt?: string;
 }
 
+// AudioContext 싱글턴 (매 사운드마다 생성하지 않음)
+let _audioCtx: AudioContext | null = null;
+function getAudioCtx() {
+  if (!_audioCtx || _audioCtx.state === "closed") _audioCtx = new AudioContext();
+  if (_audioCtx.state === "suspended") _audioCtx.resume();
+  return _audioCtx;
+}
+
 // 승인: "딩-동" 차임 (C5→E5 상승음)
 function playChime() {
   try {
-    const ctx = new AudioContext();
+    const ctx = getAudioCtx();
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
     gain.gain.value = 0.4;
@@ -46,7 +54,7 @@ function playChime() {
 // 중복: "삐—" 길고 큰 단일 경고음
 function playLongBeep() {
   try {
-    const ctx = new AudioContext();
+    const ctx = getAudioCtx();
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
     gain.gain.value = 0.6;
@@ -62,7 +70,7 @@ function playLongBeep() {
 // 오류/잘못된 QR: "삐-삐-" 짧은 2연속음
 function playDoubleBeep() {
   try {
-    const ctx = new AudioContext();
+    const ctx = getAudioCtx();
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
     gain.gain.value = 0.5;

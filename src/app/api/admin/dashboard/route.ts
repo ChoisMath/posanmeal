@@ -17,6 +17,7 @@ export async function GET(request: Request) {
     prisma.checkIn.findMany({
       where: { date: targetDate },
       select: {
+        id: true,
         type: true,
         checkedAt: true,
         user: { select: { name: true, role: true, grade: true, classNum: true, number: true } },
@@ -33,6 +34,7 @@ export async function GET(request: Request) {
     teacherWorkCount: countMap.WORK || 0,
     teacherPersonalCount: countMap.PERSONAL || 0,
     records: records.map((c) => ({
+      id: c.id,
       userName: c.user.name,
       role: c.user.role,
       type: c.type,

@@ -42,7 +42,9 @@
 - JWT 토큰 3분 만료, 30초 전 자동 갱신
 - `/check` 페이지는 공개 (인증 불필요) — 식당 입구 태블릿용
 - nimiq/qr-scanner: Web Worker 기반, BarcodeDetector API 자동 fallback
-- 체크인 성공 시 비프음, 2초 후 자동 초기화
+- 기본 전방카메라(user), 다중카메라 기기에서 전환 버튼 표시
+- 상태별 사운드 피드백 (AudioContext): 승인=딩동 차임, 중복=긴 삐, 오류=삐삐
+- 체크인 결과 2초 표시 후 자동 초기화, 태블릿에서 카메라/결과 좌우 분할
 
 ### 사진 저장
 - Railway Volume `/app/uploads`에 저장
@@ -61,10 +63,10 @@
 |------|------|------|
 | `/` | 공개 | 랜딩 (Google 로그인) |
 | `/student` | 학생 | 3탭: QR, 개인정보, 확인 |
-| `/teacher` | 교사 | 담임 4탭 / 비담임 3탭 |
-| `/check` | 공개 | QR 스캐너 (태블릿) |
+| `/teacher` | 교사 | 담임 5탭(개인석식,근무,확인,학생관리,개인정보) / 비담임 4탭 |
+| `/check` | 공개 | QR 스캐너 (태블릿, 좌우 분할 레이아웃) |
 | `/admin/login` | 공개 | 관리자 로그인 |
-| `/admin` | 관리자 | 대시보드, 사용자 CRUD, Spreadsheet 임포트 |
+| `/admin` | 관리자 | 3탭: 사용자관리(Sheet연결 모달), 석식확인(교사/학년별), 당일현황 |
 
 ## API Routes
 
@@ -81,6 +83,7 @@
 | `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 가져오기 |
 | `/api/admin/users` | CRUD | 관리자 | 사용자 관리 |
 | `/api/admin/meal-periods` | PUT | 관리자 | 석식 기간 관리 |
+| `/api/admin/checkins` | GET | 관리자 | 월별 체크인 (category: teacher/1/2/3) |
 | `/api/admin/dashboard` | GET | 관리자 | 당일 석식 현황 |
 | `/api/admin/export` | GET | 관리자 | 월별 Excel 다운로드 |
 
@@ -131,6 +134,26 @@ npx prisma db seed            # 관리자 시드
 npm run dev                   # 개발 서버 (http://localhost:3000)
 npm run build                 # 프로덕션 빌드
 ```
+
+## 디자인 시스템
+
+- **Warm Modern** 테마: 앰버/골드 primary, OKLCH 색상 (라이트/다크)
+- `globals.css` 유틸리티 클래스: `glass` (글래스모피즘), `card-elevated` (따뜻한 섀도), `bg-warm-gradient`, `header-gradient`, `bg-warm-subtle`, `page-enter` (진입 애니메이션)
+- `text-fit-sm/base/lg`: `clamp()` + `nowrap`으로 모바일 텍스트 스케일링
+- 카드: `card-elevated rounded-2xl border-0` 패턴
+- 헤더: `header-gradient` 앰버 그라데이션 (학생/교사/관리자 공통)
+- 모달: 라운드 Input (`rounded-xl`), 자연스러운 중앙 위치
+
+## 주요 컴포넌트
+
+| 컴포넌트 | 설명 |
+|----------|------|
+| `QRScanner` | nimiq/qr-scanner 래퍼, 카메라 전환 버튼, 사운드는 check 페이지에서 처리 |
+| `QRGenerator` | JWT 토큰 → QR 이미지 (type: STUDENT/WORK/PERSONAL) |
+| `MonthlyCalendar` | 월별 달력, `showType` prop으로 근무/개인 구분 표시 |
+| `StudentTable` | 담임교사용 학생 석식 테이블 (틀고정, 합계행, 주말 하이라이트) |
+| `AdminMealTable` | 관리자 석식 확인 (교사/1~3학년 탭, 월 이동, 합계행) |
+| `PhotoUpload` | 프로필 사진 업로드/삭제 |
 
 ## 주의사항
 

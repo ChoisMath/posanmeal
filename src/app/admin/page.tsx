@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { signOut } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight } from "lucide-react";
 import { AdminMealTable } from "@/components/AdminMealTable";
 
 interface User {
@@ -21,9 +21,13 @@ interface User {
   mealPeriod?: { startDate: string; endDate: string } | null;
 }
 
+interface DashboardRecord {
+  id: number; userName: string; role: string; type: string; checkedAt: string; grade?: number; classNum?: number; number?: number;
+}
+
 interface DashboardData {
   date: string; studentCount: number; teacherWorkCount: number; teacherPersonalCount: number;
-  records: { userName: string; role: string; type: string; checkedAt: string; grade?: number; classNum?: number; number?: number; }[];
+  records: DashboardRecord[];
 }
 
 const emptyForm = {
@@ -140,6 +144,16 @@ export default function AdminPage() {
     fetchUsers();
   }
 
+  async function handleToggleCheckinType(record: DashboardRecord) {
+    const newType = record.type === "WORK" ? "PERSONAL" : "WORK";
+    const res = await fetch("/api/admin/checkins", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: record.id, type: newType }),
+    });
+    if (res.ok) fetchDashboard();
+  }
+
   async function handleExport() {
     const res = await fetch("/api/admin/export");
     const blob = await res.blob();
@@ -149,15 +163,16 @@ export default function AdminPage() {
     a.click(); URL.revokeObjectURL(url);
   }
 
-  // 당일현황: 학년별 학생수 계산
-  const grade1Count = dashboard?.records.filter((r) => r.role === "STUDENT" && r.grade === 1).length || 0;
-  const grade2Count = dashboard?.records.filter((r) => r.role === "STUDENT" && r.grade === 2).length || 0;
-  const grade3Count = dashboard?.records.filter((r) => r.role === "STUDENT" && r.grade === 3).length || 0;
-
-  // 최근 체크인 시각 순으로 정렬
-  const sortedRecords = dashboard?.records
-    ? [...dashboard.records].sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
-    : [];
+  // 당일현황: 학년별 카운트 + 정렬 (memoized)
+  const { grade1Count, grade2Count, grade3Count, sortedRecords } = useMemo(() => {
+    const records = dashboard?.records || [];
+    return {
+      grade1Count: records.filter((r) => r.role === "STUDENT" && r.grade === 1).length,
+      grade2Count: records.filter((r) => r.role === "STUDENT" && r.grade === 2).length,
+      grade3Count: records.filter((r) => r.role === "STUDENT" && r.grade === 3).length,
+      sortedRecords: [...records].sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime()),
+    };
+  }, [dashboard]);
 
   return (
     <div className="min-h-screen bg-warm-subtle">
@@ -262,6 +277,7 @@ export default function AdminPage() {
                             <th className="p-2 text-left">이름</th>
                             <th className="p-2 text-left">구분</th>
                             <th className="p-2 text-left">체크인 시각</th>
+                            <th className="p-2 text-center w-16">수정</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -277,6 +293,13 @@ export default function AdminPage() {
                                 </Badge>
                               </td>
                               <td className="p-2">{new Date(r.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</td>
+                              <td className="p-2 text-center">
+                                {r.role === "TEACHER" && (
+                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleToggleCheckinType(r)} title={`${r.type === "WORK" ? "개인" : "근무"}으로 변경`}>
+                                    <ArrowLeftRight className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

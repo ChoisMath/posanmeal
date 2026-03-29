@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -43,20 +43,29 @@ export function StudentTable() {
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
-  // 주말 판별
-  const isWeekend = (day: number) => {
-    const d = new Date(year, month - 1, day).getDay();
-    return d === 0 || d === 6;
-  };
+  // 주말 판별 (memoized)
+  const weekendSet = useMemo(() => {
+    const set = new Set<number>();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dow = new Date(year, month - 1, d).getDay();
+      if (dow === 0 || dow === 6) set.add(d);
+    }
+    return set;
+  }, [year, month, daysInMonth]);
 
-  // 일자별 합계 계산
-  const dailyTotals = Array.from({ length: daysInMonth }, (_, i) => {
-    const day = i + 1;
-    return students.filter((s) =>
-      s.checkIns.some((c) => new Date(c.date).getDate() === day)
-    ).length;
-  });
-  const grandTotal = students.reduce((sum, s) => sum + s.checkIns.length, 0);
+  const isWeekend = (day: number) => weekendSet.has(day);
+
+  // 일자별 합계 계산 (memoized)
+  const { dailyTotals, grandTotal } = useMemo(() => {
+    const totals = Array.from({ length: daysInMonth }, (_, i) => {
+      const day = i + 1;
+      return students.filter((s) =>
+        s.checkIns.some((c) => new Date(c.date).getDate() === day)
+      ).length;
+    });
+    const total = students.reduce((sum, s) => sum + s.checkIns.length, 0);
+    return { dailyTotals: totals, grandTotal: total };
+  }, [students, daysInMonth]);
 
   return (
     <div>
