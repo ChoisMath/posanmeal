@@ -131,10 +131,10 @@ export async function POST(request: Request) {
             errors.push("학생 데이터 오류:\n" + rowErrors.slice(0, 5).join("\n") +
               (rowErrors.length > 5 ? `\n...외 ${rowErrors.length - 5}건` : ""));
           } else {
-            // 배치 단위로 트랜잭션 실행 (타임아웃 방지)
+            // 배치 병렬 upsert (트랜잭션 타임아웃 회피)
             const upsertedUsers: { id: number }[] = [];
             for (const batch of chunk(validRows, BATCH_SIZE)) {
-              const results = await prisma.$transaction(
+              const results = await Promise.all(
                 batch.map(([email, grade, classNum, number, name]) =>
                   prisma.user.upsert({
                     where: { email },
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
 
             if (mealPeriodOps.length > 0) {
               for (const batch of chunk(mealPeriodOps, BATCH_SIZE)) {
-                await prisma.$transaction(
+                await Promise.all(
                   batch.map((mp) =>
                     prisma.mealPeriod.upsert({
                       where: { userId: mp.userId },
@@ -181,7 +181,7 @@ export async function POST(request: Request) {
           errors.push("교사 시트에서 유효한 데이터를 찾을 수 없습니다. email과 name 열을 확인하세요.");
         } else {
           for (const batch of chunk(validRows, BATCH_SIZE)) {
-            await prisma.$transaction(
+            await Promise.all(
               batch.map(([email, subject, homeroom, position, name]) =>
                 prisma.user.upsert({
                   where: { email },
