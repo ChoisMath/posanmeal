@@ -32,19 +32,6 @@ export function QRScanner({ onScan }: QRScannerProps) {
         cooldownRef.current = true;
         onScanRef.current(result.data);
 
-        // Beep sound
-        try {
-          const ctx = new AudioContext();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.frequency.value = 1200;
-          gain.gain.value = 0.3;
-          osc.start();
-          osc.stop(ctx.currentTime + 0.1);
-        } catch {}
-
         // Cooldown 2 seconds
         setTimeout(() => {
           cooldownRef.current = false;

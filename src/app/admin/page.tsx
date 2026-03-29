@@ -160,24 +160,24 @@ export default function AdminPage() {
     : [];
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b p-4 flex items-center justify-between">
-        <h1 className="font-bold text-lg">PosanDinner Admin</h1>
-        <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-warm-subtle">
+      <header className="header-gradient px-4 py-3 flex items-center justify-between">
+        <h1 className="font-bold text-base tracking-tight">PosanDinner Admin</h1>
+        <div className="flex items-center gap-1">
           <ThemeToggle />
-          <Button variant="ghost" size="icon" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-4 w-4" /></Button>
         </div>
       </header>
-      <div className="max-w-4xl mx-auto p-4">
+      <div className="max-w-5xl mx-auto p-4 md:p-6 page-enter">
         <Tabs defaultValue="users">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="users">사용자 관리</TabsTrigger>
-            <TabsTrigger value="meals">석식 확인</TabsTrigger>
-            <TabsTrigger value="dashboard">당일 현황</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 rounded-xl h-11 max-w-lg">
+            <TabsTrigger value="users" className="rounded-lg">사용자 관리</TabsTrigger>
+            <TabsTrigger value="meals" className="rounded-lg">석식 확인</TabsTrigger>
+            <TabsTrigger value="dashboard" className="rounded-lg">당일 현황</TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">
-            <Card>
+            <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
@@ -225,7 +225,7 @@ export default function AdminPage() {
           </TabsContent>
 
           <TabsContent value="meals">
-            <Card>
+            <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6">
                 <AdminMealTable />
               </CardContent>
@@ -233,7 +233,7 @@ export default function AdminPage() {
           </TabsContent>
 
           <TabsContent value="dashboard">
-            <Card>
+            <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-semibold">오늘의 석식 현황</h3>
@@ -241,27 +241,19 @@ export default function AdminPage() {
                 </div>
                 {dashboard && (
                   <>
-                    <div className="grid grid-cols-5 gap-2 mb-4">
-                      <div className="border rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold">{grade1Count}</p>
-                        <p className="text-xs text-muted-foreground">1학년</p>
-                      </div>
-                      <div className="border rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold">{grade2Count}</p>
-                        <p className="text-xs text-muted-foreground">2학년</p>
-                      </div>
-                      <div className="border rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold">{grade3Count}</p>
-                        <p className="text-xs text-muted-foreground">3학년</p>
-                      </div>
-                      <div className="border rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{dashboard.teacherWorkCount}</p>
-                        <p className="text-xs text-muted-foreground">교사(근무)</p>
-                      </div>
-                      <div className="border rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold text-green-600 dark:text-green-400">{dashboard.teacherPersonalCount}</p>
-                        <p className="text-xs text-muted-foreground">교사(개인)</p>
-                      </div>
+                    <div className="grid grid-cols-5 gap-2 sm:gap-3 mb-5">
+                      {[
+                        { count: grade1Count, label: "1학년", color: "from-amber-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-amber-500/10" },
+                        { count: grade2Count, label: "2학년", color: "from-orange-500/10 to-orange-500/5 dark:from-orange-500/20 dark:to-orange-500/10" },
+                        { count: grade3Count, label: "3학년", color: "from-rose-500/10 to-rose-500/5 dark:from-rose-500/20 dark:to-rose-500/10" },
+                        { count: dashboard.teacherWorkCount, label: "교사(근무)", color: "from-blue-500/10 to-blue-500/5 dark:from-blue-500/20 dark:to-blue-500/10" },
+                        { count: dashboard.teacherPersonalCount, label: "교사(개인)", color: "from-emerald-500/10 to-emerald-500/5 dark:from-emerald-500/20 dark:to-emerald-500/10" },
+                      ].map(({ count, label, color }) => (
+                        <div key={label} className={`bg-gradient-to-b ${color} rounded-xl p-3 text-center`}>
+                          <p className="text-2xl font-bold">{count}</p>
+                          <p className="text-[11px] text-muted-foreground font-medium">{label}</p>
+                        </div>
+                      ))}
                     </div>
                     <div className="border rounded-lg overflow-hidden">
                       <table className="w-full text-sm">
@@ -303,8 +295,8 @@ export default function AdminPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Google Spreadsheet 가져오기</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} /></div>
-            <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} /></div>
+            <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} className="rounded-xl" /></div>
+            <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <Button onClick={handleImport} disabled={importing} className="w-full">{importing ? "가져오는 중..." : "Data 호출"}</Button>
             {importMessage && <p className="text-sm text-muted-foreground">{importMessage}</p>}
           </div>
