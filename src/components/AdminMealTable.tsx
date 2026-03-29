@@ -23,9 +23,9 @@ interface UserRecord {
   checkIns: CheckInRecord[];
 }
 
-type Category = "teacher" | "1" | "2" | "3" | "today";
+type Category = "teacher" | "1" | "2" | "3";
 
-function MealGrid({ category, year, month }: { category: Exclude<Category, "today">; year: number; month: number }) {
+function MealGrid({ category, year, month }: { category: Category; year: number; month: number }) {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const isTeacher = category === "teacher";
 
@@ -41,6 +41,25 @@ function MealGrid({ category, year, month }: { category: Exclude<Category, "toda
     const d = new Date(year, month - 1, day).getDay();
     return d === 0 || d === 6;
   };
+
+  // 일자별 합계 계산
+  const dailyTotals = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    let total = 0;
+    let work = 0;
+    let personal = 0;
+    users.forEach((user) => {
+      const checkIn = user.checkIns.find((c) => new Date(c.date).getDate() === day);
+      if (checkIn) {
+        total++;
+        if (checkIn.type === "WORK") work++;
+        else personal++;
+      }
+    });
+    return { total, work, personal };
+  });
+
+  const grandTotal = users.reduce((sum, u) => sum + u.checkIns.length, 0);
 
   if (users.length === 0) {
     return <p className="text-center text-muted-foreground py-8 text-sm">데이터가 없습니다.</p>;
@@ -128,103 +147,59 @@ function MealGrid({ category, year, month }: { category: Exclude<Category, "toda
             );
           })}
         </tbody>
-      </table>
-    </div>
-  );
-}
-
-function TodayView() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  const today = now.getDate();
-  const categories: { key: Exclude<Category, "today">; label: string }[] = [
-    { key: "teacher", label: "교사" },
-    { key: "1", label: "1학년" },
-    { key: "2", label: "2학년" },
-    { key: "3", label: "3학년" },
-  ];
-
-  return (
-    <div className="space-y-4">
-      {categories.map(({ key, label }) => (
-        <TodaySection key={key} category={key} label={label} year={year} month={month} today={today} />
-      ))}
-    </div>
-  );
-}
-
-function TodaySection({ category, label, year, month, today }: {
-  category: Exclude<Category, "today">; label: string; year: number; month: number; today: number;
-}) {
-  const [users, setUsers] = useState<UserRecord[]>([]);
-  const isTeacher = category === "teacher";
-
-  useEffect(() => {
-    fetch(`/api/admin/checkins?year=${year}&month=${month}&category=${category}`)
-      .then((res) => res.json())
-      .then((data) => setUsers(data.users || []));
-  }, [year, month, category]);
-
-  const checkedCount = users.filter((u) =>
-    u.checkIns.some((c) => new Date(c.date).getDate() === today)
-  ).length;
-
-  return (
-    <div className="border rounded-lg">
-      <div className="flex items-center justify-between px-3 py-2 bg-muted rounded-t-lg">
-        <h4 className="font-semibold text-sm">{label}</h4>
-        <span className="text-xs text-muted-foreground">
-          {checkedCount}/{users.length}명 체크인
-        </span>
-      </div>
-      <div className="overflow-auto max-h-[30vh]">
-        <table className="text-xs w-full border-collapse">
-          <thead className="sticky top-0 z-10">
+        {/* 일자별 합계 footer */}
+        <tfoot className="sticky bottom-0 z-20">
+          {isTeacher ? (
+            <>
+              <tr>
+                <td className="sticky left-0 z-30 bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
+                {dailyTotals.map((d, i) => (
+                  <td key={i} className={`text-center border-t px-0.5 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 ${d.work > 0 ? "" : "opacity-30"}`}>
+                    {d.work || ""}
+                  </td>
+                ))}
+                <td className="sticky right-0 z-30 bg-blue-50 dark:bg-blue-950 text-center border-t border-l px-2 py-1.5 font-bold text-blue-700 dark:text-blue-300">
+                  {dailyTotals.reduce((s, d) => s + d.work, 0)}
+                </td>
+              </tr>
+              <tr>
+                <td className="sticky left-0 z-30 bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
+                {dailyTotals.map((d, i) => (
+                  <td key={i} className={`text-center border-t px-0.5 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 ${d.personal > 0 ? "" : "opacity-30"}`}>
+                    {d.personal || ""}
+                  </td>
+                ))}
+                <td className="sticky right-0 z-30 bg-green-50 dark:bg-green-950 text-center border-t border-l px-2 py-1.5 font-bold text-green-700 dark:text-green-300">
+                  {dailyTotals.reduce((s, d) => s + d.personal, 0)}
+                </td>
+              </tr>
+              <tr>
+                <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+                {dailyTotals.map((d, i) => (
+                  <td key={i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
+                    {d.total || ""}
+                  </td>
+                ))}
+                <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+                  {grandTotal}
+                </td>
+              </tr>
+            </>
+          ) : (
             <tr>
-              <th className="bg-muted px-2 py-1.5 text-left font-medium text-muted-foreground border-b min-w-[100px]">
-                {isTeacher ? "이름" : "반 번호 이름"}
-              </th>
-              <th className="bg-muted px-2 py-1.5 text-center font-medium text-muted-foreground border-b w-16">구분</th>
-              <th className="bg-muted px-2 py-1.5 text-center font-medium text-muted-foreground border-b w-16">시각</th>
+              <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+              {dailyTotals.map((d, i) => (
+                <td key={i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
+                  {d.total || ""}
+                </td>
+              ))}
+              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+                {grandTotal}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => {
-              const todayCheckIn = user.checkIns.find(
-                (c) => new Date(c.date).getDate() === today
-              );
-              return (
-                <tr key={user.id} className={`border-b ${todayCheckIn ? "" : "opacity-40"}`}>
-                  <td className="px-2 py-1.5">
-                    {isTeacher ? (
-                      <span className="font-semibold">{user.name}</span>
-                    ) : (
-                      <span>
-                        <span className="text-muted-foreground">{user.classNum}-</span>
-                        <span className="font-semibold">{user.number}</span>
-                        <span className="ml-1">{user.name}</span>
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    {todayCheckIn ? (
-                      <span className={`font-medium ${todayCheckIn.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-green-600 dark:text-green-400"}`}>
-                        {todayCheckIn.type === "STUDENT" ? "학생" : todayCheckIn.type === "WORK" ? "근무" : "개인"}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    {todayCheckIn ? new Date(todayCheckIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "-"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+          )}
+        </tfoot>
+      </table>
     </div>
   );
 }
@@ -233,7 +208,7 @@ export function AdminMealTable() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [tab, setTab] = useState<Category>("today");
+  const [tab, setTab] = useState<Category>("teacher");
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(year - 1); }
@@ -248,17 +223,12 @@ export function AdminMealTable() {
   return (
     <div>
       <Tabs value={tab} onValueChange={(v) => setTab(v as Category)}>
-        <TabsList className="grid w-full grid-cols-5 mb-4">
-          <TabsTrigger value="today">Today</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-4 mb-4">
           <TabsTrigger value="teacher">교사</TabsTrigger>
           <TabsTrigger value="1">1학년</TabsTrigger>
           <TabsTrigger value="2">2학년</TabsTrigger>
           <TabsTrigger value="3">3학년</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="today">
-          <TodayView />
-        </TabsContent>
 
         {(["teacher", "1", "2", "3"] as const).map((cat) => (
           <TabsContent key={cat} value={cat}>

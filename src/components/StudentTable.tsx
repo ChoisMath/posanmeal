@@ -49,6 +49,15 @@ export function StudentTable() {
     return d === 0 || d === 6;
   };
 
+  // 일자별 합계 계산
+  const dailyTotals = Array.from({ length: daysInMonth }, (_, i) => {
+    const day = i + 1;
+    return students.filter((s) =>
+      s.checkIns.some((c) => new Date(c.date).getDate() === day)
+    ).length;
+  });
+  const grandTotal = students.reduce((sum, s) => sum + s.checkIns.length, 0);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -139,6 +148,19 @@ export function StudentTable() {
               );
             })}
           </tbody>
+          <tfoot className="sticky bottom-0 z-20">
+            <tr>
+              <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+              {dailyTotals.map((count, i) => (
+                <td key={i} className={`text-center border-t px-1 py-1.5 font-bold bg-muted ${count > 0 ? "" : "opacity-30"}`}>
+                  {count || ""}
+                </td>
+              ))}
+              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+                {grandTotal}
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>

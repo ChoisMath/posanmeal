@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { signOut } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet } from "lucide-react";
 import { AdminMealTable } from "@/components/AdminMealTable";
 
 interface User {
@@ -33,10 +33,6 @@ const emptyForm = {
 };
 
 export default function AdminPage() {
-  const [studentSheetUrl, setStudentSheetUrl] = useState("");
-  const [teacherSheetUrl, setTeacherSheetUrl] = useState("");
-  const [importMessage, setImportMessage] = useState("");
-  const [importing, setImporting] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -49,6 +45,13 @@ export default function AdminPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({ ...emptyForm });
+
+  // Sheet import dialog
+  const [sheetDialogOpen, setSheetDialogOpen] = useState(false);
+  const [studentSheetUrl, setStudentSheetUrl] = useState("");
+  const [teacherSheetUrl, setTeacherSheetUrl] = useState("");
+  const [importMessage, setImportMessage] = useState("");
+  const [importing, setImporting] = useState(false);
 
   async function fetchUsers() {
     const res = await fetch(`/api/admin/users?role=${userFilter}`);
@@ -119,7 +122,6 @@ export default function AdminPage() {
     }
     await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-    // Update meal period if student
     if (editUser.role === "STUDENT" && editForm.startDate && editForm.endDate) {
       await fetch("/api/admin/meal-periods", {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -147,6 +149,16 @@ export default function AdminPage() {
     a.click(); URL.revokeObjectURL(url);
   }
 
+  // 당일현황: 학년별 학생수 계산
+  const grade1Count = dashboard?.records.filter((r) => r.role === "STUDENT" && r.grade === 1).length || 0;
+  const grade2Count = dashboard?.records.filter((r) => r.role === "STUDENT" && r.grade === 2).length || 0;
+  const grade3Count = dashboard?.records.filter((r) => r.role === "STUDENT" && r.grade === 3).length || 0;
+
+  // 최근 체크인 시각 순으로 정렬
+  const sortedRecords = dashboard?.records
+    ? [...dashboard.records].sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime())
+    : [];
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b p-4 flex items-center justify-between">
@@ -156,18 +168,7 @@ export default function AdminPage() {
           <Button variant="ghost" size="icon" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-5 w-5" /></Button>
         </div>
       </header>
-      <div className="max-w-4xl mx-auto p-4 space-y-6">
-        {/* Spreadsheet Import */}
-        <Card>
-          <CardHeader><CardTitle className="text-base">Google Spreadsheet 가져오기</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} /></div>
-            <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} /></div>
-            <Button onClick={handleImport} disabled={importing}>{importing ? "가져오는 중..." : "Data 호출"}</Button>
-            {importMessage && <p className="text-sm text-muted-foreground">{importMessage}</p>}
-          </CardContent>
-        </Card>
-
+      <div className="max-w-4xl mx-auto p-4">
         <Tabs defaultValue="users">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="users">사용자 관리</TabsTrigger>
@@ -183,9 +184,14 @@ export default function AdminPage() {
                     <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
                     <Button variant={userFilter === "TEACHER" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("TEACHER")}>교사</Button>
                   </div>
-                  <Button size="sm" onClick={() => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); }}>
-                    <Plus className="h-4 w-4 mr-1" /> 추가
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setImportMessage(""); setSheetDialogOpen(true); }}>
+                      <FileSpreadsheet className="h-4 w-4 mr-1" /> Sheet연결
+                    </Button>
+                    <Button size="sm" onClick={() => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); }}>
+                      <Plus className="h-4 w-4 mr-1" /> 추가
+                    </Button>
+                  </div>
                 </div>
                 <div className="border rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
@@ -235,19 +241,49 @@ export default function AdminPage() {
                 </div>
                 {dashboard && (
                   <>
-                    <div className="grid grid-cols-3 gap-3 mb-4">
-                      <div className="border rounded-lg p-3 text-center"><p className="text-2xl font-bold">{dashboard.studentCount}</p><p className="text-xs text-muted-foreground">학생</p></div>
-                      <div className="border rounded-lg p-3 text-center"><p className="text-2xl font-bold">{dashboard.teacherWorkCount}</p><p className="text-xs text-muted-foreground">교사(근무)</p></div>
-                      <div className="border rounded-lg p-3 text-center"><p className="text-2xl font-bold">{dashboard.teacherPersonalCount}</p><p className="text-xs text-muted-foreground">교사(개인)</p></div>
+                    <div className="grid grid-cols-5 gap-2 mb-4">
+                      <div className="border rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold">{grade1Count}</p>
+                        <p className="text-xs text-muted-foreground">1학년</p>
+                      </div>
+                      <div className="border rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold">{grade2Count}</p>
+                        <p className="text-xs text-muted-foreground">2학년</p>
+                      </div>
+                      <div className="border rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold">{grade3Count}</p>
+                        <p className="text-xs text-muted-foreground">3학년</p>
+                      </div>
+                      <div className="border rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{dashboard.teacherWorkCount}</p>
+                        <p className="text-xs text-muted-foreground">교사(근무)</p>
+                      </div>
+                      <div className="border rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold text-green-600 dark:text-green-400">{dashboard.teacherPersonalCount}</p>
+                        <p className="text-xs text-muted-foreground">교사(개인)</p>
+                      </div>
                     </div>
                     <div className="border rounded-lg overflow-hidden">
                       <table className="w-full text-sm">
-                        <thead className="bg-muted"><tr><th className="p-2 text-left">이름</th><th className="p-2 text-left">구분</th><th className="p-2 text-left">체크인 시각</th></tr></thead>
+                        <thead className="bg-muted">
+                          <tr>
+                            <th className="p-2 text-left">이름</th>
+                            <th className="p-2 text-left">구분</th>
+                            <th className="p-2 text-left">체크인 시각</th>
+                          </tr>
+                        </thead>
                         <tbody>
-                          {dashboard.records.map((r, i) => (
+                          {sortedRecords.map((r, i) => (
                             <tr key={i} className="border-t">
                               <td className="p-2">{r.role === "STUDENT" ? `${r.grade}-${r.classNum} ${r.number}번 ${r.userName}` : `${r.userName} 선생님`}</td>
-                              <td className="p-2"><Badge variant="outline" className="text-xs">{r.type === "STUDENT" ? "학생" : r.type === "WORK" ? "근무" : "개인"}</Badge></td>
+                              <td className="p-2">
+                                <Badge variant="outline" className={`text-xs ${
+                                  r.type === "WORK" ? "border-blue-300 text-blue-600 dark:text-blue-400" :
+                                  r.type === "PERSONAL" ? "border-green-300 text-green-600 dark:text-green-400" : ""
+                                }`}>
+                                  {r.type === "STUDENT" ? `${r.grade}학년` : r.type === "WORK" ? "근무" : "개인"}
+                                </Badge>
+                              </td>
                               <td className="p-2">{new Date(r.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</td>
                             </tr>
                           ))}
@@ -261,6 +297,19 @@ export default function AdminPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Sheet Import Dialog */}
+      <Dialog open={sheetDialogOpen} onOpenChange={setSheetDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Google Spreadsheet 가져오기</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} /></div>
+            <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} /></div>
+            <Button onClick={handleImport} disabled={importing} className="w-full">{importing ? "가져오는 중..." : "Data 호출"}</Button>
+            {importMessage && <p className="text-sm text-muted-foreground">{importMessage}</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add User Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
