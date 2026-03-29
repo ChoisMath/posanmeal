@@ -128,3 +128,17 @@
     @apply font-sans;
   }
 }
+
+/* 모바일/태블릿 텍스트 스케일링: 줄바꿈 없이 뷰포트에 맞춰 축소 */
+.text-fit-sm {
+  font-size: clamp(0.65rem, 2.5vw, 0.875rem);
+  white-space: nowrap;
+}
+.text-fit-base {
+  font-size: clamp(0.75rem, 3vw, 1rem);
+  white-space: nowrap;
+}
+.text-fit-lg {
+  font-size: clamp(0.875rem, 3.5vw, 1.125rem);
+  white-space: nowrap;
+}

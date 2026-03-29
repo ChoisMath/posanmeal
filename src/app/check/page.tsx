@@ -102,18 +102,18 @@ export default function CheckPage() {
             )}
             <div>
               {result.user?.role === "STUDENT" ? (
-                <p className="font-bold text-lg text-gray-900 dark:text-white">
+                <p className="font-bold text-fit-lg text-gray-900 dark:text-white">
                   {result.user.grade}-{result.user.classNum}{" "}
                   {result.user.number}번 {result.user.name}
                 </p>
               ) : result.user ? (
-                <p className="font-bold text-lg text-gray-900 dark:text-white">
+                <p className="font-bold text-fit-lg text-gray-900 dark:text-white">
                   {result.user.name} 선생님
                 </p>
               ) : null}
 
               {result.success && (
-                <p className="text-green-700 dark:text-green-300 text-sm mt-1">
+                <p className="text-green-700 dark:text-green-300 text-fit-sm mt-1">
                   {result.user?.role === "TEACHER" && result.checkedAt
                     ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
                     : "석식 체크인 되었습니다."}
@@ -121,13 +121,13 @@ export default function CheckPage() {
               )}
 
               {result.duplicate && (
-                <p className="text-red-700 dark:text-red-300 text-sm mt-1 font-semibold">
+                <p className="text-red-700 dark:text-red-300 text-fit-sm mt-1 font-semibold">
                   이미 Checkin 되었습니다. 확인해 주세요.
                 </p>
               )}
 
               {!result.success && !result.duplicate && (
-                <p className="text-yellow-700 dark:text-yellow-300 text-sm mt-1">
+                <p className="text-yellow-700 dark:text-yellow-300 text-fit-sm mt-1">
                   {result.error}
                 </p>
               )}

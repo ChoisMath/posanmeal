@@ -68,37 +68,41 @@ export default function TeacherPage() {
           </Button>
         </div>
       </header>
-      <div className="max-w-md mx-auto p-4">
+      <div className="max-w-4xl mx-auto p-4">
         <Tabs defaultValue="personal">
-          <TabsList className={`grid w-full ${isHomeroom ? "grid-cols-4" : "grid-cols-3"}`}>
+          <TabsList className={`grid w-full max-w-md mx-auto ${isHomeroom ? "grid-cols-5" : "grid-cols-4"}`}>
             <TabsTrigger value="personal">개인석식</TabsTrigger>
             <TabsTrigger value="work">근무</TabsTrigger>
+            <TabsTrigger value="history">확인</TabsTrigger>
             {isHomeroom && <TabsTrigger value="students">학생관리</TabsTrigger>}
             <TabsTrigger value="profile">개인정보</TabsTrigger>
           </TabsList>
 
           <TabsContent value="personal">
-            <Card>
+            <Card className="max-w-md mx-auto">
               <CardContent className="pt-6 text-center">
                 <QRGenerator type="PERSONAL" />
                 <p className="mt-4 font-semibold">{user.name} 선생님</p>
                 <p className="text-sm text-amber-600 dark:text-amber-400 font-medium mt-1">개인 석식용 QR</p>
               </CardContent>
             </Card>
-            <Card className="mt-4">
-              <CardContent className="pt-6">
-                <h3 className="font-semibold mb-4">석식 이력</h3>
-                <MonthlyCalendar />
-              </CardContent>
-            </Card>
           </TabsContent>
 
           <TabsContent value="work">
-            <Card>
+            <Card className="max-w-md mx-auto">
               <CardContent className="pt-6 text-center">
                 <QRGenerator type="WORK" />
                 <p className="mt-4 font-semibold">{user.name} 선생님</p>
                 <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">근무 석식용 QR</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="history">
+            <Card className="max-w-md mx-auto">
+              <CardContent className="pt-6">
+                <h3 className="font-semibold mb-4">석식 이력</h3>
+                <MonthlyCalendar showType />
               </CardContent>
             </Card>
           </TabsContent>
@@ -110,7 +114,7 @@ export default function TeacherPage() {
           )}
 
           <TabsContent value="profile">
-            <Card>
+            <Card className="max-w-md mx-auto">
               <CardContent className="pt-6 space-y-4">
                 <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={(url) => setUser({ ...user, photoUrl: url })} />
                 {editing ? (

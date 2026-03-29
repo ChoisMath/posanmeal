@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, Pencil } from "lucide-react";
+import { AdminMealTable } from "@/components/AdminMealTable";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -168,9 +169,10 @@ export default function AdminPage() {
         </Card>
 
         <Tabs defaultValue="users">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="users">사용자 관리</TabsTrigger>
-            <TabsTrigger value="dashboard">석식 현황</TabsTrigger>
+            <TabsTrigger value="meals">석식 확인</TabsTrigger>
+            <TabsTrigger value="dashboard">당일 현황</TabsTrigger>
           </TabsList>
 
           <TabsContent value="users">
@@ -212,6 +214,14 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="meals">
+            <Card>
+              <CardContent className="pt-6">
+                <AdminMealTable />
               </CardContent>
             </Card>
           </TabsContent>
