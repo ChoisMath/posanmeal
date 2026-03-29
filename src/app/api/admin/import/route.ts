@@ -48,6 +48,16 @@ function csvToRows(csv: string): string[][] {
   return rows;
 }
 
+const BATCH_SIZE = 50;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
 async function fetchSheet(url: string, label: string): Promise<{ rows: string[][]; error?: string }> {
   const id = extractSpreadsheetId(url);
   const gid = extractGid(url);
@@ -121,30 +131,37 @@ export async function POST(request: Request) {
             errors.push("학생 데이터 오류:\n" + rowErrors.slice(0, 5).join("\n") +
               (rowErrors.length > 5 ? `\n...외 ${rowErrors.length - 5}건` : ""));
           } else {
-            const upsertedUsers = await prisma.$transaction(
-              validRows.map(([email, grade, classNum, number, name]) =>
-                prisma.user.upsert({
-                  where: { email },
-                  update: { name, grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
-                  create: { email, name, role: "STUDENT", grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
-                })
-              )
-            );
+            // 배치 단위로 트랜잭션 실행 (타임아웃 방지)
+            const upsertedUsers: { id: number }[] = [];
+            for (const batch of chunk(validRows, BATCH_SIZE)) {
+              const results = await prisma.$transaction(
+                batch.map(([email, grade, classNum, number, name]) =>
+                  prisma.user.upsert({
+                    where: { email },
+                    update: { name, grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
+                    create: { email, name, role: "STUDENT", grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
+                  })
+                )
+              );
+              upsertedUsers.push(...results);
+            }
 
             const mealPeriodOps = validRows
               .map((row, i) => ({ userId: upsertedUsers[i].id, startDate: row[5], endDate: row[6] }))
               .filter((mp) => mp.startDate && mp.endDate && !isNaN(new Date(mp.startDate).getTime()) && !isNaN(new Date(mp.endDate).getTime()));
 
             if (mealPeriodOps.length > 0) {
-              await prisma.$transaction(
-                mealPeriodOps.map((mp) =>
-                  prisma.mealPeriod.upsert({
-                    where: { userId: mp.userId },
-                    update: { startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
-                    create: { userId: mp.userId, startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
-                  })
-                )
-              );
+              for (const batch of chunk(mealPeriodOps, BATCH_SIZE)) {
+                await prisma.$transaction(
+                  batch.map((mp) =>
+                    prisma.mealPeriod.upsert({
+                      where: { userId: mp.userId },
+                      update: { startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
+                      create: { userId: mp.userId, startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
+                    })
+                  )
+                );
+              }
             }
 
             studentCount = validRows.length;
@@ -163,15 +180,17 @@ export async function POST(request: Request) {
         if (validRows.length === 0) {
           errors.push("교사 시트에서 유효한 데이터를 찾을 수 없습니다. email과 name 열을 확인하세요.");
         } else {
-          await prisma.$transaction(
-            validRows.map(([email, subject, homeroom, position, name]) =>
-              prisma.user.upsert({
-                where: { email },
-                update: { name, subject, homeroom: homeroom || null, position },
-                create: { email, name, role: "TEACHER", subject, homeroom: homeroom || null, position },
-              })
-            )
-          );
+          for (const batch of chunk(validRows, BATCH_SIZE)) {
+            await prisma.$transaction(
+              batch.map(([email, subject, homeroom, position, name]) =>
+                prisma.user.upsert({
+                  where: { email },
+                  update: { name, subject, homeroom: homeroom || null, position },
+                  create: { email, name, role: "TEACHER", subject, homeroom: homeroom || null, position },
+                })
+              )
+            );
+          }
 
           teacherCount = validRows.length;
         }
