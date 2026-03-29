@@ -72,15 +72,41 @@ export default function AdminPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchUsers(); fetchDashboard(); }, [userFilter]);
 
+  const [importError, setImportError] = useState("");
+
   async function handleImport() {
-    setImporting(true); setImportMessage("");
-    const res = await fetch("/api/admin/import", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentSheetUrl, teacherSheetUrl }),
-    });
-    const data = await res.json();
-    setImportMessage(data.message || data.error);
-    setImporting(false); fetchUsers();
+    if (!studentSheetUrl && !teacherSheetUrl) {
+      setImportError("학생 또는 교사 시트 URL을 하나 이상 입력하세요.");
+      return;
+    }
+    setImporting(true); setImportMessage(""); setImportError("");
+    try {
+      const res = await fetch("/api/admin/import", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentSheetUrl, teacherSheetUrl }),
+      });
+      let data: { message?: string; error?: string; warnings?: string };
+      try {
+        data = await res.json();
+      } catch {
+        setImportError("서버 응답을 처리할 수 없습니다. 잠시 후 다시 시도하세요.");
+        setImporting(false);
+        return;
+      }
+      if (data.error) {
+        setImportError(data.error);
+      }
+      if (data.message) {
+        setImportMessage(data.message);
+      }
+      if (data.warnings) {
+        setImportError((prev) => prev ? prev + "\n\n" + data.warnings : data.warnings!);
+      }
+      fetchUsers();
+    } catch {
+      setImportError("네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.");
+    }
+    setImporting(false);
   }
 
   async function handleAddUser() {
@@ -321,7 +347,8 @@ export default function AdminPage() {
             <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <Button onClick={handleImport} disabled={importing} className="w-full">{importing ? "가져오는 중..." : "Data 호출"}</Button>
-            {importMessage && <p className="text-sm text-muted-foreground">{importMessage}</p>}
+            {importMessage && <p className="text-sm text-green-600 dark:text-green-400">{importMessage}</p>}
+            {importError && <p className="text-sm text-red-600 dark:text-red-400 whitespace-pre-line">{importError}</p>}
           </div>
         </DialogContent>
       </Dialog>
