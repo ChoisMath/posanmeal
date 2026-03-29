@@ -8,41 +8,120 @@ export async function GET(request: Request) {
 
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0);
+  const daysInMonth = endDate.getDate();
 
-  const checkIns = await prisma.checkIn.findMany({
-    where: { date: { gte: startDate, lte: endDate } },
-    include: { user: { select: { name: true, role: true, grade: true, classNum: true, number: true, subject: true } } },
-    orderBy: [{ date: "asc" }, { checkedAt: "asc" }],
-  });
+  // 4개 카테고리 데이터를 병렬 쿼리
+  const [teachers, grade1, grade2, grade3] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: "TEACHER" },
+      select: {
+        name: true, subject: true,
+        checkIns: {
+          where: { date: { gte: startDate, lte: endDate } },
+          select: { date: true, type: true },
+          orderBy: { date: "asc" },
+        },
+      },
+      orderBy: { name: "asc" },
+    }),
+    ...([1, 2, 3] as const).map((grade) =>
+      prisma.user.findMany({
+        where: { role: "STUDENT", grade },
+        select: {
+          name: true, number: true, classNum: true,
+          checkIns: {
+            where: { date: { gte: startDate, lte: endDate } },
+            select: { date: true },
+            orderBy: { date: "asc" },
+          },
+        },
+        orderBy: [{ classNum: "asc" }, { number: "asc" }],
+      })
+    ),
+  ]);
 
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.default.Workbook();
-  const sheet = workbook.addWorksheet(`${year}년 ${month}월 석식 현황`);
 
-  sheet.columns = [
-    { header: "날짜", key: "date", width: 12 },
-    { header: "이름", key: "name", width: 15 },
-    { header: "구분", key: "role", width: 10 },
-    { header: "학년-반-번호", key: "classInfo", width: 15 },
-    { header: "유형", key: "type", width: 10 },
-    { header: "체크인 시각", key: "checkedAt", width: 15 },
+  const categories = [
+    { title: `포산고등학교 ${month}월 교사`, label: "이름", users: teachers, isTeacher: true },
+    { title: `포산고등학교 ${month}월 1학년`, label: "반-번호 이름", users: grade1, isTeacher: false },
+    { title: `포산고등학교 ${month}월 2학년`, label: "반-번호 이름", users: grade2, isTeacher: false },
+    { title: `포산고등학교 ${month}월 3학년`, label: "반-번호 이름", users: grade3, isTeacher: false },
   ];
 
-  sheet.getRow(1).font = { bold: true };
+  const sheetNames = ["교사", "1학년", "2학년", "3학년"];
 
-  for (const c of checkIns) {
-    const typeLabel = c.type === "STUDENT" ? "학생" : c.type === "WORK" ? "근무" : "개인";
-    const roleLabel = c.user.role === "STUDENT" ? "학생" : "교사";
-    const classInfo = c.user.role === "STUDENT" ? `${c.user.grade}-${c.user.classNum}-${c.user.number}` : c.user.subject || "-";
+  for (let si = 0; si < categories.length; si++) {
+    const { title, label, users, isTeacher } = categories[si];
+    const sheet = workbook.addWorksheet(sheetNames[si]);
 
-    sheet.addRow({
-      date: c.date.toISOString().slice(0, 10),
-      name: c.user.name,
-      role: roleLabel,
-      classInfo,
-      type: typeLabel,
-      checkedAt: c.checkedAt.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" }),
-    });
+    // 행1: 제목 (병합)
+    const lastCol = daysInMonth + 2; // A + days + 합계
+    sheet.mergeCells(1, 1, 1, lastCol);
+    const titleCell = sheet.getCell(1, 1);
+    titleCell.value = title;
+    titleCell.font = { bold: true, size: 14 };
+    titleCell.alignment = { horizontal: "center" };
+
+    // 행2: 빈 행
+
+    // 행3: 헤더
+    const headerRow = sheet.getRow(3);
+    headerRow.getCell(1).value = label;
+    for (let d = 1; d <= daysInMonth; d++) {
+      headerRow.getCell(d + 1).value = d;
+    }
+    headerRow.getCell(lastCol).value = "합계";
+    headerRow.font = { bold: true };
+    headerRow.alignment = { horizontal: "center" };
+    headerRow.getCell(1).alignment = { horizontal: "left" };
+
+    // 열 너비
+    sheet.getColumn(1).width = isTeacher ? 12 : 16;
+    for (let d = 1; d <= daysInMonth; d++) {
+      sheet.getColumn(d + 1).width = 4;
+    }
+    sheet.getColumn(lastCol).width = 6;
+
+    // 행4~: 데이터
+    for (const user of users) {
+      const row = sheet.addRow([]);
+      const checkedDaysMap = new Map(
+        user.checkIns.map((c: { date: Date; type?: string }) => [new Date(c.date).getDate(), c])
+      );
+
+      // A열: 이름
+      if (isTeacher) {
+        row.getCell(1).value = (user as { name: string }).name;
+      } else {
+        const s = user as { classNum: number; number: number; name: string };
+        row.getCell(1).value = `${s.classNum}-${s.number} ${s.name}`;
+      }
+
+      // 날짜열
+      let count = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const checkIn = checkedDaysMap.get(d);
+        if (checkIn) {
+          count++;
+          if (isTeacher) {
+            const type = (checkIn as { type?: string }).type;
+            row.getCell(d + 1).value = type === "WORK" ? "근" : "개";
+          } else {
+            row.getCell(d + 1).value = "O";
+          }
+        }
+      }
+
+      // 합계열
+      row.getCell(lastCol).value = count;
+
+      // 가운데 정렬 (날짜/합계)
+      for (let c = 2; c <= lastCol; c++) {
+        row.getCell(c).alignment = { horizontal: "center" };
+      }
+    }
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
@@ -50,7 +129,7 @@ export async function GET(request: Request) {
   return new NextResponse(buffer, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="meal_${year}_${month}.xlsx"`,
+      "Content-Disposition": `attachment; filename="${encodeURIComponent(`석식현황_${year}_${month}`)}.xlsx"`,
     },
   });
 }

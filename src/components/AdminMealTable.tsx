@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CheckInRecord {
+  id: number;
   date: string;
   checkedAt: string;
   type: string;
@@ -29,11 +30,13 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
   const [users, setUsers] = useState<UserRecord[]>([]);
   const isTeacher = category === "teacher";
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     fetch(`/api/admin/checkins?year=${year}&month=${month}&category=${category}`)
       .then((res) => res.json())
       .then((data) => setUsers(data.users || []));
   }, [year, month, category]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -68,6 +71,31 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
     const grand = users.reduce((sum, u) => sum + u.checkIns.length, 0);
     return { dailyTotals: totals, grandTotal: grand };
   }, [users, daysInMonth]);
+
+  // 교사 셀 클릭 → 타입 전환
+  async function handleToggleType(userId: number, checkIn: CheckInRecord) {
+    const newType = checkIn.type === "WORK" ? "PERSONAL" : "WORK";
+    const res = await fetch("/api/admin/checkins", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: checkIn.id, type: newType }),
+    });
+    if (res.ok) {
+      // 로컬 state 즉시 업데이트 (리페치 없이)
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                checkIns: u.checkIns.map((c) =>
+                  c.id === checkIn.id ? { ...c, type: newType } : c
+                ),
+              }
+            : u
+        )
+      );
+    }
+  }
 
   if (users.length === 0) {
     return <p className="text-center text-muted-foreground py-8 text-sm">데이터가 없습니다.</p>;
@@ -141,8 +169,9 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
                           : weekend
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""
-                      }`}
-                      title={checkIn ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}` : undefined}
+                      } ${isTeacher && checkIn ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
+                      title={checkIn ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${isTeacher ? " (클릭하여 변경)" : ""}` : undefined}
+                      onClick={isTeacher && checkIn ? () => handleToggleType(user.id, checkIn) : undefined}
                     >
                       {checkIn ? (isTeacher ? (checkIn.type === "WORK" ? "근" : "개") : "O") : ""}
                     </td>
@@ -228,6 +257,17 @@ export function AdminMealTable() {
     else setMonth(month + 1);
   };
 
+  async function handleExport() {
+    const res = await fetch(`/api/admin/export?year=${year}&month=${month}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `석식현황_${year}_${month}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       <Tabs value={tab} onValueChange={(v) => setTab(v as Category)}>
@@ -247,6 +287,9 @@ export function AdminMealTable() {
               <h3 className="font-semibold text-fit-base">{year}년 {month}월</h3>
               <Button variant="ghost" size="icon" onClick={nextMonth}>
                 <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleExport} title="전체 월별 Excel 다운로드">
+                <Download className="h-4 w-4 mr-1" /> Excel
               </Button>
             </div>
             <MealGrid category={cat} year={year} month={month} />

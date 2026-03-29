@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       mealPeriod: { select: { startDate: true, endDate: true } },
       checkIns: {
         where: { date: { gte: startDate, lte: endDate } },
-        select: { date: true, checkedAt: true, type: true },
+        select: { id: true, date: true, checkedAt: true, type: true },
         orderBy: { date: "asc" },
       },
     },
