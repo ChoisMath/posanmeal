@@ -39,10 +39,16 @@ export function QRScanner({ onScan }: QRScannerProps) {
       },
       {
         preferredCamera: "user",
-        maxScansPerSecond: 25,
-        highlightScanRegion: true,
+        maxScansPerSecond: 15,
+        highlightScanRegion: false,
         highlightCodeOutline: true,
         returnDetailedScanResult: true,
+        calculateScanRegion: (v: HTMLVideoElement) => ({
+          x: 0,
+          y: 0,
+          width: v.videoWidth,
+          height: v.videoHeight,
+        }),
       }
     );
 
@@ -90,6 +96,19 @@ export function QRScanner({ onScan }: QRScannerProps) {
           <SwitchCamera className="h-5 w-5" />
         </button>
       )}
+      {/* 시각적 가이드 프레임 — 실제 스캔 영역을 제한하지 않음 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      >
+        <div className="relative w-[70%] aspect-square">
+          {/* 네 모서리 강조 (L자 코너) */}
+          <div className="absolute left-0 top-0 h-6 w-6 border-l-2 border-t-2 border-white/80 rounded-tl" />
+          <div className="absolute right-0 top-0 h-6 w-6 border-r-2 border-t-2 border-white/80 rounded-tr" />
+          <div className="absolute left-0 bottom-0 h-6 w-6 border-l-2 border-b-2 border-white/80 rounded-bl" />
+          <div className="absolute right-0 bottom-0 h-6 w-6 border-r-2 border-b-2 border-white/80 rounded-br" />
+        </div>
+      </div>
     </div>
   );
 }
