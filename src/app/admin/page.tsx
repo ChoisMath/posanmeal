@@ -205,7 +205,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between">
-        <BrandMark variant="header" label="PosanDinner Admin" />
+        <BrandMark variant="header" label="PosanMeal Admin" />
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-4 w-4" /></Button>

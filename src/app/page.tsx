@@ -18,7 +18,7 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col">
-      <BrandMark variant="floating" label="포산밀" />
+      <BrandMark variant="floating" label="PosanMeal" />
       <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
       </div>

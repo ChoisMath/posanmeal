@@ -17,29 +17,29 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://posanmeal.up.railway.app"),
   title: {
-    default: "포산고-석식 관리 | Meal in Posan",
-    template: "%s | 포산밀",
+    default: "PosanMeal — 포산고 석식 관리",
+    template: "%s | PosanMeal",
   },
   description: "포산고등학교 Smart QR 석식 관리 시스템",
-  applicationName: "포산밀",
-  keywords: ["포산고", "석식", "QR", "체크인", "Meal in Posan"],
+  applicationName: "PosanMeal",
+  keywords: ["포산고", "석식", "QR", "체크인", "PosanMeal"],
   authors: [{ name: "포산고등학교" }],
   openGraph: {
     type: "website",
     locale: "ko_KR",
     url: "/",
-    siteName: "포산밀 — Meal in Posan",
-    title: "포산고-석식 관리 | Meal in Posan",
+    siteName: "PosanMeal",
+    title: "PosanMeal — 포산고 석식 관리",
     description: "포산고등학교 Smart QR 석식 관리 시스템",
   },
   twitter: {
     card: "summary_large_image",
-    title: "포산고-석식 관리 | Meal in Posan",
+    title: "PosanMeal — 포산고 석식 관리",
     description: "포산고등학교 Smart QR 석식 관리 시스템",
   },
   appleWebApp: {
     capable: true,
-    title: "포산밀",
+    title: "PosanMeal",
     statusBarStyle: "default",
   },
   formatDetection: {

@@ -39,7 +39,7 @@ export default function AdminLoginPage() {
 
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col items-center justify-center px-6">
-      <BrandMark variant="floating" label="포산밀" />
+      <BrandMark variant="floating" label="PosanMeal" />
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
@@ -49,7 +49,7 @@ export default function AdminLoginPage() {
             <ShieldCheck className="h-7 w-7" />
           </div>
           <h1 className="text-xl font-bold">관리자 로그인</h1>
-          <p className="text-sm text-muted-foreground mt-1">PosanDinner Admin</p>
+          <p className="text-sm text-muted-foreground mt-1">PosanMeal Admin</p>
         </div>
 
         <div className="glass rounded-2xl card-elevated p-6">

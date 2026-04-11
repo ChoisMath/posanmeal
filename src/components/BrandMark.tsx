@@ -54,7 +54,7 @@ export function BrandMark({
   return (
     <Link
       href={href}
-      aria-label={label ? `${label} — 홈` : "포산밀 홈"}
+      aria-label={label ? `${label} — 홈` : "PosanMeal 홈"}
       className={[wrapperByVariant[variant], className].filter(Boolean).join(" ")}
     >
       <span className={badgeByVariant[variant]}>
