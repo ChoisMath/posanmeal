@@ -11,7 +11,11 @@ interface CheckInRecord {
   type: string;
 }
 
-export function MonthlyCalendar() {
+interface MonthlyCalendarProps {
+  showType?: boolean;
+}
+
+export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -73,9 +77,14 @@ export function MonthlyCalendar() {
           const day = i + 1;
           const checkIn = getCheckIn(day);
           return (
-            <div key={day} className={`py-2 rounded-md text-sm ${checkIn ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200" : ""}`}>
+            <div key={day} className={`py-2 rounded-md text-sm ${checkIn ? checkIn.type === "WORK" ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200" : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200" : ""}`}>
               <div>{day}</div>
-              {checkIn && <div className="text-[10px] text-green-600 dark:text-green-400">{formatTime(checkIn.checkedAt)}</div>}
+              {checkIn && showType && (
+                <div className={`text-[10px] font-medium ${checkIn.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  {checkIn.type === "WORK" ? "근무" : "개인"}
+                </div>
+              )}
+              {checkIn && <div className="text-[10px] text-muted-foreground">{formatTime(checkIn.checkedAt)}</div>}
             </div>
           );
         })}

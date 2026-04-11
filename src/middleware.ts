@@ -5,17 +5,11 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
   const session = req.auth;
 
-  // Public routes
-  if (
-    pathname === "/" ||
-    pathname === "/check" ||
-    pathname === "/admin/login" ||
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/checkin") ||
-    pathname.startsWith("/api/uploads") ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/uploads")
-  ) {
+  // Public routes (Set for O(1) lookup on exact matches)
+  const publicExact = new Set(["/", "/check", "/admin/login"]);
+  const publicPrefixes = ["/api/auth", "/api/checkin", "/api/uploads", "/_next", "/uploads"];
+
+  if (publicExact.has(pathname) || publicPrefixes.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 

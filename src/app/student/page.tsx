@@ -29,30 +29,35 @@ export default function StudentPage() {
     fetch("/api/users/me").then((res) => res.json()).then((data) => setUser(data.user));
   }, []);
 
-  if (!user) return <div className="min-h-screen flex items-center justify-center">로딩 중...</div>;
+  if (!user) return (
+    <div className="min-h-screen flex items-center justify-center bg-warm-subtle">
+      <div className="animate-pulse text-muted-foreground">로딩 중...</div>
+    </div>
+  );
 
   const hasMealPeriod = !!user.mealPeriod;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b p-4 flex items-center justify-between">
-        <h1 className="font-bold text-lg">포산밀</h1>
-        <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-warm-subtle">
+      <header className="header-gradient px-4 py-3 flex items-center justify-between">
+        <h1 className="font-bold text-base tracking-tight">PosanDinner</h1>
+        <div className="flex items-center gap-1">
           <ThemeToggle />
-          <Button variant="ghost" size="icon" onClick={() => signOut({ callbackUrl: "/" })}>
-            <LogOut className="h-5 w-5" />
+          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}>
+            <LogOut className="h-4 w-4" />
           </Button>
         </div>
       </header>
-      <div className="max-w-md mx-auto p-4">
+
+      <div className="max-w-md mx-auto p-4 page-enter">
         <Tabs defaultValue="qr">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="qr">QR</TabsTrigger>
-            <TabsTrigger value="profile">개인정보</TabsTrigger>
-            <TabsTrigger value="history">확인</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3 rounded-xl h-11">
+            <TabsTrigger value="qr" className="rounded-lg">QR</TabsTrigger>
+            <TabsTrigger value="profile" className="rounded-lg">개인정보</TabsTrigger>
+            <TabsTrigger value="history" className="rounded-lg">확인</TabsTrigger>
           </TabsList>
           <TabsContent value="qr">
-            <Card>
+            <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 text-center">
                 {hasMealPeriod ? (
                   <>
@@ -69,20 +74,29 @@ export default function StudentPage() {
             </Card>
           </TabsContent>
           <TabsContent value="profile">
-            <Card>
+            <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 space-y-4">
                 <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={(url) => setUser({ ...user, photoUrl: url })} />
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between border-b pb-2"><span className="text-muted-foreground">학년</span><span>{user.grade}학년</span></div>
-                  <div className="flex justify-between border-b pb-2"><span className="text-muted-foreground">반</span><span>{user.classNum}반</span></div>
-                  <div className="flex justify-between border-b pb-2"><span className="text-muted-foreground">번호</span><span>{user.number}번</span></div>
-                  <div className="flex justify-between border-b pb-2"><span className="text-muted-foreground">이름</span><span>{user.name}</span></div>
+                <div className="space-y-1">
+                  {[
+                    ["학년", `${user.grade}학년`],
+                    ["반", `${user.classNum}반`],
+                    ["번호", `${user.number}번`],
+                    ["이름", user.name],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between py-2.5 border-b border-border/50 text-sm">
+                      <span className="text-muted-foreground">{label}</span>
+                      <span className="font-medium">{value}</span>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
           <TabsContent value="history">
-            <Card><CardContent className="pt-6"><MonthlyCalendar /></CardContent></Card>
+            <Card className="card-elevated rounded-2xl border-0">
+              <CardContent className="pt-6"><MonthlyCalendar /></CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

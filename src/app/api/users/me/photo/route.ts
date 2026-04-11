@@ -54,20 +54,17 @@ export async function DELETE() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.dbUserId },
-  });
+  // findUnique 없이 직접 파일 삭제 시도 + DB 업데이트
+  const filename = `${session.user.dbUserId}.webp`;
+  const filepath = path.join(UPLOAD_DIR, filename);
 
-  if (user?.photoUrl) {
-    const filename = `${session.user.dbUserId}.webp`;
-    const filepath = path.join(UPLOAD_DIR, filename);
-    try { await unlink(filepath); } catch {}
-  }
-
-  await prisma.user.update({
-    where: { id: session.user.dbUserId },
-    data: { photoUrl: null },
-  });
+  const [, updated] = await Promise.all([
+    unlink(filepath).catch(() => {}),
+    prisma.user.update({
+      where: { id: session.user.dbUserId },
+      data: { photoUrl: null },
+    }),
+  ]);
 
   return NextResponse.json({ success: true });
 }

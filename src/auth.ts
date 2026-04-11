@@ -38,8 +38,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async signIn({ user, account }) {
       if (account?.provider === "google") {
-        const count = await prisma.user.count({ where: { email: user.email! } });
-        return count > 0;
+        // findUnique + select는 count()보다 효율적 (인덱스 활용, 1행만 반환)
+        const dbUser = await prisma.user.findUnique({
+          where: { email: user.email! },
+          select: { id: true },
+        });
+        return !!dbUser;
       }
       return true;
     },
