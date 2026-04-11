@@ -9,7 +9,10 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     background_color: "#fef8f1",
     theme_color: "#f59e0b",
-    orientation: "portrait",
+    // "any" lets students/teachers use their phones in portrait and the
+    // /check tablet kiosk rotate freely into landscape. Locking to portrait
+    // here disables rotation app-wide even when the device is sideways.
+    orientation: "any",
     lang: "ko",
     icons: [
       {
