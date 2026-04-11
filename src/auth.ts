@@ -7,6 +7,14 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  session: {
+    strategy: "jwt",
+    maxAge: 60 * 60 * 24 * 60, // 60 days
+    updateAge: 60 * 60 * 24, // rolling refresh once per day
+  },
+  jwt: {
+    maxAge: 60 * 60 * 24 * 60,
+  },
   providers: [
     Google,
     Credentials({
