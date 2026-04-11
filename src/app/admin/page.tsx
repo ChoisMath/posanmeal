@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw } from "lucide-react";
 import { AdminMealTable } from "@/components/AdminMealTable";
 
 interface User {
@@ -40,6 +40,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [mealsRefreshKey, setMealsRefreshKey] = useState(0);
 
   // Add dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -210,7 +211,13 @@ export default function AdminPage() {
         </div>
       </header>
       <div className="max-w-5xl mx-auto p-4 md:p-6 page-enter">
-        <Tabs defaultValue="users">
+        <Tabs
+          defaultValue="users"
+          onValueChange={(v) => {
+            if (v === "dashboard") fetchDashboard();
+            if (v === "meals") setMealsRefreshKey((k) => k + 1);
+          }}
+        >
           <TabsList className="grid w-full grid-cols-3 rounded-xl h-11 max-w-lg">
             <TabsTrigger value="users" className="rounded-lg">사용자 관리</TabsTrigger>
             <TabsTrigger value="meals" className="rounded-lg">석식 확인</TabsTrigger>
@@ -268,7 +275,7 @@ export default function AdminPage() {
           <TabsContent value="meals">
             <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6">
-                <AdminMealTable />
+                <AdminMealTable refreshKey={mealsRefreshKey} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -278,7 +285,12 @@ export default function AdminPage() {
               <CardContent className="pt-6">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-semibold">오늘의 석식 현황</h3>
-                  <Button variant="outline" size="sm" onClick={handleExport}><Download className="h-4 w-4 mr-1" /> Excel 다운로드</Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="icon" onClick={fetchDashboard} aria-label="새로고침" title="새로고침">
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handleExport}><Download className="h-4 w-4 mr-1" /> Excel 다운로드</Button>
+                  </div>
                 </div>
                 {dashboard && (
                   <>

@@ -26,7 +26,7 @@ interface UserRecord {
 
 type Category = "teacher" | "1" | "2" | "3";
 
-function MealGrid({ category, year, month }: { category: Category; year: number; month: number }) {
+function MealGrid({ category, year, month, refreshKey }: { category: Category; year: number; month: number; refreshKey: number }) {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const isTeacher = category === "teacher";
 
@@ -36,7 +36,7 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
       .then((data) => setUsers(data.users || []));
   }, [year, month, category]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData, refreshKey]);
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -241,7 +241,7 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
   );
 }
 
-export function AdminMealTable() {
+export function AdminMealTable({ refreshKey = 0 }: { refreshKey?: number } = {}) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -292,7 +292,7 @@ export function AdminMealTable() {
                 <Download className="h-4 w-4 mr-1" /> Excel
               </Button>
             </div>
-            <MealGrid category={cat} year={year} month={month} />
+            <MealGrid category={cat} year={year} month={month} refreshKey={refreshKey} />
           </TabsContent>
         ))}
       </Tabs>
