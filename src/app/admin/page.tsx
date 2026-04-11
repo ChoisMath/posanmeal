@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw } from "lucide-react";
 import { AdminMealTable } from "@/components/AdminMealTable";
@@ -204,7 +205,7 @@ export default function AdminPage() {
   return (
     <div className="min-h-screen bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between">
-        <h1 className="font-bold text-base tracking-tight">PosanDinner Admin</h1>
+        <BrandMark variant="header" label="PosanDinner Admin" />
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-4 w-4" /></Button>

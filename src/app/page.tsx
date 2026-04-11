@@ -4,6 +4,7 @@ import Link from "next/link";
 import { QrCode, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { BrandMark } from "@/components/BrandMark";
 
 export default async function HomePage() {
   const session = await auth();
@@ -17,6 +18,7 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col">
+      <BrandMark variant="floating" label="포산밀" />
       <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
       </div>

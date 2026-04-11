@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { BrandMark } from "@/components/BrandMark";
 import { ShieldCheck } from "lucide-react";
 
 export default function AdminLoginPage() {
@@ -38,6 +39,7 @@ export default function AdminLoginPage() {
 
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col items-center justify-center px-6">
+      <BrandMark variant="floating" label="포산밀" />
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>

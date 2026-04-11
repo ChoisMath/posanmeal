@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -64,7 +65,7 @@ export default function TeacherPage() {
   return (
     <div className="min-h-screen bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between">
-        <h1 className="font-bold text-base tracking-tight">PosanDinner</h1>
+        <BrandMark variant="header" label="PosanDinner" />
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}>
