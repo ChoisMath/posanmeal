@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { QRScanner } from "@/components/QRScanner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -150,6 +152,14 @@ export default function CheckPage() {
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${bgClass}`}>
+      <Link
+        href="/"
+        className="absolute top-4 left-4 z-10 inline-flex items-center gap-1.5 rounded-full bg-black/40 hover:bg-black/55 text-white backdrop-blur-sm px-3 py-1.5 text-sm font-medium transition-colors"
+        aria-label="홈으로 돌아가기"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        홈으로
+      </Link>
       <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
       </div>
