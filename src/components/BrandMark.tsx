@@ -58,12 +58,13 @@ export function BrandMark({
       className={[wrapperByVariant[variant], className].filter(Boolean).join(" ")}
     >
       <span className={badgeByVariant[variant]}>
-        {/* meal.ico is a 256x256 Windows icon; Next/Image doesn't handle ICO,
-            so we use a plain img. The alt is empty because the adjacent label
-            (or the Link's aria-label) already names the element. */}
+        {/* 256x256 transparent PNG derived from meal.png (meal.ico renders
+            inconsistently across browsers). Plain <img> because Next/Image
+            brings layout constraints that fight the badge wrapper.
+            alt is empty — the Link's aria-label already names the element. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/meal.ico"
+          src="/meal.png"
           alt=""
           width={28}
           height={28}
