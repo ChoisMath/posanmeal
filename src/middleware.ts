@@ -52,5 +52,23 @@ export default auth((req) => {
 export const runtime = "nodejs";
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  /*
+   * Match every request path EXCEPT:
+   *  - Next.js internals: `/_next/*`
+   *  - Any path with a file extension (contains a `.`)
+   *
+   * The file-extension rule keeps the middleware from intercepting every
+   * public asset and every app-router file-convention icon for unauthenticated
+   * visitors. It covers:
+   *   /favicon.ico, /apple-icon.png, /opengraph-image.png, /twitter-image.png,
+   *   /manifest.webmanifest, /meal.png, /meal.ico, /icon-192.png,
+   *   /icon-512.png, /icon-maskable-512.png, /file.svg, /globe.svg,
+   *   /next.svg, /vercel.svg, /window.svg, etc.
+   *
+   * Without this, unauthenticated hits on / or /check got 302'd to the login
+   * page for /meal.png and /manifest.webmanifest, which broke the top-left
+   * logo on public pages and blocked PWA installability (the browser received
+   * HTML instead of the manifest JSON).
+   */
+  matcher: ["/((?!_next/|.*\\..*).*)"],
 };
