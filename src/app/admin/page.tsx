@@ -152,8 +152,10 @@ export default function AdminPage() {
 
       messages.push(`다운로드: 사용자 ${data.users.length}명, 석식기간 ${data.mealPeriods.length}건`);
       setSyncStatus(`동기화 완료 — ${messages.join(" | ")}`);
-    } catch {
-      setSyncStatus("동기화 중 오류가 발생했습니다.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Admin sync error:", err);
+      setSyncStatus(`동기화 오류: ${msg}`);
     }
     setIsSyncing(false);
   }

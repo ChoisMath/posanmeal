@@ -160,8 +160,13 @@ export default function CheckPage() {
           const ids = unsynced.map((ci) => ci.id!);
           await markCheckInsSynced(ids);
           setSyncMessage(`업로드: ${upData.accepted}건 전송, ${upData.duplicates}건 중복`);
+        } else if (upRes.status === 403) {
+          setSyncMessage("업로드 실패: 관리자 로그인이 필요합니다. /admin/login에서 먼저 로그인하세요.");
+          setSyncing(false);
+          return;
         } else {
-          setSyncMessage("업로드 실패. 다음에 다시 시도합니다.");
+          const errData = await upRes.json().catch(() => ({}));
+          setSyncMessage(`업로드 실패 (${upRes.status}): ${errData.error || "알 수 없는 오류"}`);
           setSyncing(false);
           return;
         }
@@ -204,8 +209,10 @@ export default function CheckPage() {
           (prev ? prev + " | " : "") + "다운로드 실패"
         );
       }
-    } catch {
-      setSyncMessage("동기화 중 오류가 발생했습니다.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Sync error:", err);
+      setSyncMessage(`동기화 오류: ${msg}`);
     }
 
     await getUnsyncedCount().then(setUnsyncedCount);
