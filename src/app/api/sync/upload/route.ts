@@ -40,10 +40,19 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Check meal period for students
+      // Check meal registration for students
       if (user.role === "STUDENT") {
-        const mp = await prisma.mealPeriod.findUnique({ where: { userId: ci.userId } });
-        if (!mp || dateObj < mp.startDate || dateObj > mp.endDate) {
+        const activeReg = await prisma.mealRegistration.findFirst({
+          where: {
+            userId: ci.userId,
+            status: "APPROVED",
+            application: {
+              mealStart: { not: null, lte: dateObj },
+              mealEnd: { not: null, gte: dateObj },
+            },
+          },
+        });
+        if (!activeReg) {
           rejected.push({ userId: ci.userId, date: ci.date, reason: "NO_MEAL_PERIOD" });
           continue;
         }

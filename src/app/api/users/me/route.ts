@@ -15,7 +15,17 @@ export async function GET() {
       grade: true, classNum: true, number: true,
       subject: true, homeroom: true, position: true,
       photoUrl: true,
-      mealPeriod: { select: { startDate: true, endDate: true } },
+      registrations: {
+        where: { status: "APPROVED" },
+        select: {
+          id: true,
+          createdAt: true,
+          application: {
+            select: { id: true, title: true, type: true, mealStart: true, mealEnd: true },
+          },
+        },
+        orderBy: { createdAt: "desc" as const },
+      },
     },
   });
 

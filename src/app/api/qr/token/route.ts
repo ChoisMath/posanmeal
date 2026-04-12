@@ -22,24 +22,23 @@ export async function GET(request: Request) {
   });
   const isLocal = modeSetting?.value === "local";
 
-  // For students, check meal period (both modes)
+  // For students, check meal registration (both modes)
   if (role === "STUDENT") {
-    const today = todayKST();
-    const mealPeriod = await prisma.mealPeriod.findUnique({
-      where: { userId },
+    const today = new Date(todayKST());
+    const activeReg = await prisma.mealRegistration.findFirst({
+      where: {
+        userId,
+        status: "APPROVED",
+        application: {
+          mealStart: { not: null, lte: today },
+          mealEnd: { not: null, gte: today },
+        },
+      },
     });
 
-    if (!mealPeriod) {
+    if (!activeReg) {
       return NextResponse.json(
-        { error: "석식 신청 기간이 없습니다." },
-        { status: 400 }
-      );
-    }
-
-    const todayDate = new Date(today);
-    if (todayDate < mealPeriod.startDate || todayDate > mealPeriod.endDate) {
-      return NextResponse.json(
-        { error: "현재 석식 신청 기간이 아닙니다." },
+        { error: "현재 석식 신청 기간이 없습니다." },
         { status: 400 }
       );
     }

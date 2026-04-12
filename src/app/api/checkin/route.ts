@@ -27,11 +27,20 @@ export async function POST(request: Request) {
     const today = todayKST();
     const todayDate = new Date(today);
 
-    // Parallel queries: mealPeriod + existing checkIn + user info
-    const [mealPeriod, existing, user] = await Promise.all([
+    // Parallel queries: mealRegistration + existing checkIn + user info
+    const [activeReg, existing, user] = await Promise.all([
       payload.role === "STUDENT"
-        ? prisma.mealPeriod.findUnique({ where: { userId: payload.userId } })
-        : null,
+        ? prisma.mealRegistration.findFirst({
+            where: {
+              userId: payload.userId,
+              status: "APPROVED",
+              application: {
+                mealStart: { not: null, lte: todayDate },
+                mealEnd: { not: null, gte: todayDate },
+              },
+            },
+          })
+        : Promise.resolve(null),
       prisma.checkIn.findUnique({
         where: { userId_date: { userId: payload.userId, date: todayDate } },
       }),
@@ -48,20 +57,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Student meal period validation
-    if (payload.role === "STUDENT") {
-      if (!mealPeriod) {
-        return NextResponse.json(
-          { success: false, error: "석식 신청 기간이 없습니다." },
-          { status: 400 }
-        );
-      }
-      if (todayDate < mealPeriod.startDate || todayDate > mealPeriod.endDate) {
-        return NextResponse.json(
-          { success: false, error: "석식 신청 기간이 아닙니다." },
-          { status: 400 }
-        );
-      }
+    // Student meal registration validation
+    if (payload.role === "STUDENT" && !activeReg) {
+      return NextResponse.json(
+        { success: false, error: "석식 신청 기간이 아닙니다.", errorCode: "NO_MEAL_PERIOD" },
+        { status: 400 }
+      );
     }
 
     if (existing) {
