@@ -200,6 +200,15 @@
   color: oklch(0.93 0.01 70);
 }
 
+/* Hide scrollbar but keep scroll */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Smooth page transitions */
 .page-enter {
   animation: pageEnter 0.3s ease-out;

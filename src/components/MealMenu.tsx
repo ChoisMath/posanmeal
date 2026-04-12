@@ -187,14 +187,14 @@ function MealCard({ meal }: { meal: Meal }) {
           <p className="text-sm text-muted-foreground">메뉴 정보가 없습니다</p>
         ) : (
           meal.dishes.map((dish, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm">
-              <span className="flex-1">{dish.name}</span>
+            <div key={i} className="flex items-center gap-2 text-sm min-w-0">
+              <span className="whitespace-nowrap shrink-0">{dish.name}</span>
               {dish.allergies.length > 0 && (
-                <div className="flex flex-wrap gap-1 shrink-0">
+                <div className="flex gap-1 overflow-x-auto min-w-0 scrollbar-hide">
                   {dish.allergies.map((code) => (
                     <span
                       key={code}
-                      className="inline-block px-1.5 py-0.5 text-[10px] rounded-full bg-muted text-muted-foreground leading-none"
+                      className="inline-block px-1.5 py-0.5 text-[10px] rounded-full bg-muted text-muted-foreground leading-none whitespace-nowrap shrink-0"
                       title={ALLERGY_MAP[code] || code}
                     >
                       {ALLERGY_MAP[code] || code}
