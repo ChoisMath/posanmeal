@@ -11,6 +11,7 @@ import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { LogOut } from "lucide-react";
+import { MealMenu } from "@/components/MealMenu";
 
 interface UserProfile {
   id: number;
@@ -51,12 +52,20 @@ export default function StudentPage() {
       </header>
 
       <div className="max-w-md mx-auto p-4 page-enter">
-        <Tabs defaultValue="qr">
-          <TabsList className="grid w-full grid-cols-3 rounded-xl h-11">
-            <TabsTrigger value="qr" className="rounded-lg">QR</TabsTrigger>
-            <TabsTrigger value="profile" className="rounded-lg">개인정보</TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg">확인</TabsTrigger>
+        <Tabs defaultValue="meal">
+          <TabsList className="grid w-full grid-cols-4 rounded-xl h-11">
+            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm">식단</TabsTrigger>
+            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm">QR</TabsTrigger>
+            <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm">개인정보</TabsTrigger>
+            <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm">확인</TabsTrigger>
           </TabsList>
+          <TabsContent value="meal">
+            <Card className="card-elevated rounded-2xl border-0">
+              <CardContent className="pt-6">
+                <MealMenu />
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="qr">
             <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 text-center">
