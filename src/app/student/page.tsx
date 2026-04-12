@@ -29,7 +29,11 @@ interface UserProfile {
   classNum: number;
   number: number;
   photoUrl: string | null;
-  mealPeriod?: { startDate: string; endDate: string };
+  registrations?: Array<{
+    id: number;
+    createdAt: string;
+    application: { id: number; title: string; type: string; mealStart: string | null; mealEnd: string | null };
+  }>;
 }
 
 interface MealApplicationItem {
@@ -106,7 +110,12 @@ export default function StudentPage() {
       </div>
     );
 
-  const hasMealPeriod = !!user.mealPeriod;
+  const activeRegistrations = (user.registrations || []).filter((r) => {
+    if (!r.application.mealStart || !r.application.mealEnd) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return today >= r.application.mealStart.slice(0, 10) && today <= r.application.mealEnd.slice(0, 10);
+  });
+  const hasMealPeriod = activeRegistrations.length > 0;
   const hasApplicationTab = applications.length > 0;
   const pendingCount = applications.filter(
     (a) => a.registrations.length === 0
@@ -325,16 +334,11 @@ export default function StudentPage() {
                       {user.grade}학년 {user.classNum}반 {user.number}번{" "}
                       {user.name}
                     </p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      석식 신청 기간:{" "}
-                      {new Date(
-                        user.mealPeriod!.startDate
-                      ).toLocaleDateString("ko-KR")}{" "}
-                      ~{" "}
-                      {new Date(
-                        user.mealPeriod!.endDate
-                      ).toLocaleDateString("ko-KR")}
-                    </p>
+                    {activeRegistrations.map((r) => (
+                      <p key={r.id} className="text-xs text-muted-foreground whitespace-nowrap">
+                        {r.application.title}: {new Date(r.application.mealStart!).toLocaleDateString("ko-KR")} ~ {new Date(r.application.mealEnd!).toLocaleDateString("ko-KR")}
+                      </p>
+                    ))}
                   </>
                 ) : (
                   <p className="text-muted-foreground py-8">
