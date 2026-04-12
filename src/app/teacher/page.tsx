@@ -15,6 +15,8 @@ import { PhotoUpload } from "@/components/PhotoUpload";
 import { StudentTable } from "@/components/StudentTable";
 import { LogOut } from "lucide-react";
 import { MealMenu } from "@/components/MealMenu";
+import { PageLoadingSkeleton } from "@/components/PageSkeleton";
+import { useUser } from "@/hooks/useUser";
 
 interface TeacherProfile {
   id: number;
@@ -27,24 +29,21 @@ interface TeacherProfile {
 }
 
 export default function TeacherPage() {
-  const [user, setUser] = useState<TeacherProfile | null>(null);
+  const { user, mutate: mutateUser } = useUser();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: "", subject: "", homeroom: "", position: "" });
   const [qrType, setQrType] = useState<"PERSONAL" | "WORK">("PERSONAL");
 
   useEffect(() => {
-    fetch("/api/users/me").then((res) => res.json()).then((data) => {
-      setUser(data.user);
-      if (data.user) {
-        setForm({
-          name: data.user.name || "",
-          subject: data.user.subject || "",
-          homeroom: data.user.homeroom || "",
-          position: data.user.position || "",
-        });
-      }
-    });
-  }, []);
+    if (user) {
+      setForm({
+        name: user.name || "",
+        subject: user.subject || "",
+        homeroom: user.homeroom || "",
+        position: user.position || "",
+      });
+    }
+  }, [user]);
 
   async function handleSave() {
     const res = await fetch("/api/users/me", {
@@ -53,14 +52,10 @@ export default function TeacherPage() {
       body: JSON.stringify(form),
     });
     const data = await res.json();
-    if (res.ok) { setUser(data.user); setEditing(false); }
+    if (res.ok) { mutateUser(); setEditing(false); }
   }
 
-  if (!user) return (
-    <div className="min-h-screen flex items-center justify-center bg-warm-subtle">
-      <div className="animate-pulse text-muted-foreground">로딩 중...</div>
-    </div>
-  );
+  if (!user) return <PageLoadingSkeleton />;
 
   const isHomeroom = !!user.homeroom;
 
@@ -156,7 +151,7 @@ export default function TeacherPage() {
           <TabsContent value="profile">
             <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 space-y-4">
-                <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={(url) => setUser({ ...user, photoUrl: url })} />
+                <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={() => mutateUser()} />
                 {editing ? (
                   <div className="space-y-3">
                     <div><Label>이름</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-xl" /></div>

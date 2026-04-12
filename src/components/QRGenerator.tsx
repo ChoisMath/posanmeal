@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import useSWR from "swr";
+import { fetcher } from "@/lib/fetcher";
 import QRCode from "qrcode";
 
 interface QRGeneratorProps {
@@ -10,7 +12,6 @@ interface QRGeneratorProps {
 export function QRGenerator({ type }: QRGeneratorProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [timeLeft, setTimeLeft] = useState<number>(0);
-  const [error, setError] = useState<string>("");
   const [mode, setMode] = useState<"online" | "local">("online");
 
   const generateQRImage = useCallback(async (data: string) => {
@@ -20,31 +21,33 @@ export function QRGenerator({ type }: QRGeneratorProps) {
       color: { dark: "#000000", light: "#ffffff" },
     });
     setQrDataUrl(dataUrl);
-  }, []);
+    try { localStorage.setItem(`posanmeal-qr-${type}`, dataUrl); } catch {}
+  }, [type]);
 
-  const fetchToken = useCallback(async () => {
+  // Load cached QR immediately for instant display
+  useEffect(() => {
     try {
-      const res = await fetch(`/api/qr/token?type=${type}`);
-      const data = await res.json();
+      const cached = localStorage.getItem(`posanmeal-qr-${type}`);
+      if (cached) setQrDataUrl(cached);
+    } catch {}
+  }, [type]);
 
-      if (!res.ok) {
-        setError(data.error || "QR 코드를 생성할 수 없습니다.");
-        setQrDataUrl("");
-        return;
-      }
-
-      setError("");
-      setMode(data.mode || "online");
-      await generateQRImage(data.token);
-      setTimeLeft(data.expiresIn);
-    } catch {
-      setError("QR 코드 생성 중 오류가 발생했습니다.");
+  const { data: tokenData, error: tokenError, mutate: refreshToken } = useSWR(
+    `/api/qr/token?type=${type}`,
+    fetcher,
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 5000,
     }
-  }, [type, generateQRImage]);
+  );
 
   useEffect(() => {
-    fetchToken();
-  }, [fetchToken]);
+    if (tokenData?.token) {
+      generateQRImage(tokenData.token);
+      setTimeLeft(tokenData.expiresIn || 0);
+      setMode(tokenData.mode || "online");
+    }
+  }, [tokenData, generateQRImage]);
 
   // Timer: only for online mode (local mode has expiresIn=0)
   useEffect(() => {
@@ -53,26 +56,27 @@ export function QRGenerator({ type }: QRGeneratorProps) {
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
-          fetchToken();
+          refreshToken();
           return 0;
         }
         if (prev === 30) {
-          fetchToken();
+          refreshToken();
         }
         return prev - 1;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [timeLeft, fetchToken]);
+  }, [timeLeft, refreshToken]);
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
 
-  if (error) {
+  if (tokenError) {
+    const errorMessage = (tokenError as any)?.info?.error || "QR 코드를 생성할 수 없습니다.";
     return (
       <div className="flex flex-col items-center justify-center p-8">
-        <p className="text-muted-foreground text-center">{error}</p>
+        <p className="text-muted-foreground text-center">{errorMessage}</p>
       </div>
     );
   }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useTeacherStudents } from "@/hooks/useTeacherStudents";
 
 interface Student {
   id: number;
@@ -16,19 +17,7 @@ export function StudentTable() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [grade, setGrade] = useState(0);
-  const [classNum, setClassNum] = useState(0);
-
-  useEffect(() => {
-    fetch(`/api/teacher/students?year=${year}&month=${month}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setStudents(data.students || []);
-        setGrade(data.grade || 0);
-        setClassNum(data.classNum || 0);
-      });
-  }, [year, month]);
+  const { students, grade = 0, classNum = 0, error } = useTeacherStudents(year, month);
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(year - 1); }
@@ -53,6 +42,14 @@ export function StudentTable() {
   }, [year, month, daysInMonth]);
 
   const isWeekend = (day: number) => weekendSet.has(day);
+
+  if (error) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-muted-foreground text-sm mb-2">데이터를 불러올 수 없습니다.</p>
+      </div>
+    );
+  }
 
   // 일자별 합계 계산 (memoized)
   const { dailyTotals, grandTotal } = useMemo(() => {

@@ -2,25 +2,32 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const applications = await prisma.mealApplication.findMany({
-    include: {
-      _count: {
-        select: {
-          registrations: { where: { status: "APPROVED" } },
+  const [applications, cancelledCounts] = await Promise.all([
+    prisma.mealApplication.findMany({
+      include: {
+        _count: {
+          select: {
+            registrations: { where: { status: "APPROVED" } },
+          },
         },
       },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.mealRegistration.groupBy({
+      by: ["applicationId"],
+      where: { status: "CANCELLED" },
+      _count: true,
+    }),
+  ]);
 
-  const appsWithCounts = await Promise.all(
-    applications.map(async (app) => {
-      const cancelledCount = await prisma.mealRegistration.count({
-        where: { applicationId: app.id, status: "CANCELLED" },
-      });
-      return { ...app, cancelledCount };
-    })
+  const cancelledMap = new Map(
+    cancelledCounts.map((c) => [c.applicationId, c._count])
   );
+
+  const appsWithCounts = applications.map((app) => ({
+    ...app,
+    cancelledCount: cancelledMap.get(app.id) || 0,
+  }));
 
   return NextResponse.json({ applications: appsWithCounts });
 }

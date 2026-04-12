@@ -33,18 +33,18 @@ export async function POST(
     return NextResponse.json({ error: "시트를 찾을 수 없습니다." }, { status: 400 });
   }
 
-  // 기존 등록된 학생 ID Set
-  const existingRegs = await prisma.mealRegistration.findMany({
-    where: { applicationId, status: "APPROVED" },
-    select: { userId: true },
-  });
+  // 기존 등록된 학생 ID Set + 전체 학생 목록 병렬 조회
+  const [existingRegs, allStudents] = await Promise.all([
+    prisma.mealRegistration.findMany({
+      where: { applicationId, status: "APPROVED" },
+      select: { userId: true },
+    }),
+    prisma.user.findMany({
+      where: { role: "STUDENT" },
+      select: { id: true, grade: true, classNum: true, number: true, name: true },
+    }),
+  ]);
   const existingUserIds = new Set(existingRegs.map((r) => r.userId));
-
-  // 전체 학생 목록 (학년+반+번호로 매칭)
-  const allStudents = await prisma.user.findMany({
-    where: { role: "STUDENT" },
-    select: { id: true, grade: true, classNum: true, number: true, name: true },
-  });
 
   // 학년-반-번호 → userId 맵
   const studentMap = new Map<string, number>();

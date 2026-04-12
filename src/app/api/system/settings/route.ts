@@ -1,17 +1,14 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCachedSettings, invalidateSettingsCache } from "@/lib/settings-cache";
 
 export async function GET() {
-  const settings = await prisma.systemSetting.findMany();
-  const result: Record<string, string> = {};
-  for (const s of settings) {
-    result[s.key] = s.value;
-  }
+  const settings = await getCachedSettings();
   return NextResponse.json(
     {
-      operationMode: result.operationMode || "online",
-      qrGeneration: parseInt(result.qrGeneration || "1", 10),
+      operationMode: settings.operationMode,
+      qrGeneration: parseInt(settings.qrGeneration, 10),
     },
     {
       headers: {
@@ -41,24 +38,20 @@ export async function PUT(request: Request) {
   }
 
   if (body.refreshQR) {
-    const current = await prisma.systemSetting.findUnique({
-      where: { key: "qrGeneration" },
-    });
-    const next = (parseInt(current?.value || "1", 10) + 1).toString();
-    await prisma.systemSetting.upsert({
-      where: { key: "qrGeneration" },
-      update: { value: next },
-      create: { key: "qrGeneration", value: next },
-    });
+    await prisma.$executeRaw`
+      INSERT INTO "SystemSetting" (key, value, "updatedAt")
+      VALUES ('qrGeneration', '2', NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET value = (CAST("SystemSetting".value AS INTEGER) + 1)::TEXT,
+          "updatedAt" = NOW()
+    `;
   }
 
-  const settings = await prisma.systemSetting.findMany();
-  const result: Record<string, string> = {};
-  for (const s of settings) {
-    result[s.key] = s.value;
-  }
+  invalidateSettingsCache();
+
+  const settings = await getCachedSettings();
   return NextResponse.json({
-    operationMode: result.operationMode || "online",
-    qrGeneration: parseInt(result.qrGeneration || "1", 10),
+    operationMode: settings.operationMode,
+    qrGeneration: parseInt(settings.qrGeneration, 10),
   });
 }

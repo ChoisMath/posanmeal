@@ -1,5 +1,5 @@
-const CACHE_VERSION = "posanmeal-v3";
-const PRECACHE_URLS = ["/check"];
+const CACHE_VERSION = "posanmeal-v4";
+const PRECACHE_URLS = ["/check", "/student", "/teacher"];
 
 // Install: cache the /check page shell
 self.addEventListener("install", (event) => {

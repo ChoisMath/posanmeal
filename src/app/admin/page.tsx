@@ -68,7 +68,6 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [mealsRefreshKey, setMealsRefreshKey] = useState(0);
 
   // Add dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -488,7 +487,6 @@ export default function AdminPage() {
           className="flex flex-col flex-1 min-h-0"
           onValueChange={(v) => {
             if (v === "dashboard") fetchDashboard();
-            if (v === "meals") setMealsRefreshKey((k) => k + 1);
             if (v === "applications") fetchApps();
           }}
         >
@@ -639,7 +637,7 @@ export default function AdminPage() {
           <TabsContent value="meals" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
-                <AdminMealTable refreshKey={mealsRefreshKey} />
+                <AdminMealTable />
               </CardContent>
             </Card>
           </TabsContent>

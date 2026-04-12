@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
+import useSWR from "swr";
+import { fetcher } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,17 +27,14 @@ interface UserRecord {
 
 type Category = "teacher" | "1" | "2" | "3";
 
-function MealGrid({ category, year, month, refreshKey }: { category: Category; year: number; month: number; refreshKey: number }) {
-  const [users, setUsers] = useState<UserRecord[]>([]);
+function MealGrid({ category, year, month }: { category: Category; year: number; month: number }) {
+  const { data, mutate: mutateGrid } = useSWR(
+    `/api/admin/checkins?year=${year}&month=${month}&category=${category}`,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const users: UserRecord[] = data?.users ?? [];
   const isTeacher = category === "teacher";
-
-  const fetchData = useCallback(() => {
-    fetch(`/api/admin/checkins?year=${year}&month=${month}&category=${category}`)
-      .then((res) => res.json())
-      .then((data) => setUsers(data.users || []));
-  }, [year, month, category]);
-
-  useEffect(() => { fetchData(); }, [fetchData, refreshKey]);
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -80,19 +79,7 @@ function MealGrid({ category, year, month, refreshKey }: { category: Category; y
       body: JSON.stringify({ id: checkIn.id, type: newType }),
     });
     if (res.ok) {
-      // 로컬 state 즉시 업데이트 (리페치 없이)
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                checkIns: u.checkIns.map((c) =>
-                  c.id === checkIn.id ? { ...c, type: newType } : c
-                ),
-              }
-            : u
-        )
-      );
+      mutateGrid();
     }
   }
 
@@ -237,7 +224,7 @@ function MealGrid({ category, year, month, refreshKey }: { category: Category; y
   );
 }
 
-export function AdminMealTable({ refreshKey = 0 }: { refreshKey?: number } = {}) {
+export function AdminMealTable() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -288,7 +275,7 @@ export function AdminMealTable({ refreshKey = 0 }: { refreshKey?: number } = {})
                 <Download className="h-4 w-4 mr-1" /> Excel
               </Button>
             </div>
-            <MealGrid category={cat} year={year} month={month} refreshKey={refreshKey} />
+            <MealGrid category={cat} year={year} month={month} />
           </TabsContent>
         ))}
       </Tabs>

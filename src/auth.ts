@@ -47,25 +47,21 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async signIn({ user, account }) {
       if (account?.provider === "google") {
-        // findUnique + select는 count()보다 효율적 (인덱스 활용, 1행만 반환)
         const dbUser = await prisma.user.findUnique({
           where: { email: user.email! },
-          select: { id: true },
+          select: { id: true, role: true },
         });
-        return !!dbUser;
+        if (!dbUser) return false;
+        (user as any).dbUserId = dbUser.id;
+        (user as any).dbRole = dbUser.role;
+        return true;
       }
       return true;
     },
     async jwt({ token, user, account }) {
-      if (account?.provider === "google" && user?.email) {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: user.email },
-          select: { id: true, role: true },
-        });
-        if (dbUser) {
-          token.dbUserId = dbUser.id;
-          token.role = dbUser.role;
-        }
+      if (account?.provider === "google" && user) {
+        token.dbUserId = (user as any).dbUserId;
+        token.role = (user as any).dbRole;
       }
       if (account?.provider === "admin-login") {
         token.role = "ADMIN";

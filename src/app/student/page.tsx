@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { signOut } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,7 +19,10 @@ import { PhotoUpload } from "@/components/PhotoUpload";
 import { SignaturePad } from "@/components/SignaturePad";
 import { LogOut } from "lucide-react";
 import { MealMenu } from "@/components/MealMenu";
+import { PageLoadingSkeleton } from "@/components/PageSkeleton";
 import { toast } from "sonner";
+import { useUser } from "@/hooks/useUser";
+import { useApplications } from "@/hooks/useApplications";
 
 interface UserProfile {
   id: number;
@@ -73,8 +76,8 @@ function typeBadge(type: string) {
 }
 
 export default function StudentPage() {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [applications, setApplications] = useState<MealApplicationItem[]>([]);
+  const { user, mutate: mutateUser } = useUser();
+  const { applications, mutate: mutateApps } = useApplications();
   const [signDialogOpen, setSignDialogOpen] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [selectedApp, setSelectedApp] = useState<MealApplicationItem | null>(
@@ -82,33 +85,7 @@ export default function StudentPage() {
   );
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchApplications = async () => {
-    try {
-      const res = await fetch("/api/applications");
-      if (res.ok) {
-        const data = await res.json();
-        setApplications(data.applications ?? []);
-      }
-    } catch {
-      // silently ignore
-    }
-  };
-
-  useEffect(() => {
-    fetch("/api/users/me")
-      .then((res) => res.json())
-      .then((data) => {
-        setUser(data.user);
-        fetchApplications();
-      });
-  }, []);
-
-  if (!user)
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-warm-subtle">
-        <div className="animate-pulse text-muted-foreground">로딩 중...</div>
-      </div>
-    );
+  if (!user) return <PageLoadingSkeleton />;
 
   const activeRegistrations = (user.registrations || []).filter((r) => {
     if (!r.application.mealStart || !r.application.mealEnd) return false;
@@ -138,7 +115,8 @@ export default function StudentPage() {
         setSignDialogOpen(false);
         setSignatureData(null);
         setSelectedApp(null);
-        await fetchApplications();
+        mutateUser();
+        mutateApps();
       } else {
         const data = await res.json().catch(() => null);
         toast.error(data?.error ?? "신청에 실패했습니다.");
@@ -158,7 +136,8 @@ export default function StudentPage() {
       });
       if (res.ok) {
         toast.success("신청이 취소되었습니다.");
-        await fetchApplications();
+        mutateUser();
+        mutateApps();
       } else {
         const data = await res.json().catch(() => null);
         toast.error(data?.error ?? "취소에 실패했습니다.");
@@ -354,7 +333,7 @@ export default function StudentPage() {
               <CardContent className="pt-6 space-y-4">
                 <PhotoUpload
                   currentPhotoUrl={user.photoUrl}
-                  onPhotoChange={(url) => setUser({ ...user, photoUrl: url })}
+                  onPhotoChange={() => mutateUser()}
                 />
                 <div className="space-y-1">
                   {[

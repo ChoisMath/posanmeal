@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { signQRToken, getQRExpirySeconds } from "@/lib/qr-token";
+import { getCachedSettings } from "@/lib/settings-cache";
 import { prisma } from "@/lib/prisma";
 import { todayKST } from "@/lib/timezone";
 
@@ -16,11 +17,9 @@ export async function GET(request: Request) {
   const userId = session.user.dbUserId;
   const role = session.user.role as "STUDENT" | "TEACHER";
 
-  // Check operation mode
-  const modeSetting = await prisma.systemSetting.findUnique({
-    where: { key: "operationMode" },
-  });
-  const isLocal = modeSetting?.value === "local";
+  // Check operation mode and qr generation from cache
+  const settings = await getCachedSettings();
+  const isLocal = settings.operationMode === "local";
 
   // For students, check meal registration (both modes)
   if (role === "STUDENT") {
@@ -48,10 +47,7 @@ export async function GET(request: Request) {
 
   // Local mode: return fixed QR string
   if (isLocal) {
-    const genSetting = await prisma.systemSetting.findUnique({
-      where: { key: "qrGeneration" },
-    });
-    const generation = genSetting?.value || "1";
+    const generation = settings.qrGeneration;
     const qrString = `posanmeal:${userId}:${generation}:${validType}`;
 
     return NextResponse.json({

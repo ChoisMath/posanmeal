@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useCheckins } from "@/hooks/useCheckins";
 
 interface CheckInRecord {
   id: number;
@@ -19,13 +20,7 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [checkIns, setCheckIns] = useState<CheckInRecord[]>([]);
-
-  useEffect(() => {
-    fetch(`/api/checkins?year=${year}&month=${month}`)
-      .then((res) => res.json())
-      .then((data) => setCheckIns(data.checkIns || []));
-  }, [year, month]);
+  const { checkIns, error } = useCheckins(year, month);
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(year - 1); }
@@ -56,6 +51,14 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
     const d = new Date(checkedAt);
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
+
+  if (error) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-muted-foreground text-sm mb-2">데이터를 불러올 수 없습니다.</p>
+      </div>
+    );
+  }
 
   return (
     <div>
