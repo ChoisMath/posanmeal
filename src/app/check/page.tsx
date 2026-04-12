@@ -466,7 +466,7 @@ export default function CheckPage() {
             {operationMode === "local" ? "로컬 모드" : "온라인 모드"}
           </span>
         </div>
-        {operationMode === "local" && (
+        {(operationMode === "local" || unsyncedCount > 0) && (
           <span className="text-white/70">미전송: {unsyncedCount}건</span>
         )}
       </div>
@@ -546,8 +546,8 @@ export default function CheckPage() {
         </div>
       </div>
 
-      {/* Sync Footer (local mode only) */}
-      {operationMode === "local" && (
+      {/* Sync Footer */}
+      {(operationMode === "local" || unsyncedCount > 0) && (
         <div className="fixed bottom-0 left-0 right-0 bg-black/80 text-white text-xs px-4 py-2 flex items-center justify-between z-20">
           <div className="flex items-center gap-4">
             <span className="text-white/60">
