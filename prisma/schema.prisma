@@ -40,8 +40,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  mealPeriod MealPeriod?
-  checkIns   CheckIn[]
+  mealPeriod    MealPeriod?
+  checkIns      CheckIn[]
+  registrations MealRegistration[]
 
   @@index([role, grade, classNum, number])
 }
@@ -55,6 +56,47 @@ model MealPeriod {
   updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model MealApplication {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  type        String    // "DINNER" | "BREAKFAST" | "OTHER"
+
+  applyStart  DateTime  @db.Date
+  applyEnd    DateTime  @db.Date
+
+  mealStart   DateTime? @db.Date
+  mealEnd     DateTime? @db.Date
+
+  status      String    @default("OPEN") // "OPEN" | "CLOSED"
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  registrations MealRegistration[]
+
+  @@index([status])
+  @@index([applyStart, applyEnd])
+}
+
+model MealRegistration {
+  id            Int       @id @default(autoincrement())
+  applicationId Int
+  userId        Int
+  signature     String    @db.Text
+  status        String    @default("APPROVED") // "APPROVED" | "CANCELLED"
+  createdAt     DateTime  @default(now())
+  cancelledAt   DateTime?
+  cancelledBy   String?   // "STUDENT" | "ADMIN"
+  addedBy       String?   // null = 학생 본인, "ADMIN" = 관리자 추가
+
+  application   MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, userId])
+  @@index([userId])
+  @@index([applicationId, status])
 }
 
 model CheckIn {
