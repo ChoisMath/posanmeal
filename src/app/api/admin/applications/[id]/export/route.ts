@@ -60,7 +60,7 @@ export async function GET(
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return new NextResponse(buffer as ArrayBuffer, {
+  return new NextResponse(buffer, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="${encodeURIComponent(application.title)}_신청명단.xlsx"`,
