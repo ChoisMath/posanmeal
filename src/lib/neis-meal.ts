@@ -66,8 +66,8 @@ export async function fetchMeals(date: string): Promise<MealResponse> {
 
   const apiKey = process.env.NEIS_API_KEY;
   if (!apiKey) {
-    console.warn("[neis-meal] NEIS_API_KEY is not set");
-    return { success: false, date, meals: [], error: "급식 정보를 불러올 수 없습니다" };
+    console.error("[neis-meal] NEIS_API_KEY is not set. Available env keys:", Object.keys(process.env).filter(k => k.includes("NEIS")).join(", ") || "(none with NEIS)");
+    return { success: false, date, meals: [], error: "API 키가 설정되지 않았습니다" };
   }
 
   try {
@@ -81,12 +81,17 @@ export async function fetchMeals(date: string): Promise<MealResponse> {
       MLSV_YMD: date,
     });
 
-    const res = await fetch(`${NEIS_API_URL}?${params}`, {
+    const url = `${NEIS_API_URL}?${params}`;
+    console.log("[neis-meal] Fetching:", url.replace(apiKey, "***"));
+
+    const res = await fetch(url, {
       signal: AbortSignal.timeout(10_000),
     });
 
     if (!res.ok) {
-      return { success: false, date, meals: [], error: "급식 정보를 불러올 수 없습니다" };
+      const body = await res.text().catch(() => "");
+      console.error("[neis-meal] HTTP error:", res.status, res.statusText, body.slice(0, 200));
+      return { success: false, date, meals: [], error: `NEIS API 오류 (HTTP ${res.status})` };
     }
 
     const data = await res.json();
@@ -119,7 +124,8 @@ export async function fetchMeals(date: string): Promise<MealResponse> {
     cache.set(date, { data: result, fetchedAt: Date.now() });
     return result;
   } catch (err) {
-    console.error("[neis-meal] fetch error:", err);
-    return { success: false, date, meals: [], error: "급식 정보를 불러올 수 없습니다" };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[neis-meal] fetch error:", errMsg);
+    return { success: false, date, meals: [], error: `급식 정보 조회 실패: ${errMsg}` };
   }
 }
