@@ -1,5 +1,5 @@
 const DB_NAME = "posanmeal-local";
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: synced field changed from boolean to number (0/1)
 
 export interface LocalUser {
   id: number;
@@ -22,15 +22,16 @@ export interface LocalCheckIn {
   date: string; // "YYYY-MM-DD"
   checkedAt: string; // ISO string
   type: "STUDENT" | "WORK" | "PERSONAL";
-  synced: boolean;
+  synced: number; // 0 = not synced, 1 = synced (IndexedDB keys don't support booleans)
 }
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const oldVersion = event.oldVersion;
 
       if (!db.objectStoreNames.contains("settings")) {
         db.createObjectStore("settings");
@@ -43,6 +44,11 @@ function openDB(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains("mealPeriods")) {
         db.createObjectStore("mealPeriods", { keyPath: "userId" });
+      }
+
+      // v1→v2: recreate checkins store with number-based synced field
+      if (oldVersion < 2 && db.objectStoreNames.contains("checkins")) {
+        db.deleteObjectStore("checkins");
       }
 
       if (!db.objectStoreNames.contains("checkins")) {
@@ -162,7 +168,7 @@ export async function getUnsyncedCheckIns(): Promise<LocalCheckIn[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readonly");
     const index = tx.objectStore("checkins").index("bySynced");
-    const req = index.getAll(false as unknown as IDBValidKey);
+    const req = index.getAll(0); // 0 = not synced
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -178,7 +184,7 @@ export async function markCheckInsSynced(ids: number[]): Promise<void> {
       getReq.onsuccess = () => {
         const record = getReq.result;
         if (record) {
-          record.synced = true;
+          record.synced = 1;
           store.put(record);
         }
       };
@@ -193,7 +199,7 @@ export async function getUnsyncedCount(): Promise<number> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readonly");
     const index = tx.objectStore("checkins").index("bySynced");
-    const req = index.count(false as unknown as IDBValidKey);
+    const req = index.count(0); // 0 = not synced
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -205,7 +211,7 @@ export async function clearSyncedCheckIns(): Promise<number> {
     const tx = db.transaction("checkins", "readwrite");
     const store = tx.objectStore("checkins");
     const index = store.index("bySynced");
-    const req = index.openCursor(true as unknown as IDBValidKey); // synced === true
+    const req = index.openCursor(1); // 1 = synced
     let count = 0;
     req.onsuccess = () => {
       const cursor = req.result;

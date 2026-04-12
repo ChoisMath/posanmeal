@@ -370,7 +370,7 @@ export default function CheckPage() {
         date: today,
         checkedAt,
         type: parsed.type as "STUDENT" | "WORK" | "PERSONAL",
-        synced: false,
+        synced: 0,
       });
 
       setResult({
