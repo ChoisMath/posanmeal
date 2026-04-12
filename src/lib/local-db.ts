@@ -162,7 +162,7 @@ export async function getUnsyncedCheckIns(): Promise<LocalCheckIn[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readonly");
     const index = tx.objectStore("checkins").index("bySynced");
-    const req = index.getAll(false);
+    const req = index.getAll(false as unknown as IDBValidKey);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -193,7 +193,7 @@ export async function getUnsyncedCount(): Promise<number> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readonly");
     const index = tx.objectStore("checkins").index("bySynced");
-    const req = index.count(false);
+    const req = index.count(false as unknown as IDBValidKey);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -205,7 +205,7 @@ export async function clearSyncedCheckIns(): Promise<number> {
     const tx = db.transaction("checkins", "readwrite");
     const store = tx.objectStore("checkins");
     const index = store.index("bySynced");
-    const req = index.openCursor(true); // synced === true
+    const req = index.openCursor(true as unknown as IDBValidKey); // synced === true
     let count = 0;
     req.onsuccess = () => {
       const cursor = req.result;
