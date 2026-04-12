@@ -509,7 +509,7 @@ export default function AdminPage() {
 
           <TabsContent value="users" className="flex-1 min-h-0 mt-4 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
                     <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
@@ -524,9 +524,9 @@ export default function AdminPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="border rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="sticky top-0 z-10">
+                <div className="border rounded-lg overflow-auto max-h-[70vh]">
+                  <table className="w-full text-sm whitespace-nowrap">
+                    <thead className="sticky top-0 z-20">
                       <tr>
                         <th className="p-2 text-left bg-muted">이름</th>
                         <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
@@ -649,7 +649,7 @@ export default function AdminPage() {
 
           <TabsContent value="dashboard" className="flex-1 min-h-0 mt-4 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-hidden">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-semibold">오늘의 석식 현황</h3>
                   <div className="flex gap-2">
@@ -675,9 +675,9 @@ export default function AdminPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="border rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead className="sticky top-0 z-10">
+                    <div className="border rounded-lg overflow-auto max-h-[50vh]">
+                      <table className="w-full text-sm whitespace-nowrap">
+                        <thead className="sticky top-0 z-20">
                           <tr>
                             <th className="p-2 text-left bg-muted">이름</th>
                             <th className="p-2 text-left bg-muted">구분</th>
@@ -926,9 +926,9 @@ export default function AdminPage() {
               <Button key={label} variant={regGradeFilter === value ? "default" : "outline"} size="sm" onClick={() => setRegGradeFilter(value)}>{label}</Button>
             ))}
           </div>
-          <div className="flex-1 min-h-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 z-10">
+          <div className="flex-1 min-h-0 overflow-auto">
+            <table className="w-full text-sm whitespace-nowrap">
+              <thead className="sticky top-0 z-20">
                 <tr>
                   <th className="p-2 text-left bg-muted whitespace-nowrap">학년</th>
                   <th className="p-2 text-left bg-muted whitespace-nowrap">반</th>
