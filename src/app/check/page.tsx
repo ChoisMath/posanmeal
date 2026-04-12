@@ -461,7 +461,7 @@ export default function CheckPage() {
           </span>
         </div>
         {(operationMode === "local" || unsyncedCount > 0) && (
-          <span className="text-white/70">미전송: {unsyncedCount}건</span>
+          <span className="text-white/70 whitespace-nowrap">미전송: {unsyncedCount}건</span>
         )}
       </div>
 
@@ -492,7 +492,7 @@ export default function CheckPage() {
                 )}
                 <div className="min-w-0">
                   {result.user?.role === "STUDENT" ? (
-                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white">
+                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
                       {result.user.grade}-{result.user.classNum}{" "}
                       {result.user.number}번 {result.user.name}
                     </p>
@@ -544,7 +544,7 @@ export default function CheckPage() {
       {(operationMode === "local" || unsyncedCount > 0) && (
         <div className="fixed bottom-0 left-0 right-0 bg-black/80 text-white text-xs px-4 py-2 flex items-center justify-between z-20">
           <div className="flex items-center gap-4">
-            <span className="text-white/60">
+            <span className="text-white/60 whitespace-nowrap">
               마지막 동기화: {lastSyncAt ? new Date(lastSyncAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "없음"}
             </span>
             {syncMessage && <span className="text-amber-400">{syncMessage}</span>}

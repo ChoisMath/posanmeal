@@ -688,7 +688,7 @@ export default function AdminPage() {
                         <tbody>
                           {sortedRecords.map((r, i) => (
                             <tr key={i} className="border-t">
-                              <td className="p-2">{r.role === "STUDENT" ? `${r.grade}-${r.classNum} ${r.number}번 ${r.userName}` : `${r.userName} 선생님`}</td>
+                              <td className="p-2 whitespace-nowrap">{r.role === "STUDENT" ? `${r.grade}-${r.classNum} ${r.number}번 ${r.userName}` : `${r.userName} 선생님`}</td>
                               <td className="p-2">
                                 <Badge variant="outline" className={`text-xs ${
                                   r.type === "WORK" ? "border-blue-300 text-blue-600 dark:text-blue-400" :

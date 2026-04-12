@@ -330,7 +330,7 @@ export default function StudentPage() {
                 {hasActiveMeal ? (
                   <>
                     <QRGenerator type="STUDENT" />
-                    <p className="mt-4 font-semibold">
+                    <p className="mt-4 font-semibold whitespace-nowrap">
                       {user.grade}학년 {user.classNum}반 {user.number}번{" "}
                       {user.name}
                     </p>
@@ -399,14 +399,14 @@ export default function StudentPage() {
                   <span className="text-muted-foreground">이름:</span>{" "}
                   <span className="font-medium">{user.name}</span>
                 </p>
-                <p>
+                <p className="whitespace-nowrap">
                   <span className="text-muted-foreground">학번:</span>{" "}
                   <span className="font-medium">
                     {user.grade}학년 {user.classNum}반 {user.number}번
                   </span>
                 </p>
                 {selectedApp.mealStart && selectedApp.mealEnd && (
-                  <p>
+                  <p className="whitespace-nowrap">
                     <span className="text-muted-foreground">급식 기간:</span>{" "}
                     <span className="font-medium">
                       {new Date(selectedApp.mealStart).toLocaleDateString(
