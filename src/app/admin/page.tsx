@@ -209,9 +209,9 @@ export default function AdminPage() {
         <BrandMark variant="header" label="PosanMeal Admin" />
         <div className="flex items-center gap-1">
           <ThemeToggle />
-          <Button asChild variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" aria-label="체크인 페이지" title="체크인 페이지">
-            <Link href="/check"><Camera className="h-4 w-4" /></Link>
-          </Button>
+          <Link href="/check" className="inline-flex items-center justify-center h-9 w-9 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors" aria-label="체크인 페이지" title="체크인 페이지">
+            <Camera className="h-4 w-4" />
+          </Link>
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-4 w-4" /></Button>
         </div>
       </header>
