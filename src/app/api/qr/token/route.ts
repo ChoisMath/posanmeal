@@ -16,7 +16,13 @@ export async function GET(request: Request) {
   const userId = session.user.dbUserId;
   const role = session.user.role as "STUDENT" | "TEACHER";
 
-  // For students, check meal period
+  // Check operation mode
+  const modeSetting = await prisma.systemSetting.findUnique({
+    where: { key: "operationMode" },
+  });
+  const isLocal = modeSetting?.value === "local";
+
+  // For students, check meal period (both modes)
   if (role === "STUDENT") {
     const today = todayKST();
     const mealPeriod = await prisma.mealPeriod.findUnique({
@@ -41,6 +47,22 @@ export async function GET(request: Request) {
 
   const validType = role === "STUDENT" ? "STUDENT" : (type as "WORK" | "PERSONAL");
 
+  // Local mode: return fixed QR string
+  if (isLocal) {
+    const genSetting = await prisma.systemSetting.findUnique({
+      where: { key: "qrGeneration" },
+    });
+    const generation = genSetting?.value || "1";
+    const qrString = `posanmeal:${userId}:${generation}:${validType}`;
+
+    return NextResponse.json({
+      token: qrString,
+      expiresIn: 0, // 0 signals "no expiry" to the client
+      mode: "local",
+    });
+  }
+
+  // Online mode: existing JWT behavior
   const token = signQRToken({
     userId,
     role,
@@ -50,5 +72,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     token,
     expiresIn: getQRExpirySeconds(),
+    mode: "online",
   });
 }
