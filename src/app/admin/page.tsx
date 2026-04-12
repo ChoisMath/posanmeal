@@ -98,6 +98,12 @@ export default function AdminPage() {
   const [studentSearch, setStudentSearch] = useState("");
   const [appForm, setAppForm] = useState(emptyAppForm);
 
+  // Excel import/export dialog
+  const [excelDialogOpen, setExcelDialogOpen] = useState(false);
+  const [excelApp, setExcelApp] = useState<MealAppItem | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{ added: number; skippedExisting: number; skippedNotFound: number } | null>(null);
+
   // System settings
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
   const [sysGeneration, setSysGeneration] = useState(1);
@@ -395,14 +401,51 @@ export default function AdminPage() {
     else { const d = await res.json(); toast.error(d.error || "추가 실패"); }
   }
 
-  async function handleExportApp(appId: number, title: string) {
-    const res = await fetch(`/api/admin/applications/${appId}/export`);
+  function openExcelDialog(app: MealAppItem) {
+    setExcelApp(app);
+    setUploadResult(null);
+    setExcelDialogOpen(true);
+  }
+
+  async function handleDownloadExcel(appId: number, title: string, template: boolean) {
+    const url = template
+      ? `/api/admin/applications/${appId}/export?template=true`
+      : `/api/admin/applications/${appId}/export`;
+    const res = await fetch(url);
     if (!res.ok) { toast.error("다운로드 실패"); return; }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url;
-    a.download = `${title}.xlsx`;
-    a.click(); URL.revokeObjectURL(url);
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = blobUrl;
+    a.download = template ? `${title}_양식.xlsx` : `${title}_신청명단.xlsx`;
+    a.click(); URL.revokeObjectURL(blobUrl);
+  }
+
+  async function handleUploadExcel(appId: number, file: File) {
+    setUploading(true);
+    setUploadResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/admin/applications/${appId}/import`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUploadResult(data);
+        toast.success(`${data.added}명 등록 완료`);
+        fetchApps();
+        if (selectedAppForReg && selectedAppForReg.id === appId) {
+          fetchRegistrations(appId);
+        }
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "업로드 실패");
+      }
+    } catch {
+      toast.error("네트워크 오류가 발생했습니다.");
+    }
+    setUploading(false);
   }
 
   // Filtered students for add-student dialog
@@ -538,11 +581,11 @@ export default function AdminPage() {
                               </Badge>
                               <span className="font-medium">{app.title}</span>
                             </div>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">
                               신청: {new Date(app.applyStart).toLocaleDateString("ko-KR")} ~ {new Date(app.applyEnd).toLocaleDateString("ko-KR")}
                             </p>
                             {app.mealStart && app.mealEnd && (
-                              <p className="text-xs text-muted-foreground">
+                              <p className="text-xs text-muted-foreground whitespace-nowrap">
                                 급식: {new Date(app.mealStart).toLocaleDateString("ko-KR")} ~ {new Date(app.mealEnd).toLocaleDateString("ko-KR")}
                               </p>
                             )}
@@ -559,7 +602,7 @@ export default function AdminPage() {
                             }}>
                               <Users className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" title="Excel" onClick={() => handleExportApp(app.id, app.title)}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" title="Excel" onClick={() => openExcelDialog(app)}>
                               <Download className="h-4 w-4" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8" title="수정" onClick={() => {
@@ -871,7 +914,7 @@ export default function AdminPage() {
                   <Plus className="h-4 w-4 mr-1" /> 학생 추가
                 </Button>
                 {selectedAppForReg && (
-                  <Button size="sm" variant="outline" onClick={() => handleExportApp(selectedAppForReg.id, selectedAppForReg.title)}>
+                  <Button size="sm" variant="outline" onClick={() => openExcelDialog(selectedAppForReg)}>
                     <Download className="h-4 w-4 mr-1" /> Excel
                   </Button>
                 )}
@@ -962,6 +1005,57 @@ export default function AdminPage() {
               )}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Excel Import/Export Dialog */}
+      <Dialog open={excelDialogOpen} onOpenChange={(open) => { setExcelDialogOpen(open); if (!open) { setExcelApp(null); setUploadResult(null); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{excelApp?.title} — Excel</DialogTitle>
+          </DialogHeader>
+          {excelApp && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <h4 className="text-sm font-semibold">다운로드</h4>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleDownloadExcel(excelApp.id, excelApp.title, false)}>
+                    <Download className="h-4 w-4 mr-1" /> 신청명단
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleDownloadExcel(excelApp.id, excelApp.title, true)}>
+                    <FileSpreadsheet className="h-4 w-4 mr-1" /> 양식 다운로드
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">양식: 전체 학생 목록 + 신청 여부(O) 포함</p>
+              </div>
+
+              <div className="border-t pt-4 space-y-2">
+                <h4 className="text-sm font-semibold">일괄 업로드</h4>
+                <p className="text-xs text-muted-foreground">양식의 &quot;신청&quot; 열에 O 표시된 학생을 일괄 등록합니다. 기존 신청자는 자동 제외됩니다.</p>
+                <Input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  disabled={uploading}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (file) await handleUploadExcel(excelApp.id, file);
+                    e.target.value = "";
+                  }}
+                />
+                {uploading && <p className="text-sm text-amber-600">업로드 중...</p>}
+                {uploadResult && (
+                  <div className="text-sm space-y-0.5 p-3 bg-muted rounded-lg">
+                    <p className="font-medium">업로드 결과</p>
+                    <p>신규 등록: <span className="font-bold text-green-600">{uploadResult.added}명</span></p>
+                    <p>기존 신청자 (제외): <span className="text-muted-foreground">{uploadResult.skippedExisting}명</span></p>
+                    {uploadResult.skippedNotFound > 0 && (
+                      <p>미등록 학생 (제외): <span className="text-red-500">{uploadResult.skippedNotFound}명</span></p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
