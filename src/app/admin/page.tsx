@@ -108,6 +108,34 @@ export default function AdminPage() {
     setIsSyncing(true);
     setSyncStatus(null);
     try {
+      const { setSetting, replaceAllUsers, replaceAllMealPeriods, getUnsyncedCheckIns, markCheckInsSynced } = await import("@/lib/local-db");
+      const messages: string[] = [];
+
+      // 1. Upload unsynced check-ins first (data loss prevention)
+      const unsynced = await getUnsyncedCheckIns();
+      if (unsynced.length > 0) {
+        const payload = unsynced.map((ci) => ({
+          userId: ci.userId,
+          date: ci.date,
+          checkedAt: ci.checkedAt,
+          type: ci.type,
+        }));
+        const upRes = await fetch("/api/sync/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checkins: payload }),
+        });
+        if (upRes.ok) {
+          const upData = await upRes.json();
+          const ids = unsynced.map((ci) => ci.id!);
+          await markCheckInsSynced(ids);
+          messages.push(`업로드: ${upData.accepted}건 전송, ${upData.duplicates}건 중복`);
+        } else {
+          messages.push("체크인 업로드 실패");
+        }
+      }
+
+      // 2. Download latest data
       const res = await fetch("/api/sync/download");
       if (!res.ok) {
         setSyncStatus("다운로드 실패. 서버 상태를 확인하세요.");
@@ -116,16 +144,14 @@ export default function AdminPage() {
       }
       const data = await res.json();
 
-      // Dynamic import to avoid SSR issues with IndexedDB
-      const { setSetting, replaceAllUsers, replaceAllMealPeriods } = await import("@/lib/local-db");
-
       await setSetting("operationMode", data.operationMode);
       await setSetting("qrGeneration", data.qrGeneration.toString());
       await replaceAllUsers(data.users);
       await replaceAllMealPeriods(data.mealPeriods);
       await setSetting("lastSyncAt", new Date().toISOString());
 
-      setSyncStatus(`동기화 완료 — 사용자 ${data.users.length}명, 석식기간 ${data.mealPeriods.length}건 저장`);
+      messages.push(`다운로드: 사용자 ${data.users.length}명, 석식기간 ${data.mealPeriods.length}건`);
+      setSyncStatus(`동기화 완료 — ${messages.join(" | ")}`);
     } catch {
       setSyncStatus("동기화 중 오류가 발생했습니다.");
     }
