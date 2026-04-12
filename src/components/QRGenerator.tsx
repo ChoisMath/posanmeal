@@ -11,6 +11,16 @@ export function QRGenerator({ type }: QRGeneratorProps) {
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [error, setError] = useState<string>("");
+  const [mode, setMode] = useState<"online" | "local">("online");
+
+  const generateQRImage = useCallback(async (data: string) => {
+    const dataUrl = await QRCode.toDataURL(data, {
+      width: 280,
+      margin: 2,
+      color: { dark: "#000000", light: "#ffffff" },
+    });
+    setQrDataUrl(dataUrl);
+  }, []);
 
   const fetchToken = useCallback(async () => {
     try {
@@ -24,25 +34,19 @@ export function QRGenerator({ type }: QRGeneratorProps) {
       }
 
       setError("");
-      const dataUrl = await QRCode.toDataURL(data.token, {
-        width: 280,
-        margin: 2,
-        color: {
-          dark: "#000000",
-          light: "#ffffff",
-        },
-      });
-      setQrDataUrl(dataUrl);
+      setMode(data.mode || "online");
+      await generateQRImage(data.token);
       setTimeLeft(data.expiresIn);
     } catch {
       setError("QR 코드 생성 중 오류가 발생했습니다.");
     }
-  }, [type]);
+  }, [type, generateQRImage]);
 
   useEffect(() => {
     fetchToken();
   }, [fetchToken]);
 
+  // Timer: only for online mode (local mode has expiresIn=0)
   useEffect(() => {
     if (timeLeft <= 0) return;
 
@@ -86,9 +90,15 @@ export function QRGenerator({ type }: QRGeneratorProps) {
           <p className="text-muted-foreground">로딩 중...</p>
         </div>
       )}
-      <p className="text-sm font-mono text-muted-foreground">
-        {minutes}:{seconds.toString().padStart(2, "0")} 남음
-      </p>
+      {mode === "online" ? (
+        <p className="text-sm font-mono text-muted-foreground">
+          {minutes}:{seconds.toString().padStart(2, "0")} 남음
+        </p>
+      ) : (
+        <p className="text-sm text-amber-600 dark:text-amber-400 font-medium">
+          로컬 모드 — 고유 QR코드
+        </p>
+      )}
     </div>
   );
 }
