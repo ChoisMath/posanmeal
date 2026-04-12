@@ -225,8 +225,24 @@ export default function CheckPage() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    getSetting("operationMode").then((mode) => {
-      if (mode === "local") setOperationMode("local");
+    // Load mode: try IndexedDB first, then server API as fallback
+    getSetting("operationMode").then(async (mode) => {
+      if (mode === "local") {
+        setOperationMode("local");
+      } else if (navigator.onLine) {
+        // IndexedDB empty or "online" — check server for actual mode
+        try {
+          const res = await fetch("/api/system/settings");
+          if (res.ok) {
+            const data = await res.json();
+            if (data.operationMode === "local") {
+              setOperationMode("local");
+              await setSetting("operationMode", "local");
+              await setSetting("qrGeneration", data.qrGeneration.toString());
+            }
+          }
+        } catch {}
+      }
     });
     getSetting("lastSyncAt").then((ts) => setLastSyncAt(ts || null));
     getUnsyncedCount().then(setUnsyncedCount);
@@ -372,7 +388,11 @@ export default function CheckPage() {
 
   const handleScan = useCallback(
     (data: string) => {
-      if (operationMode === "local") {
+      // Auto-detect: if QR starts with "posanmeal:", always use local handler
+      if (data.startsWith("posanmeal:")) {
+        handleLocalScan(data);
+      } else if (operationMode === "local") {
+        // Local mode but got a non-posanmeal QR (e.g. JWT) — reject
         handleLocalScan(data);
       } else {
         handleOnlineScan(data);
