@@ -598,7 +598,7 @@ export default function AdminPage() {
 
           <TabsContent value="meals" className="flex-1 min-h-0 mt-4 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-hidden">
                 <AdminMealTable refreshKey={mealsRefreshKey} />
               </CardContent>
             </Card>
