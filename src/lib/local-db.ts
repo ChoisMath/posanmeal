@@ -1,5 +1,5 @@
 const DB_NAME = "posanmeal-local";
-const DB_VERSION = 2; // v2: synced field changed from boolean to number (0/1)
+const DB_VERSION = 3; // v3: replace mealPeriods store with eligibleUsers
 
 export interface LocalUser {
   id: number;
@@ -8,12 +8,6 @@ export interface LocalUser {
   grade?: number;
   classNum?: number;
   number?: number;
-}
-
-export interface LocalMealPeriod {
-  userId: number;
-  startDate: string; // "YYYY-MM-DD"
-  endDate: string;
 }
 
 export interface LocalCheckIn {
@@ -42,8 +36,13 @@ function openDB(): Promise<IDBDatabase> {
         userStore.createIndex("byRoleGrade", ["role", "grade", "classNum", "number"]);
       }
 
-      if (!db.objectStoreNames.contains("mealPeriods")) {
-        db.createObjectStore("mealPeriods", { keyPath: "userId" });
+      // v2→v3: replace mealPeriods with eligibleUsers
+      if (oldVersion < 3 && db.objectStoreNames.contains("mealPeriods")) {
+        db.deleteObjectStore("mealPeriods");
+      }
+
+      if (!db.objectStoreNames.contains("eligibleUsers")) {
+        db.createObjectStore("eligibleUsers", { keyPath: "userId" });
       }
 
       // v1→v2: recreate checkins store with number-based synced field
@@ -114,26 +113,26 @@ export async function replaceAllUsers(users: LocalUser[]): Promise<void> {
   });
 }
 
-// --- Meal Periods ---
+// --- Eligible Users ---
 
-export async function getMealPeriod(userId: number): Promise<LocalMealPeriod | undefined> {
+export async function isEligible(userId: number): Promise<boolean> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction("mealPeriods", "readonly");
-    const req = tx.objectStore("mealPeriods").get(userId);
-    req.onsuccess = () => resolve(req.result);
+    const tx = db.transaction("eligibleUsers", "readonly");
+    const req = tx.objectStore("eligibleUsers").get(userId);
+    req.onsuccess = () => resolve(!!req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-export async function replaceAllMealPeriods(periods: LocalMealPeriod[]): Promise<void> {
+export async function replaceAllEligibleUsers(userIds: number[]): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction("mealPeriods", "readwrite");
-    const store = tx.objectStore("mealPeriods");
+    const tx = db.transaction("eligibleUsers", "readwrite");
+    const store = tx.objectStore("eligibleUsers");
     store.clear();
-    for (const period of periods) {
-      store.put(period);
+    for (const userId of userIds) {
+      store.put({ userId });
     }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -229,7 +228,7 @@ export async function clearSyncedCheckIns(): Promise<number> {
 export async function clearAllData(): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const storeNames = ["settings", "users", "mealPeriods", "checkins"] as const;
+    const storeNames = ["settings", "users", "eligibleUsers", "checkins"] as const;
     const tx = db.transaction([...storeNames], "readwrite");
     for (const name of storeNames) {
       tx.objectStore(name).clear();

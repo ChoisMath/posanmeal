@@ -8,14 +8,14 @@ import {
   getSetting,
   setSetting,
   getUser,
-  getMealPeriod,
+  isEligible,
   getCheckIn,
   addCheckIn,
   getUnsyncedCheckIns,
   getUnsyncedCount,
   markCheckInsSynced,
   replaceAllUsers,
-  replaceAllMealPeriods,
+  replaceAllEligibleUsers,
   clearSyncedCheckIns,
   clearAllData,
 } from "@/lib/local-db";
@@ -180,7 +180,7 @@ export default function CheckPage() {
         await setSetting("operationMode", data.operationMode);
         await setSetting("qrGeneration", data.qrGeneration.toString());
         await replaceAllUsers(data.users);
-        await replaceAllMealPeriods(data.mealPeriods);
+        await replaceAllEligibleUsers(data.eligibleUserIds);
 
         const now = new Date().toISOString();
         await setSetting("lastSyncAt", now);
@@ -329,17 +329,11 @@ export default function CheckPage() {
         return;
       }
 
-      // 5. Meal period check (students only)
+      // 5. Eligibility check (students only)
       if (user.role === "STUDENT") {
-        const mp = await getMealPeriod(parsed.userId);
-        const today = todayLocal();
-        if (!mp) {
-          setResult({ success: false, error: "석식 신청 기간이 없습니다." });
-          playDoubleBeep();
-          return;
-        }
-        if (today < mp.startDate || today > mp.endDate) {
-          setResult({ success: false, error: "오늘은 석식 대상이 아닙니다." });
+        const eligible = await isEligible(parsed.userId);
+        if (!eligible) {
+          setResult({ success: false, error: "석식 대상이 아닙니다." });
           playDoubleBeep();
           return;
         }

@@ -147,7 +147,7 @@ export default function AdminPage() {
     setIsSyncing(true);
     setSyncStatus(null);
     try {
-      const { setSetting, replaceAllUsers, replaceAllMealPeriods, getUnsyncedCheckIns, markCheckInsSynced } = await import("@/lib/local-db");
+      const { setSetting, replaceAllUsers, replaceAllEligibleUsers, getUnsyncedCheckIns, markCheckInsSynced } = await import("@/lib/local-db");
       const messages: string[] = [];
 
       // 1. Upload unsynced check-ins first (data loss prevention)
@@ -186,10 +186,10 @@ export default function AdminPage() {
       await setSetting("operationMode", data.operationMode);
       await setSetting("qrGeneration", data.qrGeneration.toString());
       await replaceAllUsers(data.users);
-      await replaceAllMealPeriods(data.mealPeriods);
+      await replaceAllEligibleUsers(data.eligibleUserIds);
       await setSetting("lastSyncAt", new Date().toISOString());
 
-      messages.push(`다운로드: 사용자 ${data.users.length}명, 석식기간 ${data.mealPeriods.length}건`);
+      messages.push(`다운로드: 사용자 ${data.users.length}명, 자격자 ${data.eligibleUserIds.length}명`);
       setSyncStatus(`동기화 완료 — ${messages.join(" | ")}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

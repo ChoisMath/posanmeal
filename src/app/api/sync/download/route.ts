@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { todayKST } from "@/lib/timezone";
 
 export async function GET() {
   const session = await auth();
@@ -8,13 +9,21 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const [settings, users, mealPeriods] = await Promise.all([
+  const [settings, users, eligibleRegs] = await Promise.all([
     prisma.systemSetting.findMany(),
     prisma.user.findMany({
       select: { id: true, name: true, role: true, grade: true, classNum: true, number: true },
     }),
-    prisma.mealPeriod.findMany({
-      select: { userId: true, startDate: true, endDate: true },
+    prisma.mealRegistration.findMany({
+      where: {
+        status: "APPROVED",
+        application: {
+          mealStart: { not: null, lte: new Date(todayKST()) },
+          mealEnd: { not: null, gte: new Date(todayKST()) },
+        },
+      },
+      select: { userId: true },
+      distinct: ["userId"],
     }),
   ]);
 
@@ -34,11 +43,7 @@ export async function GET() {
       classNum: u.classNum,
       number: u.number,
     })),
-    mealPeriods: mealPeriods.map((mp) => ({
-      userId: mp.userId,
-      startDate: mp.startDate.toISOString().slice(0, 10),
-      endDate: mp.endDate.toISOString().slice(0, 10),
-    })),
+    eligibleUserIds: eligibleRegs.map((r) => r.userId),
     serverTime: new Date().toISOString(),
   });
 }
