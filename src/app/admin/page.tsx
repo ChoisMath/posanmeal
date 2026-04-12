@@ -101,6 +101,37 @@ export default function AdminPage() {
     setSysLoading(false);
   }
 
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  async function handleAdminSync() {
+    setIsSyncing(true);
+    setSyncStatus(null);
+    try {
+      const res = await fetch("/api/sync/download");
+      if (!res.ok) {
+        setSyncStatus("다운로드 실패. 서버 상태를 확인하세요.");
+        setIsSyncing(false);
+        return;
+      }
+      const data = await res.json();
+
+      // Dynamic import to avoid SSR issues with IndexedDB
+      const { setSetting, replaceAllUsers, replaceAllMealPeriods } = await import("@/lib/local-db");
+
+      await setSetting("operationMode", data.operationMode);
+      await setSetting("qrGeneration", data.qrGeneration.toString());
+      await replaceAllUsers(data.users);
+      await replaceAllMealPeriods(data.mealPeriods);
+      await setSetting("lastSyncAt", new Date().toISOString());
+
+      setSyncStatus(`동기화 완료 — 사용자 ${data.users.length}명, 석식기간 ${data.mealPeriods.length}건 저장`);
+    } catch {
+      setSyncStatus("동기화 중 오류가 발생했습니다.");
+    }
+    setIsSyncing(false);
+  }
+
   async function fetchUsers() {
     const res = await fetch(`/api/admin/users?role=${userFilter}`);
     const data = await res.json();
@@ -440,6 +471,28 @@ export default function AdminPage() {
                       disabled={sysLoading}
                     >
                       <RefreshCw className="h-4 w-4 mr-1" /> QR 새로고침
+                    </Button>
+                  </div>
+
+                  {/* Data Sync for Tablets */}
+                  <div className="flex items-center justify-between p-4 border rounded-xl mt-3">
+                    <div>
+                      <p className="font-medium">태블릿 데이터 동기화</p>
+                      <p className="text-sm text-muted-foreground">
+                        사용자·석식기간·설정을 이 기기에 저장합니다
+                      </p>
+                      {syncStatus && (
+                        <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">{syncStatus}</p>
+                      )}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleAdminSync}
+                      disabled={isSyncing}
+                    >
+                      <Download className="h-4 w-4 mr-1" />
+                      {isSyncing ? "동기화 중..." : "데이터 동기화"}
                     </Button>
                   </div>
 

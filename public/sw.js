@@ -85,5 +85,15 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Navigation requests: try network, fall back to /check if offline
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        caches.match("/check").then((cached) => cached || new Response("Offline", { status: 503 }))
+      )
+    );
+    return;
+  }
+
   // Everything else: Network only (no offline support needed)
 });
