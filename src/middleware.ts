@@ -7,7 +7,7 @@ export default auth((req) => {
 
   // Public routes (Set for O(1) lookup on exact matches)
   const publicExact = new Set(["/", "/check", "/admin/login"]);
-  const publicPrefixes = ["/api/auth", "/api/checkin", "/api/uploads", "/api/system/settings", "/api/sync", "/_next", "/uploads"];
+  const publicPrefixes = ["/api/auth", "/api/checkin", "/api/uploads", "/api/system/settings", "/api/sync", "/api/meals", "/_next", "/uploads"];
 
   if (publicExact.has(pathname) || publicPrefixes.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
