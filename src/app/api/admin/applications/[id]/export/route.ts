@@ -5,6 +5,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  try {
   const { id } = await params;
   const { searchParams } = new URL(request.url);
   const isTemplate = searchParams.get("template") === "true";
@@ -121,4 +122,8 @@ export async function GET(
       "Content-Disposition": `attachment; filename="${encodeURIComponent(application.title)}_신청명단.xlsx"`,
     },
   });
+  } catch (err) {
+    console.error("Export error:", err);
+    return NextResponse.json({ error: String(err), stack: err instanceof Error ? err.stack : undefined }, { status: 500 });
+  }
 }
