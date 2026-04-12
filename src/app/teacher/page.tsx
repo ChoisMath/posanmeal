@@ -14,6 +14,7 @@ import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { StudentTable } from "@/components/StudentTable";
 import { LogOut } from "lucide-react";
+import { MealMenu } from "@/components/MealMenu";
 
 interface TeacherProfile {
   id: number;
@@ -29,6 +30,7 @@ export default function TeacherPage() {
   const [user, setUser] = useState<TeacherProfile | null>(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: "", subject: "", homeroom: "", position: "" });
+  const [qrType, setQrType] = useState<"PERSONAL" | "WORK">("PERSONAL");
 
   useEffect(() => {
     fetch("/api/users/me").then((res) => res.json()).then((data) => {
@@ -74,31 +76,62 @@ export default function TeacherPage() {
         </div>
       </header>
       <div className="max-w-4xl mx-auto p-4 page-enter">
-        <Tabs defaultValue="personal">
+        <Tabs defaultValue="meal">
           <TabsList className={`grid w-full max-w-md mx-auto rounded-xl h-11 ${isHomeroom ? "grid-cols-5" : "grid-cols-4"}`}>
-            <TabsTrigger value="personal" className="rounded-lg text-xs sm:text-sm">개인석식</TabsTrigger>
-            <TabsTrigger value="work" className="rounded-lg text-xs sm:text-sm">근무</TabsTrigger>
+            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm">식단</TabsTrigger>
+            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm">QR</TabsTrigger>
             <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm">확인</TabsTrigger>
             {isHomeroom && <TabsTrigger value="students" className="rounded-lg text-xs sm:text-sm">학생관리</TabsTrigger>}
             <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm">개인정보</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="personal">
+          <TabsContent value="meal">
             <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6 text-center">
-                <QRGenerator type="PERSONAL" />
-                <p className="mt-4 font-semibold">{user.name} 선생님</p>
-                <p className="text-sm text-amber-600 dark:text-amber-400 font-medium mt-1">개인 석식용 QR</p>
+              <CardContent className="pt-6">
+                <MealMenu />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="work">
+          <TabsContent value="qr">
             <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 text-center">
-                <QRGenerator type="WORK" />
-                <p className="mt-4 font-semibold">{user.name} 선생님</p>
-                <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">근무 석식용 QR</p>
+                {/* 세그먼트 컨트롤: 개인석식 / 근무 */}
+                <div className="flex rounded-xl bg-muted p-1 mb-4 max-w-xs mx-auto">
+                  <button
+                    onClick={() => setQrType("PERSONAL")}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                      qrType === "PERSONAL"
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    개인석식
+                  </button>
+                  <button
+                    onClick={() => setQrType("WORK")}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                      qrType === "WORK"
+                        ? "bg-background shadow-sm text-foreground"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    근무
+                  </button>
+                </div>
+                {qrType === "PERSONAL" ? (
+                  <>
+                    <QRGenerator type="PERSONAL" />
+                    <p className="mt-4 font-semibold">{user.name} 선생님</p>
+                    <p className="text-sm text-amber-600 dark:text-amber-400 font-medium mt-1">개인 석식용 QR</p>
+                  </>
+                ) : (
+                  <>
+                    <QRGenerator type="WORK" />
+                    <p className="mt-4 font-semibold">{user.name} 선생님</p>
+                    <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mt-1">근무 석식용 QR</p>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
