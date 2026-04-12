@@ -32,7 +32,6 @@ export async function GET(request: Request) {
     where: { role: "STUDENT", grade, classNum },
     select: {
       id: true, name: true, number: true, photoUrl: true,
-      mealPeriod: { select: { startDate: true, endDate: true } },
       checkIns: {
         where: { date: { gte: startDate, lte: endDate } },
         select: { date: true, checkedAt: true },

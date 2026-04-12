@@ -20,7 +20,6 @@ interface UserRecord {
   classNum: number | null;
   subject: string | null;
   homeroom: string | null;
-  mealPeriod: { startDate: string; endDate: string } | null;
   checkIns: CheckInRecord[];
 }
 
@@ -148,9 +147,6 @@ function MealGrid({ category, year, month, refreshKey }: { category: Category; y
                         <span className="font-semibold">{user.number}</span>
                         <span className="ml-1">{user.name}</span>
                       </>
-                    )}
-                    {!isTeacher && !user.mealPeriod && (
-                      <span className="text-[10px] text-red-400 ml-0.5">미</span>
                     )}
                   </div>
                 </td>

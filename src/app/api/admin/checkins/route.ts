@@ -26,7 +26,6 @@ export async function GET(request: Request) {
       classNum: true,
       subject: true,
       homeroom: true,
-      mealPeriod: { select: { startDate: true, endDate: true } },
       checkIns: {
         where: { date: { gte: startDate, lte: endDate } },
         select: { id: true, date: true, checkedAt: true, type: true },

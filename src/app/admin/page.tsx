@@ -21,7 +21,6 @@ interface User {
   id: number; email: string; name: string; role: string;
   grade?: number; classNum?: number; number?: number;
   subject?: string; homeroom?: string; position?: string;
-  mealPeriod?: { startDate: string; endDate: string } | null;
 }
 
 interface MealAppItem {

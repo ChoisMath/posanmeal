@@ -146,24 +146,6 @@ export async function POST(request: Request) {
               upsertedUsers.push(...results);
             }
 
-            const mealPeriodOps = validRows
-              .map((row, i) => ({ userId: upsertedUsers[i].id, startDate: row[5], endDate: row[6] }))
-              .filter((mp) => mp.startDate && mp.endDate && !isNaN(new Date(mp.startDate).getTime()) && !isNaN(new Date(mp.endDate).getTime()));
-
-            if (mealPeriodOps.length > 0) {
-              for (const batch of chunk(mealPeriodOps, BATCH_SIZE)) {
-                await Promise.all(
-                  batch.map((mp) =>
-                    prisma.mealPeriod.upsert({
-                      where: { userId: mp.userId },
-                      update: { startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
-                      create: { userId: mp.userId, startDate: new Date(mp.startDate), endDate: new Date(mp.endDate) },
-                    })
-                  )
-                );
-              }
-            }
-
             studentCount = validRows.length;
           }
         }

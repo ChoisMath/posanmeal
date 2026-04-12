@@ -9,7 +9,6 @@ interface Student {
   name: string;
   number: number;
   photoUrl: string | null;
-  mealPeriod?: { startDate: string; endDate: string } | null;
   checkIns: { date: string; checkedAt: string }[];
 }
 
@@ -115,8 +114,6 @@ export function StudentTable() {
               const checkedDaysSet = new Set(
                 student.checkIns.map((c) => new Date(c.date).getDate())
               );
-              const hasMealPeriod = !!student.mealPeriod;
-
               return (
                 <tr key={student.id} className="hover:bg-muted/50">
                   {/* 학생명 셀 - 좌측 고정 */}
@@ -124,9 +121,6 @@ export function StudentTable() {
                     <div className="flex items-center gap-1 text-fit-sm">
                       <span className="font-semibold">{student.number}</span>
                       <span>{student.name}</span>
-                      {!hasMealPeriod && (
-                        <span className="text-[10px] text-red-400 ml-0.5">미</span>
-                      )}
                     </div>
                   </td>
                   {/* 날짜 셀 */}

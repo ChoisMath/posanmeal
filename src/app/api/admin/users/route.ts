@@ -11,7 +11,6 @@ export async function GET(request: Request) {
       id: true, email: true, name: true, role: true,
       grade: true, classNum: true, number: true,
       subject: true, homeroom: true, position: true,
-      mealPeriod: { select: { startDate: true, endDate: true } },
     },
     orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }, { name: "asc" }],
   });
@@ -28,11 +27,6 @@ export async function POST(request: Request) {
     },
   });
 
-  if (body.role === "STUDENT" && body.startDate && body.endDate) {
-    await prisma.mealPeriod.create({
-      data: { userId: user.id, startDate: new Date(body.startDate), endDate: new Date(body.endDate) },
-    });
-  }
   return NextResponse.json({ user }, { status: 201 });
 }
 

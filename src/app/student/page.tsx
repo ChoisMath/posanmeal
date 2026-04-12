@@ -115,7 +115,7 @@ export default function StudentPage() {
     const today = new Date().toISOString().slice(0, 10);
     return today >= r.application.mealStart.slice(0, 10) && today <= r.application.mealEnd.slice(0, 10);
   });
-  const hasMealPeriod = activeRegistrations.length > 0;
+  const hasActiveMeal = activeRegistrations.length > 0;
   const hasApplicationTab = applications.length > 0;
   const pendingCount = applications.filter(
     (a) => a.registrations.length === 0
@@ -327,7 +327,7 @@ export default function StudentPage() {
           <TabsContent value="qr">
             <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 text-center">
-                {hasMealPeriod ? (
+                {hasActiveMeal ? (
                   <>
                     <QRGenerator type="STUDENT" />
                     <p className="mt-4 font-semibold">
