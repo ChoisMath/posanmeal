@@ -249,12 +249,12 @@ export default function AdminPage() {
                 </div>
                 <div className="border rounded-lg">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0 z-10">
+                    <thead className="sticky top-0 z-10">
                       <tr>
-                        <th className="p-2 text-left">이름</th>
-                        <th className="p-2 text-left">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
-                        <th className="p-2 text-left">{userFilter === "STUDENT" ? "신청기간" : "직책"}</th>
-                        <th className="p-2 text-center w-24">관리</th>
+                        <th className="p-2 text-left bg-muted">이름</th>
+                        <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
+                        <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "신청기간" : "직책"}</th>
+                        <th className="p-2 text-center w-24 bg-muted">관리</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -316,12 +316,12 @@ export default function AdminPage() {
                     </div>
                     <div className="border rounded-lg">
                       <table className="w-full text-sm">
-                        <thead className="bg-muted sticky top-0 z-10">
+                        <thead className="sticky top-0 z-10">
                           <tr>
-                            <th className="p-2 text-left">이름</th>
-                            <th className="p-2 text-left">구분</th>
-                            <th className="p-2 text-left">체크인 시각</th>
-                            <th className="p-2 text-center w-16">수정</th>
+                            <th className="p-2 text-left bg-muted">이름</th>
+                            <th className="p-2 text-left bg-muted">구분</th>
+                            <th className="p-2 text-left bg-muted">체크인 시각</th>
+                            <th className="p-2 text-center w-16 bg-muted">수정</th>
                           </tr>
                         </thead>
                         <tbody>
