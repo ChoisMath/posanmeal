@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera } from "lucide-react";
+import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 
 interface User {
@@ -203,31 +204,35 @@ export default function AdminPage() {
   }, [dashboard]);
 
   return (
-    <div className="min-h-screen bg-warm-subtle">
-      <header className="header-gradient px-4 py-3 flex items-center justify-between">
+    <div className="h-screen flex flex-col overflow-hidden bg-warm-subtle">
+      <header className="header-gradient px-4 py-3 flex items-center justify-between shrink-0">
         <BrandMark variant="header" label="PosanMeal Admin" />
         <div className="flex items-center gap-1">
           <ThemeToggle />
+          <Button asChild variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" aria-label="체크인 페이지" title="체크인 페이지">
+            <Link href="/check"><Camera className="h-4 w-4" /></Link>
+          </Button>
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-4 w-4" /></Button>
         </div>
       </header>
-      <div className="max-w-5xl mx-auto p-4 md:p-6 page-enter">
+      <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-4 md:p-6 flex flex-col overflow-hidden page-enter">
         <Tabs
           defaultValue="users"
+          className="flex flex-col flex-1 min-h-0"
           onValueChange={(v) => {
             if (v === "dashboard") fetchDashboard();
             if (v === "meals") setMealsRefreshKey((k) => k + 1);
           }}
         >
-          <TabsList className="grid w-full grid-cols-3 rounded-xl h-11 max-w-lg">
+          <TabsList className="grid w-full grid-cols-3 rounded-xl h-11 max-w-lg shrink-0">
             <TabsTrigger value="users" className="rounded-lg">사용자 관리</TabsTrigger>
             <TabsTrigger value="meals" className="rounded-lg">석식 확인</TabsTrigger>
             <TabsTrigger value="dashboard" className="rounded-lg">당일 현황</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="users">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="users" className="flex-1 min-h-0 mt-4 overflow-hidden">
+            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
                     <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
@@ -242,9 +247,9 @@ export default function AdminPage() {
                     </Button>
                   </div>
                 </div>
-                <div className="border rounded-lg overflow-hidden">
+                <div className="border rounded-lg">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted">
+                    <thead className="bg-muted sticky top-0 z-10">
                       <tr>
                         <th className="p-2 text-left">이름</th>
                         <th className="p-2 text-left">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
@@ -273,17 +278,17 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="meals">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="meals" className="flex-1 min-h-0 mt-4 overflow-hidden">
+            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
                 <AdminMealTable refreshKey={mealsRefreshKey} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="dashboard">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="dashboard" className="flex-1 min-h-0 mt-4 overflow-hidden">
+            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-semibold">오늘의 석식 현황</h3>
                   <div className="flex gap-2">
@@ -309,9 +314,9 @@ export default function AdminPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="border rounded-lg overflow-hidden">
+                    <div className="border rounded-lg">
                       <table className="w-full text-sm">
-                        <thead className="bg-muted">
+                        <thead className="bg-muted sticky top-0 z-10">
                           <tr>
                             <th className="p-2 text-left">이름</th>
                             <th className="p-2 text-left">구분</th>

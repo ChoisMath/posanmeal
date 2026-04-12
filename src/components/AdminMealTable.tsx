@@ -102,7 +102,7 @@ function MealGrid({ category, year, month, refreshKey }: { category: Category; y
   }
 
   return (
-    <div className="overflow-auto max-h-[65vh] border rounded-lg">
+    <div className="border rounded-lg">
       <table className="text-xs border-collapse w-full">
         <thead className="sticky top-0 z-20">
           <tr>

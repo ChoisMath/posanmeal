@@ -1,7 +1,6 @@
 import { auth, signIn } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ShieldCheck, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
@@ -58,24 +57,13 @@ export default async function HomePage() {
             </Button>
           </form>
 
-        </div>
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t" /></div>
+            <div className="relative flex justify-center text-xs"><span className="bg-card/80 backdrop-blur-sm px-3 text-muted-foreground">또는</span></div>
+          </div>
 
-        {/* Admin login shortcut */}
-        <div className="max-w-sm mx-auto mt-4 page-enter">
-          <Link
-            href="/admin"
-            className="group block glass rounded-2xl card-elevated p-4 transition-all hover:scale-[1.015] active:scale-[0.99]"
-          >
-            <div className="flex items-center gap-4">
-              <div className="shrink-0 w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/25 to-orange-500/15 dark:from-amber-400/30 dark:to-orange-400/20 flex items-center justify-center ring-1 ring-amber-500/20">
-                <ShieldCheck className="h-6 w-6 text-amber-600 dark:text-amber-300" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-sm tracking-tight">관리자로 로그인</p>
-                <p className="text-xs text-muted-foreground mt-0.5">관리자 페이지로 이동</p>
-              </div>
-              <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 group-hover:translate-x-0.5 group-hover:text-amber-600 dark:group-hover:text-amber-300 transition-all" />
-            </div>
+          <Link href="/admin/login" className="block text-center text-sm text-muted-foreground hover:text-foreground transition-colors">
+            관리자 로그인 →
           </Link>
         </div>
       </div>
