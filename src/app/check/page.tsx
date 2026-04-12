@@ -232,25 +232,31 @@ export default function CheckPage() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Load mode: try IndexedDB first, then server API as fallback
-    getSetting("operationMode").then(async (mode) => {
-      if (mode === "local") {
-        setOperationMode("local");
-      } else if (navigator.onLine) {
-        // IndexedDB empty or "online" — check server for actual mode
+    // Load mode: server is source of truth when online, IndexedDB is fallback
+    (async () => {
+      if (navigator.onLine) {
         try {
           const res = await fetch("/api/system/settings");
           if (res.ok) {
             const data = await res.json();
-            if (data.operationMode === "local") {
-              setOperationMode("local");
-              await setSetting("operationMode", "local");
+            const serverMode = data.operationMode || "online";
+            setOperationMode(serverMode);
+            await setSetting("operationMode", serverMode);
+            if (data.qrGeneration) {
               await setSetting("qrGeneration", data.qrGeneration.toString());
             }
+            return;
           }
         } catch {}
       }
-    });
+      // Offline or server unreachable: use IndexedDB
+      try {
+        const savedMode = await getSetting("operationMode");
+        if (savedMode === "local" || savedMode === "online") {
+          setOperationMode(savedMode);
+        }
+      } catch {}
+    })();
     getSetting("lastSyncAt").then((ts) => setLastSyncAt(ts || null));
     getUnsyncedCount().then(setUnsyncedCount);
 

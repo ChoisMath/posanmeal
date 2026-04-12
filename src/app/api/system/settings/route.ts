@@ -8,10 +8,17 @@ export async function GET() {
   for (const s of settings) {
     result[s.key] = s.value;
   }
-  return NextResponse.json({
-    operationMode: result.operationMode || "online",
-    qrGeneration: parseInt(result.qrGeneration || "1", 10),
-  });
+  return NextResponse.json(
+    {
+      operationMode: result.operationMode || "online",
+      qrGeneration: parseInt(result.qrGeneration || "1", 10),
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+      },
+    }
+  );
 }
 
 export async function PUT(request: Request) {
