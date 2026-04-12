@@ -1,4 +1,4 @@
-const CACHE_VERSION = "posanmeal-v1";
+const CACHE_VERSION = "posanmeal-v2";
 const PRECACHE_URLS = ["/check"];
 
 // Install: cache the /check page shell
