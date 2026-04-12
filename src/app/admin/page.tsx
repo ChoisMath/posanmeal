@@ -507,9 +507,9 @@ export default function AdminPage() {
             <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="users" className="flex-1 min-h-0 mt-4 overflow-hidden">
+          <TabsContent value="users" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-hidden">
+              <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-2">
                     <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
@@ -555,9 +555,9 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="applications" className="flex-1 min-h-0 mt-4 overflow-hidden">
+          <TabsContent value="applications" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
+              <CardContent className="pt-2 flex-1 min-h-0 overflow-auto">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold">석식 신청 공고</h3>
                   <Button size="sm" onClick={() => { setEditingApp(null); setAppForm(emptyAppForm); setAppDialogOpen(true); }}>
@@ -639,17 +639,17 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="meals" className="flex-1 min-h-0 mt-4 overflow-hidden">
+          <TabsContent value="meals" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-hidden">
+              <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
                 <AdminMealTable refreshKey={mealsRefreshKey} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="dashboard" className="flex-1 min-h-0 mt-4 overflow-hidden">
+          <TabsContent value="dashboard" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-6 flex-1 min-h-0 overflow-hidden">
+              <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-semibold">오늘의 석식 현황</h3>
                   <div className="flex gap-2">
@@ -716,9 +716,9 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="settings" className="flex-1 min-h-0 mt-4 overflow-hidden">
+          <TabsContent value="settings" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6 space-y-6">
+              <CardContent className="pt-2 space-y-6">
                 <div>
                   <h3 className="font-semibold mb-4 flex items-center gap-2">
                     <Settings className="h-4 w-4" /> 시스템 설정
