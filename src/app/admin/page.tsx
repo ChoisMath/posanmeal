@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 
@@ -60,6 +60,47 @@ export default function AdminPage() {
   const [importMessage, setImportMessage] = useState("");
   const [importing, setImporting] = useState(false);
 
+  // System settings
+  const [sysMode, setSysMode] = useState<"online" | "local">("online");
+  const [sysGeneration, setSysGeneration] = useState(1);
+  const [sysLoading, setSysLoading] = useState(false);
+
+  async function fetchSystemSettings() {
+    const res = await fetch("/api/system/settings");
+    const data = await res.json();
+    setSysMode(data.operationMode);
+    setSysGeneration(data.qrGeneration);
+  }
+
+  async function handleModeToggle() {
+    const newMode = sysMode === "online" ? "local" : "online";
+    const msg = newMode === "local"
+      ? "로컬 모드로 전환하시겠습니까?\n학생/교사에게 고유 QR이 표시됩니다."
+      : "온라인 모드로 전환하시겠습니까?\n기존 JWT 토큰 QR 방식으로 돌아갑니다.";
+    if (!confirm(msg)) return;
+
+    setSysLoading(true);
+    await fetch("/api/system/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operationMode: newMode }),
+    });
+    await fetchSystemSettings();
+    setSysLoading(false);
+  }
+
+  async function handleRefreshQR() {
+    if (!confirm("전체 QR을 새로고침하시겠습니까?\n기존 QR코드는 모두 무효화됩니다.\n태블릿 동기화 후 적용됩니다.")) return;
+    setSysLoading(true);
+    await fetch("/api/system/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshQR: true }),
+    });
+    await fetchSystemSettings();
+    setSysLoading(false);
+  }
+
   async function fetchUsers() {
     const res = await fetch(`/api/admin/users?role=${userFilter}`);
     const data = await res.json();
@@ -73,7 +114,7 @@ export default function AdminPage() {
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchUsers(); fetchDashboard(); }, [userFilter]);
+  useEffect(() => { fetchUsers(); fetchDashboard(); fetchSystemSettings(); }, [userFilter]);
 
   const [importError, setImportError] = useState("");
 
@@ -224,10 +265,11 @@ export default function AdminPage() {
             if (v === "meals") setMealsRefreshKey((k) => k + 1);
           }}
         >
-          <TabsList className="grid w-full grid-cols-3 rounded-xl h-11 max-w-lg shrink-0">
+          <TabsList className="grid w-full grid-cols-4 rounded-xl h-11 max-w-lg shrink-0">
             <TabsTrigger value="users" className="rounded-lg">사용자 관리</TabsTrigger>
             <TabsTrigger value="meals" className="rounded-lg">석식 확인</TabsTrigger>
             <TabsTrigger value="dashboard" className="rounded-lg">당일 현황</TabsTrigger>
+            <TabsTrigger value="settings" className="rounded-lg">설정</TabsTrigger>
           </TabsList>
 
           <TabsContent value="users" className="flex-1 min-h-0 mt-4 overflow-hidden">
@@ -351,6 +393,62 @@ export default function AdminPage() {
                     </div>
                   </>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="settings" className="flex-1 min-h-0 mt-4 overflow-hidden">
+            <Card className="card-elevated rounded-2xl border-0">
+              <CardContent className="pt-6 space-y-6">
+                <div>
+                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                    <Settings className="h-4 w-4" /> 시스템 설정
+                  </h3>
+
+                  {/* Operation Mode */}
+                  <div className="flex items-center justify-between p-4 border rounded-xl">
+                    <div>
+                      <p className="font-medium">운영 모드</p>
+                      <p className="text-sm text-muted-foreground">
+                        {sysMode === "online"
+                          ? "온라인 — JWT 토큰 QR (3분 갱신)"
+                          : "로컬 — 고유 QR코드 (오프라인 체크인)"}
+                      </p>
+                    </div>
+                    <Button
+                      variant={sysMode === "local" ? "default" : "outline"}
+                      size="sm"
+                      onClick={handleModeToggle}
+                      disabled={sysLoading}
+                    >
+                      {sysMode === "online" ? "로컬 모드로 전환" : "온라인 모드로 전환"}
+                    </Button>
+                  </div>
+
+                  {/* QR Generation */}
+                  <div className="flex items-center justify-between p-4 border rounded-xl mt-3">
+                    <div>
+                      <p className="font-medium">QR 세대</p>
+                      <p className="text-sm text-muted-foreground">
+                        현재: {sysGeneration}세대 — 새로고침 시 기존 QR 모두 무효화
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRefreshQR}
+                      disabled={sysLoading}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-1" /> QR 새로고침
+                    </Button>
+                  </div>
+
+                  {sysMode === "local" && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-3">
+                      태블릿에서 동기화를 실행해야 설정이 반영됩니다.
+                    </p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
