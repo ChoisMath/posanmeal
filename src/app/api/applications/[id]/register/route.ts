@@ -19,6 +19,9 @@ export async function POST(
   if (!signature) {
     return NextResponse.json({ error: "서명이 필요합니다." }, { status: 400 });
   }
+  if (signature.length > 200_000) {
+    return NextResponse.json({ error: "서명 데이터가 너무 큽니다." }, { status: 400 });
+  }
 
   const today = new Date(todayKST());
   const app = await prisma.mealApplication.findUnique({ where: { id: applicationId } });

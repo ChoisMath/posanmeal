@@ -7,6 +7,9 @@ export async function PATCH(
 ) {
   const { regId } = await params;
   const { status } = await request.json();
+  if (status !== "APPROVED" && status !== "CANCELLED") {
+    return NextResponse.json({ error: "잘못된 상태값입니다." }, { status: 400 });
+  }
 
   const data: Record<string, unknown> = { status };
   if (status === "CANCELLED") {

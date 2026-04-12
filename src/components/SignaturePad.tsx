@@ -12,6 +12,8 @@ export function SignaturePad({ onSignatureChange, height = 150 }: SignaturePadPr
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
   const hasDrawn = useRef(false);
+  const onSignatureChangeRef = useRef(onSignatureChange);
+  onSignatureChangeRef.current = onSignatureChange;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -29,6 +31,10 @@ export function SignaturePad({ onSignatureChange, height = 150 }: SignaturePadPr
         ctx.lineWidth = 2;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
+      }
+      if (hasDrawn.current) {
+        hasDrawn.current = false;
+        onSignatureChangeRef.current(null);
       }
     };
 
