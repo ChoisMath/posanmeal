@@ -17,6 +17,18 @@ async function main() {
     },
   });
   console.log("Admin user seeded");
+
+  await prisma.systemSetting.upsert({
+    where: { key: "operationMode" },
+    update: {},
+    create: { key: "operationMode", value: "online" },
+  });
+  await prisma.systemSetting.upsert({
+    where: { key: "qrGeneration" },
+    update: {},
+    create: { key: "qrGeneration", value: "1" },
+  });
+  console.log("System settings seeded");
 }
 
 main()
