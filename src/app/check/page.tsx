@@ -124,6 +124,8 @@ export default function CheckPage() {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [modeLoaded, setModeLoaded] = useState(false);
+  const prevModeRef = useRef<"online" | "local">("online");
 
   // Register Service Worker
   useEffect(() => {
@@ -219,52 +221,90 @@ export default function CheckPage() {
     setSyncing(false);
   }, []);
 
+  // Fetch mode from server, update state + IndexedDB, return mode or null
+  const fetchMode = useCallback(async (): Promise<"online" | "local" | null> => {
+    if (!navigator.onLine) return null;
+    try {
+      const res = await fetch("/api/system/settings");
+      if (res.ok) {
+        const data = await res.json();
+        const serverMode: "online" | "local" = data.operationMode === "local" ? "local" : "online";
+        setOperationMode(serverMode);
+        await setSetting("operationMode", serverMode);
+        if (data.qrGeneration) {
+          await setSetting("qrGeneration", data.qrGeneration.toString());
+        }
+        return serverMode;
+      }
+    } catch {}
+    return null;
+  }, []);
+
   // Initialize mode and online status
   useEffect(() => {
     setIsOnline(navigator.onLine);
 
+    // Fetch mode and auto-sync when transitioning online→local
+    const fetchAndMaybeSync = async () => {
+      const newMode = await fetchMode();
+      if (newMode && newMode === "local" && prevModeRef.current === "online") {
+        performSync();
+      }
+      if (newMode) prevModeRef.current = newMode;
+    };
+
+    // Initial load
+    (async () => {
+      const loaded = await fetchMode();
+      if (loaded) {
+        prevModeRef.current = loaded;
+      } else {
+        // Offline or server unreachable: use IndexedDB
+        try {
+          const savedMode = await getSetting("operationMode");
+          if (savedMode === "local" || savedMode === "online") {
+            setOperationMode(savedMode);
+            prevModeRef.current = savedMode;
+          }
+        } catch {}
+      }
+      setModeLoaded(true);
+    })();
+
     const handleOnline = () => {
       setIsOnline(true);
+      fetchAndMaybeSync();
       setTimeout(() => performSync(), 3000);
     };
     const handleOffline = () => setIsOnline(false);
 
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        fetchAndMaybeSync();
+      }
+    };
+
+    // Poll settings every 15 seconds to detect admin mode changes
+    const pollInterval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchAndMaybeSync();
+      }
+    }, 15_000);
+
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    document.addEventListener("visibilitychange", handleVisibility);
 
-    // Load mode: server is source of truth when online, IndexedDB is fallback
-    (async () => {
-      if (navigator.onLine) {
-        try {
-          const res = await fetch("/api/system/settings");
-          if (res.ok) {
-            const data = await res.json();
-            const serverMode = data.operationMode || "online";
-            setOperationMode(serverMode);
-            await setSetting("operationMode", serverMode);
-            if (data.qrGeneration) {
-              await setSetting("qrGeneration", data.qrGeneration.toString());
-            }
-            return;
-          }
-        } catch {}
-      }
-      // Offline or server unreachable: use IndexedDB
-      try {
-        const savedMode = await getSetting("operationMode");
-        if (savedMode === "local" || savedMode === "online") {
-          setOperationMode(savedMode);
-        }
-      } catch {}
-    })();
     getSetting("lastSyncAt").then((ts) => setLastSyncAt(ts || null));
     getUnsyncedCount().then(setUnsyncedCount);
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearInterval(pollInterval);
     };
-  }, [performSync]);
+  }, [fetchMode, performSync]);
 
   // --- Online mode: existing server-based check-in ---
   const handleOnlineScan = useCallback(async (data: string) => {
@@ -476,7 +516,16 @@ export default function CheckPage() {
         {/* Camera Area */}
         <div className="bg-gray-900/95 p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto md:max-w-lg w-full">
-            <QRScanner onScan={handleScan} />
+            {modeLoaded ? (
+              <QRScanner onScan={handleScan} />
+            ) : (
+              <div className="flex items-center justify-center h-[300px] text-white/60">
+                <div className="text-center">
+                  <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-2" />
+                  <p className="text-sm">모드 확인 중...</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

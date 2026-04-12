@@ -1,0 +1,170 @@
+<div class="max-w-4xl mx-auto px-2 py-4">
+  <!-- 헤더 + 버튼 -->
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">급식식단</h1>
+      <% if @school %>
+        <p class="text-sm text-gray-500"><%= @school.name %></p>
+      <% end %>
+    </div>
+    <div class="flex items-center space-x-2">
+      <!-- 달력 아이콘 버튼 -->
+      <button onclick="document.getElementById('date-picker').showPicker()" class="p-2 hover:bg-gray-100 rounded-lg transition-colors border border-gray-200">
+        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+        </svg>
+      </button>
+      <input type="date"
+             id="date-picker"
+             value="<%= @date.strftime('%Y-%m-%d') %>"
+             onchange="window.location.href='<%= meals_path %>?date=' + this.value"
+             class="sr-only">
+      <!-- 오늘 버튼 -->
+      <% today_weekday = Date.current.saturday? ? Date.current - 1.day : (Date.current.sunday? ? Date.current + 1.day : Date.current) %>
+      <% unless @date == today_weekday %>
+        <%= link_to "오늘", meals_path, class: "px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-200" %>
+      <% end %>
+    </div>
+  </div>
+
+  <!-- 날짜 네비게이션 -->
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 px-3 py-2 mb-4">
+    <div class="flex items-center justify-between">
+      <%= link_to meals_path(date: @prev_date), class: "p-1.5 hover:bg-gray-100 rounded-lg transition-colors" do %>
+        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+      <% end %>
+
+      <div class="text-center">
+        <span class="text-base font-medium text-gray-900">
+          <%= @date.strftime("%Y.%m.%d") %>
+          <span class="text-gray-500 ml-1">(<%= %w[일 월 화 수 목 금 토][@date.wday][0] %>)</span>
+        </span>
+      </div>
+
+      <%= link_to meals_path(date: @next_date), class: "p-1.5 hover:bg-gray-100 rounded-lg transition-colors" do %>
+        <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      <% end %>
+    </div>
+  </div>
+
+  <!-- 급식 정보 -->
+  <div id="meal-content">
+    <% if @result[:success] %>
+      <% if @result[:meals].present? %>
+        <div class="space-y-3">
+          <% @result[:meals].each do |meal| %>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <!-- 식사 유형 헤더 -->
+              <div class="px-3 py-2 bg-gradient-to-r <%= meal_header_color(meal[:meal_code]) %> border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center space-x-2">
+                    <%= meal_icon(meal[:meal_code]) %>
+                    <h2 class="text-base font-semibold text-gray-900"><%= meal[:meal_type] %></h2>
+                  </div>
+                  <% if meal[:calorie].present? %>
+                    <span class="text-sm font-medium text-gray-600"><%= meal[:calorie] %></span>
+                  <% end %>
+                </div>
+              </div>
+
+              <!-- 메뉴 목록 (가로 스크롤) -->
+              <div class="p-3">
+                <div class="space-y-1.5">
+                  <% meal[:dishes].each do |dish| %>
+                    <div class="overflow-x-auto scrollbar-hide">
+                      <div class="flex items-center whitespace-nowrap min-w-0">
+                        <span class="text-gray-800 text-sm shrink-0"><%= dish[:name] %></span>
+                        <% if dish[:allergies].present? %>
+                          <div class="flex items-center gap-1 ml-2 shrink-0">
+                            <% dish[:allergies].each do |allergy| %>
+                              <span class="px-1.5 py-0.5 bg-red-100 text-red-600 text-xs rounded">
+                                <%= allergy %>
+                              </span>
+                            <% end %>
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+
+                <!-- 영양 정보 (토글) -->
+                <% if meal[:nutrition].present? %>
+                  <div class="mt-3 pt-3 border-t border-gray-100">
+                    <button onclick="toggleNutrition('<%= meal[:meal_code] %>')" class="flex items-center text-xs text-gray-500 hover:text-gray-700">
+                      <svg class="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                      </svg>
+                      영양정보
+                    </button>
+                    <div id="nutrition-<%= meal[:meal_code] %>" class="hidden mt-2 text-xs text-gray-600 bg-gray-50 rounded-lg p-2">
+                      <% meal[:nutrition].each do |info| %>
+                        <div><%= info %></div>
+                      <% end %>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+
+        <!-- 알레르기 안내 -->
+        <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
+          <div class="flex items-start">
+            <svg class="w-4 h-4 text-yellow-600 mt-0.5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+            <p class="text-xs text-yellow-700">
+              메뉴명 옆 태그는 알레르기 유발 식품입니다.
+            </p>
+          </div>
+        </div>
+      <% else %>
+        <!-- 급식 정보 없음 -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
+          <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M12 20h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <p class="text-gray-500"><%= @result[:message] || "해당 날짜에 급식 정보가 없습니다." %></p>
+        </div>
+      <% end %>
+    <% else %>
+      <!-- 에러 표시 -->
+      <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+        <svg class="w-10 h-10 text-red-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <p class="text-red-700 font-medium text-sm"><%= @result[:error] %></p>
+        <% if @result[:error].include?("학교") %>
+          <p class="text-red-600 text-xs mt-1">
+            <%= link_to "설정 페이지", settings_path, class: "underline hover:no-underline" %>에서 학교를 설정해주세요.
+          </p>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<style>
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+</style>
+
+<script>
+function toggleNutrition(mealCode) {
+  const el = document.getElementById('nutrition-' + mealCode);
+  if (el) {
+    el.classList.toggle('hidden');
+  }
+}
+</script>

@@ -1,0 +1,87 @@
+<!-- Date Navigation -->
+<div class="bg-gray-50 rounded-lg px-3 py-2 mb-4">
+  <div class="flex items-center justify-between">
+    <button onclick="loadMeals('<%= prev_date.strftime('%Y-%m-%d') %>')" class="p-1.5 hover:bg-gray-200 rounded-lg transition-colors">
+      <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+      </svg>
+    </button>
+
+    <div class="text-center">
+      <span class="text-base font-medium text-gray-900">
+        <%= date.strftime("%Y.%m.%d") %>
+        <span class="text-gray-500 ml-1">(<%= %w[일 월 화 수 목 금 토][date.wday][0] %>)</span>
+      </span>
+    </div>
+
+    <button onclick="loadMeals('<%= next_date.strftime('%Y-%m-%d') %>')" class="p-1.5 hover:bg-gray-200 rounded-lg transition-colors">
+      <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- Meal Content -->
+<% if result[:success] %>
+  <% if result[:meals].present? %>
+    <div class="space-y-3">
+      <% result[:meals].each do |meal| %>
+        <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <!-- Meal Header -->
+          <div class="px-3 py-2 bg-gradient-to-r <%= meal_header_color(meal[:meal_code]) %> border-b border-gray-200">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <%= meal_icon(meal[:meal_code]) %>
+                <h3 class="text-base font-semibold text-gray-900"><%= meal[:meal_type] %></h3>
+              </div>
+              <% if meal[:calorie].present? %>
+                <span class="text-sm font-medium text-gray-600"><%= meal[:calorie] %></span>
+              <% end %>
+            </div>
+          </div>
+
+          <!-- Menu Items -->
+          <div class="p-3">
+            <div class="space-y-1.5">
+              <% meal[:dishes].each do |dish| %>
+                <div class="flex items-center">
+                  <span class="text-gray-800 text-sm"><%= dish[:name] %></span>
+                  <% if dish[:allergies].present? %>
+                    <div class="flex items-center gap-1 ml-2">
+                      <% dish[:allergies].each do |allergy| %>
+                        <span class="px-1.5 py-0.5 bg-red-100 text-red-600 text-xs rounded">
+                          <%= allergy %>
+                        </span>
+                      <% end %>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Allergy Notice -->
+    <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+      <div class="flex items-start">
+        <svg class="w-4 h-4 text-yellow-600 mt-0.5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+        </svg>
+        <p class="text-xs text-yellow-700">메뉴명 옆 태그는 알레르기 유발 식품입니다.</p>
+      </div>
+    </div>
+  <% else %>
+    <div class="text-center py-8 text-gray-500">
+      <i class="ti ti-soup-off text-4xl text-gray-300 mb-2"></i>
+      <p><%= result[:message] || "해당 날짜에 급식 정보가 없습니다." %></p>
+    </div>
+  <% end %>
+<% else %>
+  <div class="text-center py-8 text-red-500">
+    <i class="ti ti-alert-circle text-4xl text-red-300 mb-2"></i>
+    <p><%= result[:error] %></p>
+  </div>
+<% end %>

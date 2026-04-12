@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p .claude/agents)",
+      "Bash(touch .claude/.project-map-pending.log)",
+      "Bash(> .claude/.project-map-pending.log)",
+      "Bash(node .claude/hooks/log-edit.mjs)",
+      "Bash(node .claude/hooks/session-start.mjs)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/log-edit.mjs",
+            "async": true,
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/session-start.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
