@@ -12,15 +12,40 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, X, Users, Search } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
+import { toast } from "sonner";
 
 interface User {
   id: number; email: string; name: string; role: string;
   grade?: number; classNum?: number; number?: number;
   subject?: string; homeroom?: string; position?: string;
   mealPeriod?: { startDate: string; endDate: string } | null;
+}
+
+interface MealAppItem {
+  id: number;
+  title: string;
+  description: string | null;
+  type: string;
+  applyStart: string;
+  applyEnd: string;
+  mealStart: string | null;
+  mealEnd: string | null;
+  status: string;
+  _count: { registrations: number };
+  cancelledCount: number;
+}
+
+interface RegistrationItem {
+  id: number;
+  userId: number;
+  status: string;
+  createdAt: string;
+  addedBy: string | null;
+  cancelledBy: string | null;
+  user: { id: number; name: string; grade: number; classNum: number; number: number };
 }
 
 interface DashboardRecord {
@@ -35,8 +60,10 @@ interface DashboardData {
 const emptyForm = {
   role: "STUDENT" as "STUDENT" | "TEACHER",
   email: "", name: "", grade: "", classNum: "", number: "",
-  subject: "", homeroom: "", position: "", startDate: "", endDate: "",
+  subject: "", homeroom: "", position: "",
 };
+
+const emptyAppForm = { title: "", description: "", type: "DINNER", applyStart: "", applyEnd: "", mealStart: "", mealEnd: "" };
 
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -59,6 +86,18 @@ export default function AdminPage() {
   const [teacherSheetUrl, setTeacherSheetUrl] = useState("");
   const [importMessage, setImportMessage] = useState("");
   const [importing, setImporting] = useState(false);
+
+  // Applications (신청관리)
+  const [apps, setApps] = useState<MealAppItem[]>([]);
+  const [appDialogOpen, setAppDialogOpen] = useState(false);
+  const [editingApp, setEditingApp] = useState<MealAppItem | null>(null);
+  const [regDialogOpen, setRegDialogOpen] = useState(false);
+  const [selectedAppForReg, setSelectedAppForReg] = useState<MealAppItem | null>(null);
+  const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
+  const [addStudentDialogOpen, setAddStudentDialogOpen] = useState(false);
+  const [regGradeFilter, setRegGradeFilter] = useState<number | null>(null);
+  const [studentSearch, setStudentSearch] = useState("");
+  const [appForm, setAppForm] = useState(emptyAppForm);
 
   // System settings
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
@@ -173,7 +212,7 @@ export default function AdminPage() {
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchUsers(); fetchDashboard(); fetchSystemSettings(); }, [userFilter]);
+  useEffect(() => { fetchUsers(); fetchDashboard(); fetchSystemSettings(); fetchApps(); }, [userFilter]);
 
   const [importError, setImportError] = useState("");
 
@@ -216,7 +255,7 @@ export default function AdminPage() {
     const body: Record<string, unknown> = { role: addForm.role, email: addForm.email, name: addForm.name };
     if (addForm.role === "STUDENT") {
       body.grade = parseInt(addForm.grade); body.classNum = parseInt(addForm.classNum);
-      body.number = parseInt(addForm.number); body.startDate = addForm.startDate; body.endDate = addForm.endDate;
+      body.number = parseInt(addForm.number);
     } else {
       body.subject = addForm.subject; body.homeroom = addForm.homeroom; body.position = addForm.position;
     }
@@ -238,8 +277,6 @@ export default function AdminPage() {
       subject: user.subject || "",
       homeroom: user.homeroom || "",
       position: user.position || "",
-      startDate: user.mealPeriod ? user.mealPeriod.startDate.slice(0, 10) : "",
-      endDate: user.mealPeriod ? user.mealPeriod.endDate.slice(0, 10) : "",
     });
     setEditDialogOpen(true);
   }
@@ -254,13 +291,6 @@ export default function AdminPage() {
       body.subject = editForm.subject; body.homeroom = editForm.homeroom; body.position = editForm.position;
     }
     await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-
-    if (editUser.role === "STUDENT" && editForm.startDate && editForm.endDate) {
-      await fetch("/api/admin/meal-periods", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: editUser.id, startDate: editForm.startDate, endDate: editForm.endDate }),
-      });
-    }
 
     setEditDialogOpen(false);
     setEditUser(null);
@@ -292,6 +322,108 @@ export default function AdminPage() {
     a.click(); URL.revokeObjectURL(url);
   }
 
+  // --- 신청관리 functions ---
+  async function fetchApps() {
+    const res = await fetch("/api/admin/applications");
+    if (res.ok) { const data = await res.json(); setApps(data.applications); }
+  }
+
+  async function fetchRegistrations(appId: number) {
+    const res = await fetch(`/api/admin/applications/${appId}/registrations`);
+    if (res.ok) { const data = await res.json(); setRegistrations(data.registrations); }
+  }
+
+  async function handleCreateApp() {
+    const res = await fetch("/api/admin/applications", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(appForm),
+    });
+    if (res.ok) { toast.success("공고가 생성되었습니다."); setAppDialogOpen(false); setAppForm(emptyAppForm); fetchApps(); }
+    else { const d = await res.json(); toast.error(d.error || "생성 실패"); }
+  }
+
+  async function handleUpdateApp() {
+    if (!editingApp) return;
+    const res = await fetch(`/api/admin/applications/${editingApp.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(appForm),
+    });
+    if (res.ok) { toast.success("공고가 수정되었습니다."); setAppDialogOpen(false); setEditingApp(null); setAppForm(emptyAppForm); fetchApps(); }
+    else { const d = await res.json(); toast.error(d.error || "수정 실패"); }
+  }
+
+  async function handleCloseApp(app: MealAppItem) {
+    if (!confirm(`"${app.title}" 공고를 마감하시겠습니까?`)) return;
+    const res = await fetch(`/api/admin/applications/${app.id}/close`, { method: "POST" });
+    if (res.ok) { toast.success("공고가 마감되었습니다."); fetchApps(); }
+    else { const d = await res.json(); toast.error(d.error || "마감 실패"); }
+  }
+
+  async function handleDeleteApp(app: MealAppItem) {
+    if (!confirm(`"${app.title}" 공고를 삭제하시겠습니까? 모든 신청 데이터가 삭제됩니다.`)) return;
+    const res = await fetch(`/api/admin/applications/${app.id}`, { method: "DELETE" });
+    if (res.ok) { toast.success("공고가 삭제되었습니다."); fetchApps(); }
+    else { const d = await res.json(); toast.error(d.error || "삭제 실패"); }
+  }
+
+  async function handleCancelReg(regId: number) {
+    if (!selectedAppForReg) return;
+    const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${regId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "CANCELLED" }),
+    });
+    if (res.ok) { toast.success("신청이 취소되었습니다."); fetchRegistrations(selectedAppForReg.id); fetchApps(); }
+    else { toast.error("취소 실패"); }
+  }
+
+  async function handleRestoreReg(regId: number) {
+    if (!selectedAppForReg) return;
+    const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${regId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "APPROVED" }),
+    });
+    if (res.ok) { toast.success("신청이 복원되었습니다."); fetchRegistrations(selectedAppForReg.id); fetchApps(); }
+    else { toast.error("복원 실패"); }
+  }
+
+  async function handleAdminAddStudent(userId: number) {
+    if (!selectedAppForReg) return;
+    const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    if (res.ok) { toast.success("학생이 추가되었습니다."); setAddStudentDialogOpen(false); fetchRegistrations(selectedAppForReg.id); fetchApps(); }
+    else { const d = await res.json(); toast.error(d.error || "추가 실패"); }
+  }
+
+  async function handleExportApp(appId: number, title: string) {
+    const res = await fetch(`/api/admin/applications/${appId}/export`);
+    if (!res.ok) { toast.error("다운로드 실패"); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `${title}.xlsx`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  // Filtered students for add-student dialog
+  const filteredStudentsForAdd = useMemo(() => {
+    if (!addStudentDialogOpen) return [];
+    const registeredIds = new Set(registrations.map((r) => r.userId));
+    return users
+      .filter((u) => u.role === "STUDENT" && !registeredIds.has(u.id))
+      .filter((u) => {
+        if (!studentSearch) return true;
+        const s = studentSearch.toLowerCase();
+        return u.name.toLowerCase().includes(s) || `${u.grade}-${u.classNum}-${u.number}`.includes(s);
+      })
+      .sort((a, b) => {
+        if ((a.grade || 0) !== (b.grade || 0)) return (a.grade || 0) - (b.grade || 0);
+        if ((a.classNum || 0) !== (b.classNum || 0)) return (a.classNum || 0) - (b.classNum || 0);
+        return (a.number || 0) - (b.number || 0);
+      });
+  }, [addStudentDialogOpen, users, registrations, studentSearch]);
+
   // 당일현황: 학년별 카운트 + 정렬 (memoized)
   const { grade1Count, grade2Count, grade3Count, sortedRecords } = useMemo(() => {
     const records = dashboard?.records || [];
@@ -322,13 +454,15 @@ export default function AdminPage() {
           onValueChange={(v) => {
             if (v === "dashboard") fetchDashboard();
             if (v === "meals") setMealsRefreshKey((k) => k + 1);
+            if (v === "applications") fetchApps();
           }}
         >
-          <TabsList className="grid w-full grid-cols-4 rounded-xl h-11 max-w-lg shrink-0">
-            <TabsTrigger value="users" className="rounded-lg">사용자 관리</TabsTrigger>
-            <TabsTrigger value="meals" className="rounded-lg">석식 확인</TabsTrigger>
-            <TabsTrigger value="dashboard" className="rounded-lg">당일 현황</TabsTrigger>
-            <TabsTrigger value="settings" className="rounded-lg">설정</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-5 rounded-xl h-11 max-w-2xl shrink-0">
+            <TabsTrigger value="users" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">사용자 관리</TabsTrigger>
+            <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청관리</TabsTrigger>
+            <TabsTrigger value="meals" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">석식 확인</TabsTrigger>
+            <TabsTrigger value="dashboard" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">당일 현황</TabsTrigger>
+            <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
           </TabsList>
 
           <TabsContent value="users" className="flex-1 min-h-0 mt-4 overflow-hidden">
@@ -354,7 +488,7 @@ export default function AdminPage() {
                       <tr>
                         <th className="p-2 text-left bg-muted">이름</th>
                         <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
-                        <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "신청기간" : "직책"}</th>
+                        <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "이메일" : "직책"}</th>
                         <th className="p-2 text-center w-24 bg-muted">관리</th>
                       </tr>
                     </thead>
@@ -363,7 +497,7 @@ export default function AdminPage() {
                         <tr key={u.id} className="border-t">
                           <td className="p-2">{u.name}</td>
                           <td className="p-2">{u.role === "STUDENT" ? `${u.grade}-${u.classNum}-${u.number}` : `${u.subject || "-"} / ${u.homeroom || "비담임"}`}</td>
-                          <td className="p-2">{u.role === "STUDENT" ? (u.mealPeriod ? `${new Date(u.mealPeriod.startDate).toLocaleDateString("ko-KR")} ~ ${new Date(u.mealPeriod.endDate).toLocaleDateString("ko-KR")}` : "미신청") : u.position || "-"}</td>
+                          <td className="p-2">{u.role === "STUDENT" ? u.email : u.position || "-"}</td>
                           <td className="p-2 text-center">
                             <div className="flex justify-center gap-1">
                               <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}><Pencil className="h-4 w-4" /></Button>
@@ -375,6 +509,90 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="applications" className="flex-1 min-h-0 mt-4 overflow-hidden">
+            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
+              <CardContent className="pt-6 flex-1 min-h-0 overflow-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold">석식 신청 공고</h3>
+                  <Button size="sm" onClick={() => { setEditingApp(null); setAppForm(emptyAppForm); setAppDialogOpen(true); }}>
+                    <Plus className="h-4 w-4 mr-1" /> 공고
+                  </Button>
+                </div>
+                {apps.length === 0 ? (
+                  <p className="text-muted-foreground text-center py-8">등록된 공고가 없습니다.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {apps.map((app) => (
+                      <div key={app.id} className="border rounded-xl p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <Badge variant="outline" className="text-xs">
+                                {app.type === "DINNER" ? "석식" : app.type === "BREAKFAST" ? "조식" : "기타"}
+                              </Badge>
+                              <Badge variant={app.status === "OPEN" ? "default" : "secondary"} className="text-xs">
+                                {app.status === "OPEN" ? "진행중" : "마감"}
+                              </Badge>
+                              <span className="font-medium">{app.title}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              신청: {new Date(app.applyStart).toLocaleDateString("ko-KR")} ~ {new Date(app.applyEnd).toLocaleDateString("ko-KR")}
+                            </p>
+                            {app.mealStart && app.mealEnd && (
+                              <p className="text-xs text-muted-foreground">
+                                급식: {new Date(app.mealStart).toLocaleDateString("ko-KR")} ~ {new Date(app.mealEnd).toLocaleDateString("ko-KR")}
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-1">
+                              신청 {app._count.registrations}명 (취소 {app.cancelledCount}명)
+                            </p>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" title="명단" onClick={() => {
+                              setSelectedAppForReg(app);
+                              fetchRegistrations(app.id);
+                              setRegGradeFilter(null);
+                              setRegDialogOpen(true);
+                            }}>
+                              <Users className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" title="Excel" onClick={() => handleExportApp(app.id, app.title)}>
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" title="수정" onClick={() => {
+                              setEditingApp(app);
+                              setAppForm({
+                                title: app.title,
+                                description: app.description || "",
+                                type: app.type,
+                                applyStart: app.applyStart.slice(0, 10),
+                                applyEnd: app.applyEnd.slice(0, 10),
+                                mealStart: app.mealStart ? app.mealStart.slice(0, 10) : "",
+                                mealEnd: app.mealEnd ? app.mealEnd.slice(0, 10) : "",
+                              });
+                              setAppDialogOpen(true);
+                            }}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            {app.status === "OPEN" ? (
+                              <Button variant="ghost" size="icon" className="h-8 w-8" title="마감" onClick={() => handleCloseApp(app)}>
+                                <X className="h-4 w-4 text-amber-600" />
+                              </Button>
+                            ) : (
+                              <Button variant="ghost" size="icon" className="h-8 w-8" title="삭제" onClick={() => handleDeleteApp(app)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -570,10 +788,6 @@ export default function AdminPage() {
                   <div><Label>반</Label><Input type="number" value={addForm.classNum} onChange={(e) => setAddForm({ ...addForm, classNum: e.target.value })} /></div>
                   <div><Label>번호</Label><Input type="number" value={addForm.number} onChange={(e) => setAddForm({ ...addForm, number: e.target.value })} /></div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><Label>석식 시작일</Label><Input type="date" value={addForm.startDate} onChange={(e) => setAddForm({ ...addForm, startDate: e.target.value })} /></div>
-                  <div><Label>석식 종료일</Label><Input type="date" value={addForm.endDate} onChange={(e) => setAddForm({ ...addForm, endDate: e.target.value })} /></div>
-                </div>
               </>
             )}
             {addForm.role === "TEACHER" && (
@@ -603,10 +817,6 @@ export default function AdminPage() {
                     <div><Label>반</Label><Input type="number" value={editForm.classNum} onChange={(e) => setEditForm({ ...editForm, classNum: e.target.value })} /></div>
                     <div><Label>번호</Label><Input type="number" value={editForm.number} onChange={(e) => setEditForm({ ...editForm, number: e.target.value })} /></div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><Label>석식 시작일</Label><Input type="date" value={editForm.startDate} onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })} /></div>
-                    <div><Label>석식 종료일</Label><Input type="date" value={editForm.endDate} onChange={(e) => setEditForm({ ...editForm, endDate: e.target.value })} /></div>
-                  </div>
                 </>
               )}
               {editUser.role === "TEACHER" && (
@@ -619,6 +829,140 @@ export default function AdminPage() {
               <Button onClick={handleEditUser} className="w-full">저장</Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Application Create/Edit Dialog */}
+      <Dialog open={appDialogOpen} onOpenChange={(open) => { setAppDialogOpen(open); if (!open) { setEditingApp(null); setAppForm(emptyAppForm); } }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{editingApp ? "공고 수정" : "새 공고"}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>유형</Label>
+              <div className="flex gap-2 mt-1">
+                {[{ value: "DINNER", label: "석식" }, { value: "BREAKFAST", label: "조식" }, { value: "OTHER", label: "기타" }].map(({ value, label }) => (
+                  <Button key={value} variant={appForm.type === value ? "default" : "outline"} size="sm" onClick={() => setAppForm({ ...appForm, type: value })}>{label}</Button>
+                ))}
+              </div>
+            </div>
+            <div><Label>제목</Label><Input value={appForm.title} onChange={(e) => setAppForm({ ...appForm, title: e.target.value })} className="rounded-xl" placeholder="예: 4월 석식 신청" /></div>
+            <div><Label>설명 (선택)</Label><textarea className="flex w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" rows={2} value={appForm.description} onChange={(e) => setAppForm({ ...appForm, description: e.target.value })} placeholder="공고 설명..." /></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label>신청 시작일</Label><Input type="date" value={appForm.applyStart} onChange={(e) => setAppForm({ ...appForm, applyStart: e.target.value })} className="rounded-xl" /></div>
+              <div><Label>신청 마감일</Label><Input type="date" value={appForm.applyEnd} onChange={(e) => setAppForm({ ...appForm, applyEnd: e.target.value })} className="rounded-xl" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label>급식 시작일</Label><Input type="date" value={appForm.mealStart} onChange={(e) => setAppForm({ ...appForm, mealStart: e.target.value })} className="rounded-xl" /></div>
+              <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
+            </div>
+            <p className="text-xs text-muted-foreground">급식 기간을 비워두면 명단 수합용 공고로 사용됩니다.</p>
+            <Button onClick={editingApp ? handleUpdateApp : handleCreateApp} className="w-full">{editingApp ? "수정" : "생성"}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Registration List Dialog */}
+      <Dialog open={regDialogOpen} onOpenChange={(open) => { setRegDialogOpen(open); if (!open) { setSelectedAppForReg(null); setRegistrations([]); } }}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between gap-2 flex-wrap">
+              <span>{selectedAppForReg?.title} — 명단 ({registrations.filter((r) => r.status !== "CANCELLED").length}명)</span>
+              <div className="flex gap-1">
+                <Button size="sm" variant="outline" onClick={() => { setStudentSearch(""); setAddStudentDialogOpen(true); fetchUsers(); }}>
+                  <Plus className="h-4 w-4 mr-1" /> 학생 추가
+                </Button>
+                {selectedAppForReg && (
+                  <Button size="sm" variant="outline" onClick={() => handleExportApp(selectedAppForReg.id, selectedAppForReg.title)}>
+                    <Download className="h-4 w-4 mr-1" /> Excel
+                  </Button>
+                )}
+              </div>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex gap-2 mb-3">
+            {[{ value: null, label: "전체" }, { value: 1, label: "1학년" }, { value: 2, label: "2학년" }, { value: 3, label: "3학년" }].map(({ value, label }) => (
+              <Button key={label} variant={regGradeFilter === value ? "default" : "outline"} size="sm" onClick={() => setRegGradeFilter(value)}>{label}</Button>
+            ))}
+          </div>
+          <div className="flex-1 min-h-0 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10">
+                <tr>
+                  <th className="p-2 text-left bg-muted whitespace-nowrap">학년</th>
+                  <th className="p-2 text-left bg-muted whitespace-nowrap">반</th>
+                  <th className="p-2 text-left bg-muted whitespace-nowrap">번호</th>
+                  <th className="p-2 text-left bg-muted whitespace-nowrap">이름</th>
+                  <th className="p-2 text-left bg-muted whitespace-nowrap">신청일</th>
+                  <th className="p-2 text-center bg-muted whitespace-nowrap">상태</th>
+                  <th className="p-2 text-center bg-muted whitespace-nowrap">관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {registrations
+                  .filter((r) => regGradeFilter === null || r.user.grade === regGradeFilter)
+                  .sort((a, b) => {
+                    if (a.user.grade !== b.user.grade) return a.user.grade - b.user.grade;
+                    if (a.user.classNum !== b.user.classNum) return a.user.classNum - b.user.classNum;
+                    return a.user.number - b.user.number;
+                  })
+                  .map((r) => (
+                    <tr key={r.id} className="border-t">
+                      <td className="p-2 whitespace-nowrap">{r.user.grade}</td>
+                      <td className="p-2 whitespace-nowrap">{r.user.classNum}</td>
+                      <td className="p-2 whitespace-nowrap">{r.user.number}</td>
+                      <td className="p-2 whitespace-nowrap">{r.user.name}</td>
+                      <td className="p-2 whitespace-nowrap">{new Date(r.createdAt).toLocaleDateString("ko-KR")}</td>
+                      <td className="p-2 text-center whitespace-nowrap">
+                        <Badge variant={r.status === "CANCELLED" ? "secondary" : "default"} className="text-xs">
+                          {r.status === "CANCELLED" ? "취소" : r.addedBy === "ADMIN" ? "관리자추가" : "승인"}
+                        </Badge>
+                      </td>
+                      <td className="p-2 text-center whitespace-nowrap">
+                        {r.status === "CANCELLED" ? (
+                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleRestoreReg(r.id)}>복원</Button>
+                        ) : (
+                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => handleCancelReg(r.id)}>취소</Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Student Dialog */}
+      <Dialog open={addStudentDialogOpen} onOpenChange={setAddStudentDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>학생 추가</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="이름 또는 학번으로 검색..."
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                className="pl-9 rounded-xl"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto border rounded-lg">
+              {filteredStudentsForAdd.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">검색 결과가 없습니다.</p>
+              ) : (
+                filteredStudentsForAdd.map((u) => (
+                  <button
+                    key={u.id}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted border-b last:border-b-0 flex justify-between items-center"
+                    onClick={() => handleAdminAddStudent(u.id)}
+                  >
+                    <span>{u.grade}-{u.classNum}-{u.number} {u.name}</span>
+                    <Plus className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
