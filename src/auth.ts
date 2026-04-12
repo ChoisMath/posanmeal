@@ -10,11 +10,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
   session: {
     strategy: "jwt",
-    maxAge: 60 * 60 * 24 * 60, // 60 days
+    maxAge: 60 * 60 * 24 * 365, // 365 days
     updateAge: 60 * 60 * 24, // rolling refresh once per day
   },
   jwt: {
-    maxAge: 60 * 60 * 24 * 60,
+    maxAge: 60 * 60 * 24 * 365, // 365 days
   },
   providers: [
     Google,
