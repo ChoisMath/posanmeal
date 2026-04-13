@@ -55,15 +55,13 @@ function createStudentSheet_(ss) {
     sheet.clear();
   }
 
-  var headers = ["email", "grade", "classNum", "number", "name", "startDate", "endDate"];
+  var headers = ["email", "grade", "classNum", "number", "name"];
   var headerDescriptions = [
     "이메일 (Google 계정)",
     "학년 (1~3)",
     "반 (숫자)",
     "번호 (숫자)",
-    "이름",
-    "석식 시작일 (YYYY-MM-DD)",
-    "석식 종료일 (YYYY-MM-DD)"
+    "이름"
   ];
 
   // 헤더 행
@@ -80,16 +78,11 @@ function createStudentSheet_(ss) {
   }
 
   // 예시 데이터
-  var today = new Date();
-  var year = today.getFullYear();
-  var startDate = year + "-03-01";
-  var endDate = year + "-12-31";
-
   var sampleData = [
-    ["hong@school.edu", 1, 1, 1, "홍길동", startDate, endDate],
-    ["kim@school.edu", 1, 1, 2, "김철수", startDate, endDate],
-    ["lee@school.edu", 2, 3, 15, "이영희", startDate, endDate],
-    ["park@school.edu", 3, 2, 8, "박민수", "", ""]
+    ["hong@school.edu", 1, 1, 1, "홍길동"],
+    ["kim@school.edu", 1, 1, 2, "김철수"],
+    ["lee@school.edu", 2, 3, 15, "이영희"],
+    ["park@school.edu", 3, 2, 8, "박민수"]
   ];
   sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
 
@@ -104,8 +97,6 @@ function createStudentSheet_(ss) {
   sheet.setColumnWidth(3, 70);  // classNum
   sheet.setColumnWidth(4, 60);  // number
   sheet.setColumnWidth(5, 100); // name
-  sheet.setColumnWidth(6, 120); // startDate
-  sheet.setColumnWidth(7, 120); // endDate
 
   // 데이터 유효성 검사
   var maxRows = 500;
@@ -133,19 +124,6 @@ function createStudentSheet_(ss) {
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, 4, maxRows, 1).setDataValidation(numberRule);
-
-  // date columns: 날짜 형식
-  var dateRule = SpreadsheetApp.newDataValidation()
-    .requireDate()
-    .setHelpText("날짜를 YYYY-MM-DD 형식으로 입력하세요")
-    .setAllowInvalid(true)
-    .build();
-  sheet.getRange(2, 6, maxRows, 1).setDataValidation(dateRule);
-  sheet.getRange(2, 7, maxRows, 1).setDataValidation(dateRule);
-
-  // 날짜 열 서식을 텍스트 형식의 YYYY-MM-DD로 설정
-  sheet.getRange(2, 6, maxRows, 1).setNumberFormat("yyyy-mm-dd");
-  sheet.getRange(2, 7, maxRows, 1).setNumberFormat("yyyy-mm-dd");
 
   // 숫자 열 서식 (소수점 없이)
   sheet.getRange(2, 2, maxRows, 1).setNumberFormat("0");
