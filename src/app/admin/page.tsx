@@ -16,6 +16,7 @@ import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { toast } from "sonner";
+import { useAdminPermission } from "@/hooks/useAdminPermission";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -65,6 +66,7 @@ const emptyForm = {
 const emptyAppForm = { title: "", description: "", type: "DINNER", applyStart: "", applyEnd: "", mealStart: "", mealEnd: "" };
 
 export default function AdminPage() {
+  const adminPerm = useAdminPermission();
   const [users, setUsers] = useState<User[]>([]);
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
@@ -473,7 +475,19 @@ export default function AdminPage() {
     <div className="h-screen flex flex-col overflow-hidden bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between shrink-0">
         <BrandMark variant="header" label="PosanMeal Admin" />
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          {adminPerm.badgeLabel && (
+            <span className="hidden sm:inline text-sm text-white/90 whitespace-nowrap">
+              {adminPerm.displayName} · <span className="font-medium">{adminPerm.badgeLabel}</span>
+            </span>
+          )}
+          {adminPerm.isTeacher && (
+            <Link href="/teacher">
+              <Button variant="outline" size="sm" className="rounded-xl bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white">
+                교사 페이지로
+              </Button>
+            </Link>
+          )}
           <ThemeToggle />
           <Link href="/check" className="inline-flex items-center justify-center h-9 w-9 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors" aria-label="체크인 페이지" title="체크인 페이지">
             <Camera className="h-4 w-4" />
