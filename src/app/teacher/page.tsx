@@ -69,7 +69,7 @@ export default function TeacherPage() {
         <div className="flex items-center gap-1">
           {canRead && isTeacher && (
             <Link href="/admin">
-              <Button variant="outline" size="sm" className="rounded-xl">
+              <Button variant="outline" size="sm" className="rounded-xl bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white">
                 관리자 페이지
               </Button>
             </Link>
