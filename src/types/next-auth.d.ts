@@ -10,6 +10,7 @@ declare module "next-auth" {
       image?: string;
       role: string;
       dbUserId: number;
+      adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
     };
   }
 
@@ -22,5 +23,6 @@ declare module "next-auth/jwt" {
   interface JWT {
     role?: string;
     dbUserId?: number;
+    adminLevel?: "NONE" | "SUBADMIN" | "ADMIN";
   }
 }
