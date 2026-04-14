@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { canWriteAdmin } from "@/lib/permissions";
 
 export async function GET() {
+  const session = await auth();
+  if (!canWriteAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const [applications, cancelledCounts] = await Promise.all([
     prisma.mealApplication.findMany({
       include: {
@@ -33,6 +39,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const session = await auth();
+  if (!canWriteAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const body = await request.json();
   if (!body.title || !body.type || !body.applyStart || !body.applyEnd) {
     return NextResponse.json({ error: "필수 항목이 누락되었습니다." }, { status: 400 });

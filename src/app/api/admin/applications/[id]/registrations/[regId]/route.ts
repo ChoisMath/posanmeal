@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { canWriteAdmin } from "@/lib/permissions";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; regId: string }> }
 ) {
+  const session = await auth();
+  if (!canWriteAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const { regId } = await params;
   const { status } = await request.json();
   if (status !== "APPROVED" && status !== "CANCELLED") {
