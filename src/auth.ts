@@ -49,11 +49,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account?.provider === "google") {
         const dbUser = await prisma.user.findUnique({
           where: { email: user.email! },
-          select: { id: true, role: true },
+          select: { id: true, role: true, adminLevel: true },
         });
         if (!dbUser) return false;
         (user as any).dbUserId = dbUser.id;
         (user as any).dbRole = dbUser.role;
+        (user as any).dbAdminLevel = dbUser.adminLevel;
         return true;
       }
       return true;
@@ -62,16 +63,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account?.provider === "google" && user) {
         token.dbUserId = (user as any).dbUserId;
         token.role = (user as any).dbRole;
+        token.adminLevel = (user as any).dbAdminLevel ?? "NONE";
       }
       if (account?.provider === "admin-login") {
         token.role = "ADMIN";
         token.dbUserId = 0;
+        token.adminLevel = "ADMIN";
       }
       return token;
     },
     async session({ session, token }) {
       session.user.role = token.role as string;
       session.user.dbUserId = token.dbUserId as number;
+      session.user.adminLevel =
+        (token.adminLevel as "NONE" | "SUBADMIN" | "ADMIN") ?? "NONE";
       return session;
     },
   },
