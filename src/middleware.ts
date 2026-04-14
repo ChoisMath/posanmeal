@@ -5,9 +5,12 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
   const session = req.auth;
 
-  // Public routes (Set for O(1) lookup on exact matches)
   const publicExact = new Set(["/", "/check", "/admin/login"]);
-  const publicPrefixes = ["/api/auth", "/api/checkin", "/api/uploads", "/api/system/settings", "/api/sync", "/api/meals", "/_next", "/uploads"];
+  const publicPrefixes = [
+    "/api/auth", "/api/checkin", "/api/uploads",
+    "/api/system/settings", "/api/sync", "/api/meals",
+    "/_next", "/uploads",
+  ];
 
   if (publicExact.has(pathname) || publicPrefixes.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
@@ -21,6 +24,12 @@ export default auth((req) => {
   }
 
   const role = session.user?.role;
+  const adminLevel = (session.user?.adminLevel ?? "NONE") as
+    | "NONE" | "SUBADMIN" | "ADMIN";
+
+  const isAdminAccess =
+    role === "ADMIN" ||
+    (role === "TEACHER" && (adminLevel === "ADMIN" || adminLevel === "SUBADMIN"));
 
   if (pathname.startsWith("/student") && role !== "STUDENT") {
     return NextResponse.redirect(new URL("/", req.url));
@@ -33,12 +42,12 @@ export default auth((req) => {
   if (
     pathname.startsWith("/admin") &&
     !pathname.startsWith("/admin/login") &&
-    role !== "ADMIN"
+    !isAdminAccess
   ) {
     return NextResponse.redirect(new URL("/admin/login", req.url));
   }
 
-  if (pathname.startsWith("/api/admin") && role !== "ADMIN") {
+  if (pathname.startsWith("/api/admin") && !isAdminAccess) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
