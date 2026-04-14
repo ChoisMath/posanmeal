@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { canWriteAdmin } from "@/lib/permissions";
 
 // GET /api/admin/checkins?year=2026&month=3&category=teacher|1|2|3
 export async function GET(request: Request) {
@@ -42,6 +44,11 @@ export async function GET(request: Request) {
 
 // PATCH /api/admin/checkins — 체크인 타입 수정 (교사 근무↔개인)
 export async function PATCH(request: Request) {
+  const session = await auth();
+  if (!canWriteAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { id, type } = await request.json();
 
   if (!id || !["WORK", "PERSONAL"].includes(type)) {
