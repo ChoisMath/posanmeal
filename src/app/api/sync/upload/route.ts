@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { canWriteAdmin } from "@/lib/permissions";
 
 interface UploadCheckIn {
   userId: number;
@@ -11,7 +12,7 @@ interface UploadCheckIn {
 
 export async function POST(request: Request) {
   const session = await auth();
-  if (session?.user?.role !== "ADMIN") {
+  if (!canWriteAdmin(session)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
