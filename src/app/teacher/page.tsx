@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import { LogOut } from "lucide-react";
 import { MealMenu } from "@/components/MealMenu";
 import { PageLoadingSkeleton } from "@/components/PageSkeleton";
 import { useUser } from "@/hooks/useUser";
+import { useAdminPermission } from "@/hooks/useAdminPermission";
 
 interface TeacherProfile {
   id: number;
@@ -30,6 +32,7 @@ interface TeacherProfile {
 
 export default function TeacherPage() {
   const { user, mutate: mutateUser } = useUser();
+  const { canRead, isTeacher } = useAdminPermission();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: "", subject: "", homeroom: "", position: "" });
   const [qrType, setQrType] = useState<"PERSONAL" | "WORK">("PERSONAL");
@@ -64,6 +67,13 @@ export default function TeacherPage() {
       <header className="header-gradient px-4 py-3 flex items-center justify-between">
         <BrandMark variant="header" label="PosanMeal" />
         <div className="flex items-center gap-1">
+          {canRead && isTeacher && (
+            <Link href="/admin">
+              <Button variant="outline" size="sm" className="rounded-xl">
+                관리자 페이지
+              </Button>
+            </Link>
+          )}
           <ThemeToggle />
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}>
             <LogOut className="h-4 w-4" />
