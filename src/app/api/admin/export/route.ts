@@ -56,15 +56,19 @@ export async function GET(request: Request) {
     const { title, label, users, isTeacher } = categories[si];
     const sheet = workbook.addWorksheet(sheetNames[si]);
 
+    // 열 구성: A(이름) + daysInMonth + 개인/근무(교사만) + 합계
+    const summaryCols = isTeacher ? 3 : 1; // 개인,근무,합계 | 합계
+    const lastCol = daysInMonth + 1 + summaryCols;
+    const personalCol = isTeacher ? daysInMonth + 2 : 0;
+    const workCol = isTeacher ? daysInMonth + 3 : 0;
+    const totalCol = lastCol;
+
     // 행1: 제목 (병합)
-    const lastCol = daysInMonth + 2; // A + days + 합계
     sheet.mergeCells(1, 1, 1, lastCol);
     const titleCell = sheet.getCell(1, 1);
     titleCell.value = title;
     titleCell.font = { bold: true, size: 14 };
     titleCell.alignment = { horizontal: "center" };
-
-    // 행2: 빈 행
 
     // 행3: 헤더
     const headerRow = sheet.getRow(3);
@@ -72,7 +76,11 @@ export async function GET(request: Request) {
     for (let d = 1; d <= daysInMonth; d++) {
       headerRow.getCell(d + 1).value = d;
     }
-    headerRow.getCell(lastCol).value = "합계";
+    if (isTeacher) {
+      headerRow.getCell(personalCol).value = "개인";
+      headerRow.getCell(workCol).value = "근무";
+    }
+    headerRow.getCell(totalCol).value = "합계";
     headerRow.font = { bold: true };
     headerRow.alignment = { horizontal: "center" };
     headerRow.getCell(1).alignment = { horizontal: "left" };
@@ -82,7 +90,16 @@ export async function GET(request: Request) {
     for (let d = 1; d <= daysInMonth; d++) {
       sheet.getColumn(d + 1).width = 4;
     }
-    sheet.getColumn(lastCol).width = 6;
+    if (isTeacher) {
+      sheet.getColumn(personalCol).width = 6;
+      sheet.getColumn(workCol).width = 6;
+    }
+    sheet.getColumn(totalCol).width = 6;
+
+    // 일자별 합계 누적용
+    const dailyPersonal = new Array(daysInMonth + 1).fill(0);
+    const dailyWork = new Array(daysInMonth + 1).fill(0);
+    const dailyTotal = new Array(daysInMonth + 1).fill(0);
 
     // 행4~: 데이터
     for (const user of users) {
@@ -101,25 +118,91 @@ export async function GET(request: Request) {
 
       // 날짜열
       let count = 0;
+      let personalCount = 0;
+      let workCount = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         const checkIn = checkedDaysMap.get(d);
         if (checkIn) {
           count++;
+          dailyTotal[d]++;
           if (isTeacher) {
             const type = (checkIn as { type?: string }).type;
-            row.getCell(d + 1).value = type === "WORK" ? "근" : "개";
+            if (type === "WORK") {
+              workCount++;
+              dailyWork[d]++;
+              row.getCell(d + 1).value = "근";
+            } else {
+              personalCount++;
+              dailyPersonal[d]++;
+              row.getCell(d + 1).value = "개";
+            }
           } else {
+            dailyPersonal[d]++;
             row.getCell(d + 1).value = "O";
           }
         }
       }
 
-      // 합계열
-      row.getCell(lastCol).value = count;
+      // 합계
+      if (isTeacher) {
+        row.getCell(personalCol).value = personalCount;
+        row.getCell(workCol).value = workCount;
+      }
+      row.getCell(totalCol).value = count;
 
-      // 가운데 정렬 (날짜/합계)
+      // 가운데 정렬
       for (let c = 2; c <= lastCol; c++) {
         row.getCell(c).alignment = { horizontal: "center" };
+      }
+    }
+
+    // 하단: 일자별 합계 행
+    if (isTeacher) {
+      const personalRow = sheet.addRow([]);
+      personalRow.getCell(1).value = "개인";
+      for (let d = 1; d <= daysInMonth; d++) {
+        personalRow.getCell(d + 1).value = dailyPersonal[d] || "";
+      }
+      personalRow.getCell(personalCol).value = dailyPersonal.reduce((s, v) => s + v, 0);
+      personalRow.getCell(workCol).value = 0;
+      personalRow.getCell(totalCol).value = dailyPersonal.reduce((s, v) => s + v, 0);
+      personalRow.font = { bold: true };
+
+      const workRow = sheet.addRow([]);
+      workRow.getCell(1).value = "근무";
+      for (let d = 1; d <= daysInMonth; d++) {
+        workRow.getCell(d + 1).value = dailyWork[d] || "";
+      }
+      workRow.getCell(personalCol).value = 0;
+      workRow.getCell(workCol).value = dailyWork.reduce((s, v) => s + v, 0);
+      workRow.getCell(totalCol).value = dailyWork.reduce((s, v) => s + v, 0);
+      workRow.font = { bold: true };
+
+      const totalRow = sheet.addRow([]);
+      totalRow.getCell(1).value = "합계";
+      for (let d = 1; d <= daysInMonth; d++) {
+        totalRow.getCell(d + 1).value = dailyTotal[d] || "";
+      }
+      totalRow.getCell(personalCol).value = dailyPersonal.reduce((s, v) => s + v, 0);
+      totalRow.getCell(workCol).value = dailyWork.reduce((s, v) => s + v, 0);
+      totalRow.getCell(totalCol).value = dailyTotal.reduce((s, v) => s + v, 0);
+      totalRow.font = { bold: true };
+
+      for (const r of [personalRow, workRow, totalRow]) {
+        for (let c = 2; c <= lastCol; c++) {
+          r.getCell(c).alignment = { horizontal: "center" };
+        }
+      }
+    } else {
+      const totalRow = sheet.addRow([]);
+      totalRow.getCell(1).value = "합계";
+      for (let d = 1; d <= daysInMonth; d++) {
+        totalRow.getCell(d + 1).value = dailyTotal[d] || "";
+      }
+      totalRow.getCell(totalCol).value = dailyTotal.reduce((s, v) => s + v, 0);
+      totalRow.font = { bold: true };
+      for (let c = 2; c <= lastCol; c++) {
+        totalRow.getCell(c).alignment = { horizontal: "center" };
       }
     }
   }

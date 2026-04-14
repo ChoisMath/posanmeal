@@ -101,7 +101,7 @@ export default function TeacherPage() {
           <TabsContent value="qr">
             <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 text-center">
-                {/* 세그먼트 컨트롤: 개인석식 / 근무 */}
+                {/* 세그먼트 컨트롤: 개인정산 / 근무 */}
                 <div className="flex rounded-xl bg-muted p-1 mb-4 max-w-xs mx-auto">
                   <button
                     onClick={() => setQrType("PERSONAL")}
@@ -111,7 +111,7 @@ export default function TeacherPage() {
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    개인석식
+                    개인정산
                   </button>
                   <button
                     onClick={() => setQrType("WORK")}

@@ -142,10 +142,11 @@ posanmeal/
 **Enums**
 - `Role`: STUDENT | TEACHER
 - `CheckInType`: STUDENT | WORK | PERSONAL
+- `AdminLevel`: NONE | SUBADMIN | ADMIN
 
 **Models**
 - **Admin** — `id`, `username` UNIQUE, `passwordHash`, `createdAt` (legacy; current admin uses env vars via credentials provider)
-- **User** — `id`, `email` UNIQUE, `name`, `role`, `grade?`, `classNum?`, `number?` (student only), `subject?`, `homeroom?` (e.g. "2-6"), `position?` (teacher), `photoUrl?`, `createdAt`, `updatedAt`. Relations: `registrations` (1:N), `checkIns` (1:N). Index `(role, grade, classNum, number)`.
+- **User** — `id`, `email` UNIQUE, `name`, `role`, `grade?`, `classNum?`, `number?` (student only), `subject?`, `homeroom?` (e.g. "2-6"), `position?` (teacher), `photoUrl?`, `adminLevel` (AdminLevel, default NONE), `createdAt`, `updatedAt`. Relations: `registrations` (1:N), `checkIns` (1:N). Indexes `(role, grade, classNum, number)` and `(role, adminLevel)`.
 - **MealApplication** — `id`, `title`, `description?`, `type` ("DINNER"|"BREAKFAST"|"OTHER"), `applyStart @db.Date`, `applyEnd @db.Date`, `mealStart? @db.Date`, `mealEnd? @db.Date`, `status` ("OPEN"|"CLOSED", default OPEN), `createdAt`, `updatedAt`. Indexes on `status` and `(applyStart, applyEnd)`.
 - **MealRegistration** — `id`, `applicationId`, `userId`, `signature @db.Text`, `status` ("APPROVED"|"CANCELLED", default APPROVED), `createdAt`, `cancelledAt?`, `cancelledBy?` ("STUDENT"|"ADMIN"), `addedBy?` (null=학생 본인, "ADMIN"=관리자 추가). Unique `(applicationId, userId)`. Indexes on `userId` and `(applicationId, status)`. FK cascade on both FKs.
 - **CheckIn** — `id`, `userId`, `date @db.Date`, `checkedAt`, `type`. Unique `(userId, date)`. Indexes on `date` and `userId`. FK cascade.
@@ -183,6 +184,7 @@ shadcn/ui: button, card, dialog, dropdown-menu, input, label, select, separator,
 | `neis-meal.ts` | `Dish`, `Meal`, `MealResponse` (interfaces), `ALLERGY_MAP` | NEIS 급식 API client (`open.neis.go.kr`); office D10, school 7240189; 1-hour in-memory cache; exports types used by `MealMenu.tsx` |
 | `settings-cache.ts` | `getCachedSettings`, `invalidateSettingsCache` | Server-side in-memory cache (30s TTL) for `SystemSetting` rows (`operationMode`, `qrGeneration`); used by `/api/system/settings` and `/api/qr/token` |
 | `fetcher.ts` | `fetcher` | Generic SWR fetcher; throws with `.status` + `.info` on non-OK responses |
+| `permissions.ts` | `EffectiveLevel`, `getEffectiveAdminLevel`, `canWriteAdmin`, `canReadAdmin` | Resolves effective admin level from session: env-admin role=ADMIN → ADMIN; teacher with `adminLevel` ADMIN/SUBADMIN → respective level; used by middleware and API routes |
 
 ## 8b. Hooks (`src/hooks/`)
 
@@ -198,22 +200,24 @@ SWR-based data hooks; all use `fetcher` from `src/lib/fetcher.ts`.
 | `useAdminApps` | `GET /api/admin/applications` | `{ apps, error, isLoading, mutate }` |
 | `useAdminDashboard(date?)` | `GET /api/admin/dashboard` | `{ dashboard, error, isLoading, mutate }` (30s auto-refresh) |
 | `useSystemSettings` | `GET /api/system/settings` | `{ settings, error, isLoading, mutate }` |
+| `useAdminPermission` | session only (no API) | `{ canWrite, canRead, isSubadmin, isTeacher, isEnvAdmin, displayName, badgeLabel, dbUserId }` — derives effective admin level from session for client-side gating |
 
 ## 9. Auth & Middleware
 
 **`src/auth.ts`** — NextAuth v5
 - `trustHost: true` — required for Railway reverse-proxy deployment
-- **Google**: `signIn` callback looks up User by email; rejects if not in DB
+- **Google**: `signIn` callback looks up User by email; rejects if not in DB; selects `id`, `role`, `adminLevel`
 - **Credentials (admin)**: validates against `ADMIN_USERNAME` / `ADMIN_PASSWORD` (plain env var, not hashed)
-- **jwt callback**: first login → fetch `role` + `dbUserId` into token; admin provider sets role=ADMIN
-- **session callback**: exposes `user.role`, `user.dbUserId`
+- **jwt callback**: first login → fetch `role`, `dbUserId`, `adminLevel` into token; admin provider sets role=ADMIN, adminLevel=ADMIN
+- **session callback**: exposes `user.role`, `user.dbUserId`, `user.adminLevel`
 - **session lifetime**: `maxAge` 365 days, `updateAge` 1 day (rolling); JWT `maxAge` 365 days
 - signIn page `/`, error → `/`
 
 **`src/middleware.ts`**
-- Public bypass: `/`, `/check`, `/admin/login`, `/api/auth/**`, `/api/checkin`, `/api/uploads/**`, `/api/system/settings/**`, `/api/sync/**`, `/_next/**`, `/uploads/**`
-- Page role gates: `/student`→STUDENT, `/teacher`→TEACHER, `/admin/*`→ADMIN (else → `/admin/login`)
-- API role gates: `/api/admin/**`→ADMIN (403), `/api/teacher/**`→TEACHER (403)
+- Imports `canReadAdmin` from `src/lib/permissions`
+- Public bypass: `/`, `/check`, `/admin/login`, `/api/auth/**`, `/api/checkin`, `/api/uploads/**`, `/api/system/settings/**`, `/api/sync/**`, `/api/meals/**`, `/_next/**`, `/uploads/**`
+- Page role gates: `/student`→STUDENT, `/teacher`→TEACHER, `/admin/*`→`canReadAdmin()` (includes SUBADMIN teachers; else → `/admin/login`)
+- API role gates: `/api/admin/**`→`canReadAdmin()` (403 if denied), `/api/teacher/**`→TEACHER (403)
 - Matcher: `/((?!_next/|.*\\..*).*)` — skips `_next/` AND any path containing a `.` (covers all static assets: `.png`, `.ico`, `.webmanifest`, `.svg`, etc.)
 
 ## 10. Environment Variables (`.env.example`)
