@@ -504,12 +504,18 @@ export default function AdminPage() {
             if (v === "applications") fetchApps();
           }}
         >
-          <TabsList className="grid w-full grid-cols-5 rounded-xl h-11 max-w-2xl shrink-0">
+          <TabsList
+            className={`grid w-full ${adminPerm.isSubadmin ? "grid-cols-3" : "grid-cols-5"} rounded-xl h-11 max-w-2xl shrink-0`}
+          >
             <TabsTrigger value="users" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">사용자 관리</TabsTrigger>
-            <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청관리</TabsTrigger>
+            {!adminPerm.isSubadmin && (
+              <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청관리</TabsTrigger>
+            )}
             <TabsTrigger value="meals" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">석식 확인</TabsTrigger>
             <TabsTrigger value="dashboard" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">당일 현황</TabsTrigger>
-            <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
+            {!adminPerm.isSubadmin && (
+              <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="users" className="flex-1 min-h-0 mt-1 overflow-hidden">
@@ -560,6 +566,7 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
+          {!adminPerm.isSubadmin && (
           <TabsContent value="applications" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-auto">
@@ -647,6 +654,7 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
 
           <TabsContent value="meals" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
@@ -725,6 +733,7 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
+          {!adminPerm.isSubadmin && (
           <TabsContent value="settings" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0">
               <CardContent className="pt-2 space-y-6">
@@ -802,6 +811,7 @@ export default function AdminPage() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
         </Tabs>
       </div>
 
