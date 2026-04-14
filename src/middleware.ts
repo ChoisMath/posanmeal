@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { canReadAdmin } from "@/lib/permissions";
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -24,12 +25,7 @@ export default auth((req) => {
   }
 
   const role = session.user?.role;
-  const adminLevel = (session.user?.adminLevel ?? "NONE") as
-    | "NONE" | "SUBADMIN" | "ADMIN";
-
-  const isAdminAccess =
-    role === "ADMIN" ||
-    (role === "TEACHER" && (adminLevel === "ADMIN" || adminLevel === "SUBADMIN"));
+  const isAdminAccess = canReadAdmin(session);
 
   if (pathname.startsWith("/student") && role !== "STUDENT") {
     return NextResponse.redirect(new URL("/", req.url));
