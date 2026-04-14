@@ -22,6 +22,7 @@ interface User {
   id: number; email: string; name: string; role: string;
   grade?: number; classNum?: number; number?: number;
   subject?: string; homeroom?: string; position?: string;
+  adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
 }
 
 interface MealAppItem {
@@ -309,6 +310,45 @@ export default function AdminPage() {
     fetchUsers();
   }
 
+  const labelOfAdminLevel = (lvl: "NONE" | "SUBADMIN" | "ADMIN") =>
+    lvl === "ADMIN" ? "관리자" : lvl === "SUBADMIN" ? "서브관리자" : "일반";
+
+  async function handleAdminLevelChange(
+    user: User,
+    newLevel: "NONE" | "SUBADMIN" | "ADMIN"
+  ) {
+    if (newLevel === user.adminLevel) return;
+    const ok = window.confirm(
+      `"${user.name}"의 권한을 "${labelOfAdminLevel(newLevel)}"(으)로 변경하시겠습니까?`
+    );
+    if (!ok) return;
+
+    const res = await fetch("/api/admin/users", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        grade: user.grade ?? null,
+        classNum: user.classNum ?? null,
+        number: user.number ?? null,
+        subject: user.subject ?? null,
+        homeroom: user.homeroom ?? null,
+        position: user.position ?? null,
+        adminLevel: newLevel,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data?.reason ?? "권한 변경에 실패했습니다.");
+      return;
+    }
+    toast.success("권한 변경 완료. 대상자가 다음 로그인 시 적용됩니다.");
+    fetchUsers();
+  }
+
   async function handleToggleCheckinType(record: DashboardRecord) {
     const newType = record.type === "WORK" ? "PERSONAL" : "WORK";
     const res = await fetch("/api/admin/checkins", {
@@ -526,14 +566,16 @@ export default function AdminPage() {
                     <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
                     <Button variant={userFilter === "TEACHER" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("TEACHER")}>교사</Button>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => { setImportMessage(""); setSheetDialogOpen(true); }}>
-                      <FileSpreadsheet className="h-4 w-4 mr-1" /> Sheet연결
-                    </Button>
-                    <Button size="sm" onClick={() => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); }}>
-                      <Plus className="h-4 w-4 mr-1" /> 추가
-                    </Button>
-                  </div>
+                  {adminPerm.canWrite && (
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => { setImportMessage(""); setSheetDialogOpen(true); }}>
+                        <FileSpreadsheet className="h-4 w-4 mr-1" /> Sheet연결
+                      </Button>
+                      <Button size="sm" onClick={() => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); }}>
+                        <Plus className="h-4 w-4 mr-1" /> 추가
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="border rounded-lg overflow-auto max-h-[70vh]">
                   <table className="w-full text-sm whitespace-nowrap">
@@ -542,6 +584,7 @@ export default function AdminPage() {
                         <th className="p-2 text-left bg-muted">이름</th>
                         <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
                         <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "이메일" : "직책"}</th>
+                        <th className="p-2 text-left bg-muted whitespace-nowrap">권한</th>
                         <th className="p-2 text-center w-24 bg-muted">관리</th>
                       </tr>
                     </thead>
@@ -551,11 +594,32 @@ export default function AdminPage() {
                           <td className="p-2">{u.name}</td>
                           <td className="p-2">{u.role === "STUDENT" ? `${u.grade}-${u.classNum}-${u.number}` : `${u.subject || "-"} / ${u.homeroom || "비담임"}`}</td>
                           <td className="p-2">{u.role === "STUDENT" ? u.email : u.position || "-"}</td>
+                          <td className="p-2 whitespace-nowrap">
+                            {u.role === "STUDENT" ? (
+                              <span className="text-muted-foreground">—</span>
+                            ) : (
+                              <select
+                                value={u.adminLevel}
+                                disabled={
+                                  !adminPerm.canWrite ||
+                                  (adminPerm.dbUserId === u.id && u.adminLevel === "ADMIN")
+                                }
+                                onChange={(e) => handleAdminLevelChange(u, e.target.value as "NONE" | "SUBADMIN" | "ADMIN")}
+                                className="rounded-md border px-2 py-1 text-sm bg-background disabled:opacity-60"
+                              >
+                                <option value="NONE">일반</option>
+                                <option value="SUBADMIN">서브관리자</option>
+                                <option value="ADMIN">관리자</option>
+                              </select>
+                            )}
+                          </td>
                           <td className="p-2 text-center">
-                            <div className="flex justify-center gap-1">
-                              <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}><Pencil className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                            </div>
+                            {adminPerm.canWrite && (
+                              <div className="flex justify-center gap-1">
+                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}><Pencil className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
