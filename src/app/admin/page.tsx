@@ -781,7 +781,17 @@ export default function AdminPage() {
                               <td className="p-2">{new Date(r.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</td>
                               <td className="p-2 text-center">
                                 {r.role === "TEACHER" && (
-                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleToggleCheckinType(r)} title={`${r.type === "WORK" ? "개인" : "근무"}으로 변경`}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    disabled={adminPerm.isSubadmin}
+                                    onClick={() => {
+                                      if (adminPerm.isSubadmin) return;
+                                      handleToggleCheckinType(r);
+                                    }}
+                                    title={adminPerm.isSubadmin ? "권한 없음" : `${r.type === "WORK" ? "개인" : "근무"}으로 변경`}
+                                  >
                                     <ArrowLeftRight className="h-3.5 w-3.5" />
                                   </Button>
                                 )}
