@@ -192,7 +192,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
           })}
         </tbody>
         {/* 일자별 합계 footer */}
-        <tfoot className="sticky bottom-0 z-20">
+        <tfoot>
           {isTeacher ? (
             <>
               <tr>
