@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { canWriteAdmin } from "@/lib/permissions";
 
 function extractSpreadsheetId(url: string): string | null {
   const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -89,6 +91,10 @@ async function fetchSheet(url: string, label: string): Promise<{ rows: string[][
 }
 
 export async function POST(request: Request) {
+  const session = await auth();
+  if (!canWriteAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   let body: { studentSheetUrl?: string; teacherSheetUrl?: string };
   try {
     body = await request.json();
