@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCachedSettings, invalidateSettingsCache } from "@/lib/settings-cache";
+import { canWriteAdmin } from "@/lib/permissions";
 
 export async function GET() {
   const settings = await getCachedSettings();
@@ -20,7 +21,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   const session = await auth();
-  if (session?.user?.role !== "ADMIN") {
+  if (!canWriteAdmin(session)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
