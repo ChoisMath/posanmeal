@@ -27,7 +27,7 @@ interface UserRecord {
 
 type Category = "teacher" | "1" | "2" | "3";
 
-function MealGrid({ category, year, month }: { category: Category; year: number; month: number }) {
+function MealGrid({ category, year, month, readonly = false }: { category: Category; year: number; month: number; readonly?: boolean }) {
   const { data, mutate: mutateGrid } = useSWR(
     `/api/admin/checkins?year=${year}&month=${month}&category=${category}`,
     fetcher,
@@ -111,6 +111,16 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
                 </th>
               );
             })}
+            {isTeacher && (
+              <>
+                <th className="bg-green-50 dark:bg-green-950 px-2 py-2 text-center font-medium text-green-700 dark:text-green-300 border-b border-l min-w-[44px] text-fit-sm">
+                  개인
+                </th>
+                <th className="bg-blue-50 dark:bg-blue-950 px-2 py-2 text-center font-medium text-blue-700 dark:text-blue-300 border-b border-l min-w-[44px] text-fit-sm">
+                  근무
+                </th>
+              </>
+            )}
             <th className="sticky right-0 z-30 bg-muted px-2 py-2 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
               합계
             </th>
@@ -152,16 +162,30 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
                           : weekend
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""
-                      } ${isTeacher && checkIn ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
-                      title={checkIn ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${isTeacher ? " (클릭하여 변경)" : ""}` : undefined}
-                      onClick={isTeacher && checkIn ? () => handleToggleType(user.id, checkIn) : undefined}
+                      } ${isTeacher && checkIn && !readonly ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
+                      title={checkIn ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${isTeacher && !readonly ? " (클릭하여 변경)" : ""}` : undefined}
+                      onClick={isTeacher && checkIn && !readonly ? () => handleToggleType(user.id, checkIn) : undefined}
                     >
                       {checkIn ? (isTeacher ? (checkIn.type === "WORK" ? "근" : "개") : "O") : ""}
                     </td>
                   );
                 })}
+                {isTeacher && (() => {
+                  const workCount = user.checkIns.filter((c) => c.type === "WORK").length;
+                  const personalCount = user.checkIns.length - workCount;
+                  return (
+                    <>
+                      <td className="text-center border-b border-l px-2 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">
+                        {personalCount}
+                      </td>
+                      <td className="text-center border-b border-l px-2 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                        {workCount}
+                      </td>
+                    </>
+                  );
+                })()}
                 <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-1.5 font-medium">
-                  {user.checkIns.length}/{daysInMonth}
+                  {user.checkIns.length}{isTeacher ? "" : `/${daysInMonth}`}
                 </td>
               </tr>
             );
@@ -178,6 +202,10 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
                     {d.work || ""}
                   </td>
                 ))}
+                <td className="text-center border-t border-l px-2 py-1.5 bg-blue-50 dark:bg-blue-950 opacity-30">0</td>
+                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                  {dailyTotals.reduce((s, d) => s + d.work, 0)}
+                </td>
                 <td className="sticky right-0 z-30 bg-blue-50 dark:bg-blue-950 text-center border-t border-l px-2 py-1.5 font-bold text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
@@ -189,6 +217,10 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
                     {d.personal || ""}
                   </td>
                 ))}
+                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+                  {dailyTotals.reduce((s, d) => s + d.personal, 0)}
+                </td>
+                <td className="text-center border-t border-l px-2 py-1.5 bg-green-50 dark:bg-green-950 opacity-30">0</td>
                 <td className="sticky right-0 z-30 bg-green-50 dark:bg-green-950 text-center border-t border-l px-2 py-1.5 font-bold text-green-700 dark:text-green-300">
                   {dailyTotals.reduce((s, d) => s + d.personal, 0)}
                 </td>
@@ -200,6 +232,12 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
                     {d.total || ""}
                   </td>
                 ))}
+                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+                  {dailyTotals.reduce((s, d) => s + d.personal, 0)}
+                </td>
+                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                  {dailyTotals.reduce((s, d) => s + d.work, 0)}
+                </td>
                 <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
                   {grandTotal}
                 </td>
@@ -224,7 +262,7 @@ function MealGrid({ category, year, month }: { category: Category; year: number;
   );
 }
 
-export function AdminMealTable() {
+export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}) {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -275,7 +313,7 @@ export function AdminMealTable() {
                 <Download className="h-4 w-4 mr-1" /> Excel
               </Button>
             </div>
-            <MealGrid category={cat} year={year} month={month} />
+            <MealGrid category={cat} year={year} month={month} readonly={readonly} />
           </TabsContent>
         ))}
       </Tabs>

@@ -723,7 +723,7 @@ export default function AdminPage() {
           <TabsContent value="meals" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
-                <AdminMealTable />
+                <AdminMealTable readonly={adminPerm.isSubadmin} />
               </CardContent>
             </Card>
           </TabsContent>
