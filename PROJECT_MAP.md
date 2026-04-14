@@ -2,15 +2,21 @@
 
 > **Purpose of this file:** Fast index of the entire codebase. Future Claude sessions read this FIRST and only open the specific files relevant to the current task. When the map is stale, run the `project-map-keeper` agent to refresh it.
 >
-> **Last full regeneration:** 2026-04-12 (MealPeriod removed; MealApplication + MealRegistration added; SignaturePad component; local-db v3)
+> **Last update:** 2026-04-14 (AdminLevel enum + teacher admin/subadmin roles; branch workflow simplified)
 
 ---
+
+## 0. Branch / Deployment Workflow
+
+- **Working + deployment branch:** `feat/posanmeal-mvp` (Railway watches this branch for auto-deploy).
+- **`main`** is legacy/unused; it may lag behind `feat/posanmeal-mvp` and should not receive new work unless the policy changes.
+- **Workflow:** commit directly on `feat/posanmeal-mvp` → `git push origin feat/posanmeal-mvp` → Railway deploy + `prisma migrate deploy` auto-runs. There is no separate staging branch — verification happens post-deploy in production.
 
 ## 1. Overview
 
 Korean high-school dinner (석식) management app — branding name **PosanMeal**. Students scan a daily QR code at a food-court tablet to check in; teachers have work + personal QR variants; admins import users from Google Sheets and export monthly Excel reports.
 
-**Auth roles:** `STUDENT`, `TEACHER`, `ADMIN` (admin uses credentials provider; others use Google OAuth).
+**Auth roles:** `STUDENT`, `TEACHER`, `ADMIN` (admin uses credentials provider; others use Google OAuth). Teachers may additionally carry `adminLevel ∈ {NONE, SUBADMIN, ADMIN}` — SUBADMIN gets read-only access to `/admin`, ADMIN gets full `/admin` write access (equivalent to env-credentials admin). See spec `docs/superpowers/specs/2026-04-14-teacher-admin-roles-design.md`.
 
 ## 2. Tech Stack
 
