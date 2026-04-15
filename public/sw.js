@@ -1,15 +1,18 @@
-const CACHE_VERSION = "posanmeal-v4";
-const PRECACHE_URLS = ["/check", "/student", "/teacher"];
+const CACHE_VERSION = "posanmeal-v5";
+// Only precache fully-public routes. Authenticated pages redirect when
+// anonymous, which would cause cache.addAll to reject and abort install.
+const PRECACHE_URLS = ["/check"];
 
-// Install: cache the /check page shell
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_VERSION).then((cache) => cache.addAll(PRECACHE_URLS))
+    caches.open(CACHE_VERSION).then((cache) =>
+      // allSettled so a single URL failure (offline, 5xx) does not abort install
+      Promise.allSettled(PRECACHE_URLS.map((url) => cache.add(url)))
+    )
   );
   self.skipWaiting();
 });
 
-// Activate: clean old caches
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -23,17 +26,29 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch strategy
+self.addEventListener("message", (event) => {
+  const data = event.data;
+  if (!data || typeof data !== "object") return;
+  if (data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+    return;
+  }
+  if (data.type === "CLEAR_ALL") {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+    );
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET requests
   if (event.request.method !== "GET") return;
 
-  // API requests: always network (never cache)
+  // API requests: always network
   if (url.pathname.startsWith("/api/")) return;
 
-  // Static assets (/_next/static/): Cache First
+  // Static assets: Cache First
   if (url.pathname.startsWith("/_next/static/")) {
     event.respondWith(
       caches.match(event.request).then(
@@ -49,7 +64,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // /check page: Cache First (critical for offline)
+  // /check page: Cache First (critical for kiosk offline)
   if (url.pathname === "/check") {
     event.respondWith(
       caches.match(event.request).then(
@@ -85,15 +100,16 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigation requests: try network, fall back to /check if offline
+  // Navigation requests: network-first. Only the kiosk /check page gets an
+  // offline fallback — swapping an auth page for /check would be confusing.
   if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request).catch(() =>
-        caches.match("/check").then((cached) => cached || new Response("Offline", { status: 503 }))
-      )
-    );
+    if (url.pathname === "/check") {
+      event.respondWith(
+        fetch(event.request).catch(() =>
+          caches.match("/check").then((cached) => cached || new Response("Offline", { status: 503 }))
+        )
+      );
+    }
     return;
   }
-
-  // Everything else: Network only (no offline support needed)
 });

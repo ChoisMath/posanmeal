@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signOut } from "next-auth/react";
+import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -157,7 +157,7 @@ export default function StudentPage() {
             variant="ghost"
             size="icon"
             className="text-white/80 hover:text-white hover:bg-white/10"
-            onClick={() => signOut({ callbackUrl: "/" })}
+            onClick={() => clearClientStateAndSignOut("/")}
           >
             <LogOut className="h-4 w-4" />
           </Button>
