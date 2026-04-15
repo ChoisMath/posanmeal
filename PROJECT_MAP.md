@@ -132,6 +132,7 @@ posanmeal/
 - `POST   /api/admin/applications/[id]/import` — multipart `file` (filled-in template XLSX); bulk-creates MealRegistration rows from rows with E-column "O"; returns `{ added, skippedExisting, skippedNotFound, total }`
 - `GET    /api/admin/dashboard?date=YYYY-MM-DD` — daily stats + records
 - `PATCH  /api/admin/checkins` — body `{ id, type }` toggle WORK↔PERSONAL for a teacher check-in record
+- `POST   /api/admin/checkins/toggle` — admin manual edit; body `{ userId, date: "YYYY-MM-DD", action: "cycle" | "toggle" }`. cycle (teacher): none→WORK→PERSONAL→delete. toggle (student): none↔STUDENT. Requires `canWriteAdmin` (no subadmin)
 - `POST   /api/admin/import` — body `{ studentSheetUrl?, teacherSheetUrl? }` (Google Sheets CSV)
 - `GET    /api/admin/export?year=&month=` — returns monthly check-in .xlsx
 
