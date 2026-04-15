@@ -6,6 +6,7 @@ import { fetcher } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 
 interface CheckInRecord {
   id: number;
@@ -49,6 +50,9 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
 
   const isWeekend = (day: number) => weekendSet.has(day);
 
+  // 진행 중인 셀 클릭(userId:day) — 중복 클릭 방지
+  const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
+
   // 일자별 합계 계산 (memoized)
   const { dailyTotals, grandTotal } = useMemo(() => {
     const totals = Array.from({ length: daysInMonth }, (_, i) => {
@@ -79,14 +83,30 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
 
   // 셀 클릭: 교사=cycle, 학생=toggle
   async function handleCellClick(userId: number, day: number) {
+    const key = `${userId}:${day}`;
+    if (pendingCells.has(key)) return;
+    setPendingCells((prev) => new Set(prev).add(key));
     const action = isTeacher ? "cycle" : "toggle";
-    const res = await fetch("/api/admin/checkins/toggle", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, date: formatDayKey(day), action }),
-    });
-    if (res.ok) {
-      mutateGrid();
+    try {
+      const res = await fetch("/api/admin/checkins/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, date: formatDayKey(day), action }),
+      });
+      if (res.ok) {
+        mutateGrid();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error ?? "체크인 변경에 실패했습니다.");
+      }
+    } catch {
+      toast.error("네트워크 오류가 발생했습니다.");
+    } finally {
+      setPendingCells((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
@@ -158,7 +178,8 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   const day = i + 1;
                   const checkIn = checkedDaysMap.get(day);
                   const weekend = isWeekend(day);
-                  const clickable = !readonly;
+                  const pending = pendingCells.has(`${user.id}:${day}`);
+                  const clickable = !readonly && !pending;
                   return (
                     <td
                       key={day}
@@ -172,7 +193,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                           : weekend
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""
-                      } ${clickable ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
+                      } ${clickable ? "cursor-pointer hover:opacity-70 select-none" : ""} ${pending ? "opacity-50" : ""}`}
                       title={
                         clickable
                           ? checkIn
