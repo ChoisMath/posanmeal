@@ -31,6 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
   }
 
+  // KST 해당 일자 00:00 → UTC Date (기존 checkIn.date 저장 규칙과 동일)
   const targetDate = new Date(`${date}T00:00:00.000Z`);
 
   const user = await prisma.user.findUnique({
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ success: true, state: "PERSONAL" });
     }
+    // PERSONAL (또는 예상 외 타입) → 삭제
     await prisma.checkIn.delete({ where: { id: existing.id } });
     return NextResponse.json({ success: true, state: "empty" });
   }
