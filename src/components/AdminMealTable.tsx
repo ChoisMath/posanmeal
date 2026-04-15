@@ -70,13 +70,20 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
     return { dailyTotals: totals, grandTotal: grand };
   }, [users, daysInMonth]);
 
-  // 교사 셀 클릭 → 타입 전환
-  async function handleToggleType(userId: number, checkIn: CheckInRecord) {
-    const newType = checkIn.type === "WORK" ? "PERSONAL" : "WORK";
-    const res = await fetch("/api/admin/checkins", {
-      method: "PATCH",
+  // 날짜를 "YYYY-MM-DD" (KST 달력 기준)로 포맷
+  function formatDayKey(day: number): string {
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    return `${year}-${mm}-${dd}`;
+  }
+
+  // 셀 클릭: 교사=cycle, 학생=toggle
+  async function handleCellClick(userId: number, day: number) {
+    const action = isTeacher ? "cycle" : "toggle";
+    const res = await fetch("/api/admin/checkins/toggle", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: checkIn.id, type: newType }),
+      body: JSON.stringify({ userId, date: formatDayKey(day), action }),
     });
     if (res.ok) {
       mutateGrid();
@@ -151,20 +158,31 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   const day = i + 1;
                   const checkIn = checkedDaysMap.get(day);
                   const weekend = isWeekend(day);
+                  const clickable = !readonly;
                   return (
                     <td
                       key={day}
                       className={`text-center border-b px-0.5 py-1.5 ${
                         checkIn
-                          ? checkIn.type === "WORK"
-                            ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold"
+                          ? isTeacher
+                            ? checkIn.type === "WORK"
+                              ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold"
+                              : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                             : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                           : weekend
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""
-                      } ${isTeacher && checkIn && !readonly ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
-                      title={checkIn ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${isTeacher && !readonly ? " (클릭하여 변경)" : ""}` : undefined}
-                      onClick={isTeacher && checkIn && !readonly ? () => handleToggleType(user.id, checkIn) : undefined}
+                      } ${clickable ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
+                      title={
+                        clickable
+                          ? checkIn
+                            ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} (클릭하여 ${isTeacher ? "변경" : "삭제"})`
+                            : "클릭하여 추가"
+                          : checkIn
+                            ? new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                            : undefined
+                      }
+                      onClick={clickable ? () => handleCellClick(user.id, day) : undefined}
                     >
                       {checkIn ? (isTeacher ? (checkIn.type === "WORK" ? "근" : "개") : "O") : ""}
                     </td>
