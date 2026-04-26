@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, X, Users, Search } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { toast } from "sonner";
@@ -65,6 +65,11 @@ const emptyForm = {
 };
 
 const emptyAppForm = { title: "", description: "", type: "DINNER", applyStart: "", applyEnd: "", mealStart: "", mealEnd: "" };
+
+const sheetImportGuides = [
+  { label: "학생", columns: ["email", "grade", "classNum", "number", "name"] },
+  { label: "교사", columns: ["email", "subject", "homeroom", "position", "name"] },
+] as const;
 
 export default function AdminPage() {
   const adminPerm = useAdminPermission();
@@ -911,6 +916,24 @@ export default function AdminPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Google Spreadsheet 가져오기</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            <div className="rounded-xl border bg-muted/40 p-3 text-sm">
+              <p className="font-medium text-foreground">시트 헤더 안내</p>
+              <p className="mt-1 text-xs text-muted-foreground">첫 번째 행(head)에 아래 항목을 순서대로 입력해 주세요.</p>
+              <div className="mt-3 space-y-2">
+                {sheetImportGuides.map((guide) => (
+                  <div key={guide.label} className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">{guide.label}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {guide.columns.map((column) => (
+                        <code key={column} className="rounded-md bg-background px-2 py-1 text-xs text-foreground">
+                          {column}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <Button onClick={handleImport} disabled={importing} className="w-full">{importing ? "가져오는 중..." : "Data 호출"}</Button>
