@@ -921,11 +921,11 @@ export default function AdminPage() {
               <p className="mt-1 text-xs text-muted-foreground">첫 번째 행(head)에 아래 항목을 순서대로 입력해 주세요.</p>
               <div className="mt-3 space-y-2">
                 {sheetImportGuides.map((guide) => (
-                  <div key={guide.label} className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground">{guide.label}</p>
-                    <div className="flex flex-wrap gap-1.5">
+                  <div key={guide.label} className="flex items-center gap-2 overflow-x-auto">
+                    <p className="shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground">{guide.label}</p>
+                    <div className="flex gap-1.5">
                       {guide.columns.map((column) => (
-                        <code key={column} className="rounded-md bg-background px-2 py-1 text-xs text-foreground">
+                        <code key={column} className="whitespace-nowrap rounded-md bg-background px-2 py-1 text-xs text-foreground">
                           {column}
                         </code>
                       ))}
