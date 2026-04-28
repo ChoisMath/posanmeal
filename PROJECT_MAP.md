@@ -2,15 +2,29 @@
 
 > **Purpose of this file:** Fast index of the entire codebase. Future Claude sessions read this FIRST and only open the specific files relevant to the current task. When the map is stale, run the `project-map-keeper` agent to refresh it.
 >
-> **Last update:** 2026-04-14 (AdminLevel enum + teacher admin/subadmin roles; branch workflow simplified)
+> **Last update:** 2026-04-29 (split into prod/test deployments — main=prod meal.posan.kr, feat/posanmeal-mvp=test posanmeal.up.railway.app, shared DB+Volume)
 
 ---
 
 ## 0. Branch / Deployment Workflow
 
-- **Working + deployment branch:** `feat/posanmeal-mvp` (Railway watches this branch for auto-deploy).
-- **`main`** is legacy/unused; it may lag behind `feat/posanmeal-mvp` and should not receive new work unless the policy changes.
-- **Workflow:** commit directly on `feat/posanmeal-mvp` → `git push origin feat/posanmeal-mvp` → Railway deploy + `prisma migrate deploy` auto-runs. There is no separate staging branch — verification happens post-deploy in production.
+| Branch | Role | Domain | Railway service |
+|--------|------|--------|-----------------|
+| `main` | **production** | `https://meal.posan.kr` | prod service (watch=main) |
+| `feat/posanmeal-mvp` | **staging/test** | `https://posanmeal.up.railway.app` | test service (watch=feat/posanmeal-mvp) |
+
+**Shared resources** (single school, two domains pointing at the same data):
+- PostgreSQL DB — single instance, both services use same `DATABASE_URL`.
+- Volume `/app/uploads` — content kept identical via copy/sync; user-uploaded photos must appear on both.
+- All secrets (`AUTH_SECRET`, `QR_JWT_SECRET`, `AUTH_GOOGLE_*`, `ADMIN_*`) — identical across services so JWTs and OAuth work cross-domain.
+- Per-environment-only: `NEXT_PUBLIC_SITE_URL`, `AUTH_URL`.
+
+**Workflow:**
+1. Always commit & push to `feat/posanmeal-mvp` first → Railway test deploy → verify on `posanmeal.up.railway.app`.
+2. Fast-forward / merge into `main` → push → Railway prod deploy → `meal.posan.kr` updates.
+3. Keep the two branches diverged for minutes, not days.
+
+**Migration safety (because DB is shared):** strictly additive Prisma migrations. No column drop / rename / NOT-NULL-without-default in a single deploy. Test deploy applies the migration first, prod runs old code briefly against the new schema — that gap must remain non-breaking. Use `prisma-migration-guardian` agent before any risky migration.
 
 ## 1. Overview
 
@@ -230,17 +244,19 @@ SWR-based data hooks; all use `fetcher` from `src/lib/fetcher.ts`.
 ## 10. Environment Variables (`.env.example`)
 
 ```
-DATABASE_URL               # Postgres connection
-AUTH_SECRET                # NextAuth secret
-AUTH_GOOGLE_ID             # Google OAuth
+DATABASE_URL               # Postgres connection (shared across prod and test)
+AUTH_SECRET                # NextAuth secret (same on both services)
+AUTH_GOOGLE_ID             # Google OAuth (shared client; both redirect URIs registered)
 AUTH_GOOGLE_SECRET
 ADMIN_USERNAME             # Admin login (credentials provider)
 ADMIN_PASSWORD             # Plain-text password (compared directly in auth.ts)
-QR_JWT_SECRET              # QR token signing
+QR_JWT_SECRET              # QR token signing (same on both services so QRs cross-validate)
 QR_TOKEN_EXPIRY_SECONDS    # default 180
-UPLOAD_DIR                 # default ./public/uploads
+UPLOAD_DIR                 # default ./public/uploads (Railway: /app/uploads)
 MAX_FILE_SIZE_MB           # default 5
 TZ                         # Asia/Seoul
+NEXT_PUBLIC_SITE_URL       # per-environment: prod=https://meal.posan.kr, test=https://posanmeal.up.railway.app
+AUTH_URL                   # per-environment, mirrors NEXT_PUBLIC_SITE_URL
 ```
 
 ## 11. Key Architectural Decisions

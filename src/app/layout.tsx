@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://posanmeal.up.railway.app"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://meal.posan.kr"),
   title: {
     default: "PosanMeal — 포산고 석식 관리",
     template: "%s | PosanMeal",
