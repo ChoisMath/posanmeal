@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, type CSSProperties } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 
 interface CheckInRecord {
   id: number;
@@ -49,6 +50,14 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
 
   const isWeekend = (day: number) => weekendSet.has(day);
 
+  // 진행 중인 셀 클릭(userId:day) — 중복 클릭 방지
+  const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
+
+  // 컬럼 하이라이트용 hovered day
+  const [hoveredDay, setHoveredDay] = useState<number | null>(null);
+  const colHoverStyle = (day: number): CSSProperties | undefined =>
+    hoveredDay === day ? { backgroundColor: "rgba(251, 191, 36, 0.28)" } : undefined;
+
   // 일자별 합계 계산 (memoized)
   const { dailyTotals, grandTotal } = useMemo(() => {
     const totals = Array.from({ length: daysInMonth }, (_, i) => {
@@ -70,16 +79,39 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
     return { dailyTotals: totals, grandTotal: grand };
   }, [users, daysInMonth]);
 
-  // 교사 셀 클릭 → 타입 전환
-  async function handleToggleType(userId: number, checkIn: CheckInRecord) {
-    const newType = checkIn.type === "WORK" ? "PERSONAL" : "WORK";
-    const res = await fetch("/api/admin/checkins", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: checkIn.id, type: newType }),
-    });
-    if (res.ok) {
-      mutateGrid();
+  // 날짜를 "YYYY-MM-DD" (KST 달력 기준)로 포맷
+  function formatDayKey(day: number): string {
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    return `${year}-${mm}-${dd}`;
+  }
+
+  // 셀 클릭: 교사=cycle, 학생=toggle
+  async function handleCellClick(userId: number, day: number) {
+    const key = `${userId}:${day}`;
+    if (pendingCells.has(key)) return;
+    setPendingCells((prev) => new Set(prev).add(key));
+    const action = isTeacher ? "cycle" : "toggle";
+    try {
+      const res = await fetch("/api/admin/checkins/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, date: formatDayKey(day), action }),
+      });
+      if (res.ok) {
+        mutateGrid();
+      } else {
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error ?? "체크인 변경에 실패했습니다.");
+      }
+    } catch {
+      toast.error("네트워크 오류가 발생했습니다.");
+    } finally {
+      setPendingCells((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   }
 
@@ -106,6 +138,9 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                       ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                       : "bg-muted text-muted-foreground"
                   }`}
+                  style={colHoverStyle(day)}
+                  onMouseEnter={() => setHoveredDay(day)}
+                  onMouseLeave={() => setHoveredDay(null)}
                 >
                   {day}
                 </th>
@@ -151,20 +186,35 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   const day = i + 1;
                   const checkIn = checkedDaysMap.get(day);
                   const weekend = isWeekend(day);
+                  const pending = pendingCells.has(`${user.id}:${day}`);
+                  const clickable = !readonly && !pending;
                   return (
                     <td
                       key={day}
                       className={`text-center border-b px-0.5 py-1.5 ${
                         checkIn
-                          ? checkIn.type === "WORK"
-                            ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold"
+                          ? isTeacher
+                            ? checkIn.type === "WORK"
+                              ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold"
+                              : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                             : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                           : weekend
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""
-                      } ${isTeacher && checkIn && !readonly ? "cursor-pointer hover:opacity-70 select-none" : ""}`}
-                      title={checkIn ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}${isTeacher && !readonly ? " (클릭하여 변경)" : ""}` : undefined}
-                      onClick={isTeacher && checkIn && !readonly ? () => handleToggleType(user.id, checkIn) : undefined}
+                      } ${clickable ? "cursor-pointer hover:opacity-70 select-none" : ""} ${pending ? "opacity-50" : ""}`}
+                      style={colHoverStyle(day)}
+                      onMouseEnter={() => setHoveredDay(day)}
+                      onMouseLeave={() => setHoveredDay(null)}
+                      title={
+                        clickable
+                          ? checkIn
+                            ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} (클릭하여 ${isTeacher ? "변경" : "삭제"})`
+                            : "클릭하여 추가"
+                          : checkIn
+                            ? new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                            : undefined
+                      }
+                      onClick={clickable ? () => handleCellClick(user.id, day) : undefined}
                     >
                       {checkIn ? (isTeacher ? (checkIn.type === "WORK" ? "근" : "개") : "O") : ""}
                     </td>
@@ -192,13 +242,19 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
           })}
         </tbody>
         {/* 일자별 합계 footer */}
-        <tfoot className="sticky bottom-0 z-20">
+        <tfoot>
           {isTeacher ? (
             <>
               <tr>
                 <td className="sticky left-0 z-30 bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
                 {dailyTotals.map((d, i) => (
-                  <td key={i} className={`text-center border-t px-0.5 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 ${d.work > 0 ? "" : "opacity-30"}`}>
+                  <td
+                    key={i}
+                    className={`text-center border-t px-0.5 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 ${d.work > 0 ? "" : "opacity-30"}`}
+                    style={colHoverStyle(i + 1)}
+                    onMouseEnter={() => setHoveredDay(i + 1)}
+                    onMouseLeave={() => setHoveredDay(null)}
+                  >
                     {d.work || ""}
                   </td>
                 ))}
@@ -213,7 +269,13 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
               <tr>
                 <td className="sticky left-0 z-30 bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
                 {dailyTotals.map((d, i) => (
-                  <td key={i} className={`text-center border-t px-0.5 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 ${d.personal > 0 ? "" : "opacity-30"}`}>
+                  <td
+                    key={i}
+                    className={`text-center border-t px-0.5 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 ${d.personal > 0 ? "" : "opacity-30"}`}
+                    style={colHoverStyle(i + 1)}
+                    onMouseEnter={() => setHoveredDay(i + 1)}
+                    onMouseLeave={() => setHoveredDay(null)}
+                  >
                     {d.personal || ""}
                   </td>
                 ))}
@@ -228,7 +290,13 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
               <tr>
                 <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
                 {dailyTotals.map((d, i) => (
-                  <td key={i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
+                  <td
+                    key={i}
+                    className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}
+                    style={colHoverStyle(i + 1)}
+                    onMouseEnter={() => setHoveredDay(i + 1)}
+                    onMouseLeave={() => setHoveredDay(null)}
+                  >
                     {d.total || ""}
                   </td>
                 ))}

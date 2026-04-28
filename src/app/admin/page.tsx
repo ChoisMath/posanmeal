@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { signOut } from "next-auth/react";
+import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, X, Users, Search } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { toast } from "sonner";
@@ -66,6 +66,11 @@ const emptyForm = {
 
 const emptyAppForm = { title: "", description: "", type: "DINNER", applyStart: "", applyEnd: "", mealStart: "", mealEnd: "" };
 
+const sheetImportGuides = [
+  { label: "학생", columns: ["email", "grade", "classNum", "number", "name"] },
+  { label: "교사", columns: ["email", "subject", "homeroom", "position", "name"] },
+] as const;
+
 export default function AdminPage() {
   const adminPerm = useAdminPermission();
   const [users, setUsers] = useState<User[]>([]);
@@ -95,6 +100,7 @@ export default function AdminPage() {
   const [regDialogOpen, setRegDialogOpen] = useState(false);
   const [selectedAppForReg, setSelectedAppForReg] = useState<MealAppItem | null>(null);
   const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
+  const [showCancelled, setShowCancelled] = useState(false);
   const [addStudentDialogOpen, setAddStudentDialogOpen] = useState(false);
   const [regGradeFilter, setRegGradeFilter] = useState<number | null>(null);
   const [studentSearch, setStudentSearch] = useState("");
@@ -482,6 +488,22 @@ export default function AdminPage() {
     setUploading(false);
   }
 
+  const visibleRegs = useMemo(() => {
+    return registrations
+      .filter((r) => showCancelled || r.status !== "CANCELLED")
+      .filter((r) => regGradeFilter === null || r.user.grade === regGradeFilter)
+      .sort((a, b) => {
+        if (a.user.grade !== b.user.grade) return a.user.grade - b.user.grade;
+        if (a.user.classNum !== b.user.classNum) return a.user.classNum - b.user.classNum;
+        return a.user.number - b.user.number;
+      });
+  }, [registrations, showCancelled, regGradeFilter]);
+
+  const approvedCount = useMemo(
+    () => visibleRegs.filter((r) => r.status !== "CANCELLED").length,
+    [visibleRegs],
+  );
+
   // Filtered students for add-student dialog
   const filteredStudentsForAdd = useMemo(() => {
     if (!addStudentDialogOpen) return [];
@@ -532,7 +554,7 @@ export default function AdminPage() {
           <Link href="/check" className="inline-flex items-center justify-center h-9 w-9 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors" aria-label="체크인 페이지" title="체크인 페이지">
             <Camera className="h-4 w-4" />
           </Link>
-          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}><LogOut className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => clearClientStateAndSignOut("/")}><LogOut className="h-4 w-4" /></Button>
         </div>
       </header>
       <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-4 md:p-6 flex flex-col overflow-hidden page-enter">
@@ -894,6 +916,24 @@ export default function AdminPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Google Spreadsheet 가져오기</DialogTitle></DialogHeader>
           <div className="space-y-3">
+            <div className="rounded-xl border bg-muted/40 p-3 text-sm">
+              <p className="font-medium text-foreground">시트 헤더 안내</p>
+              <p className="mt-1 text-xs text-muted-foreground">첫 번째 행(head)에 아래 항목을 순서대로 입력해 주세요.</p>
+              <div className="mt-3 space-y-2">
+                {sheetImportGuides.map((guide) => (
+                  <div key={guide.label} className="flex items-center gap-2 overflow-x-auto">
+                    <p className="shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground">{guide.label}</p>
+                    <div className="flex gap-1.5">
+                      {guide.columns.map((column) => (
+                        <code key={column} className="whitespace-nowrap rounded-md bg-background px-2 py-1 text-xs text-foreground">
+                          {column}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
             <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <Button onClick={handleImport} disabled={importing} className="w-full">{importing ? "가져오는 중..." : "Data 호출"}</Button>
@@ -997,11 +1037,22 @@ export default function AdminPage() {
       </Dialog>
 
       {/* Registration List Dialog */}
-      <Dialog open={regDialogOpen} onOpenChange={(open) => { setRegDialogOpen(open); if (!open) { setSelectedAppForReg(null); setRegistrations([]); } }}>
+      <Dialog
+        open={regDialogOpen}
+        onOpenChange={(open) => {
+          setRegDialogOpen(open);
+          if (!open) {
+            setSelectedAppForReg(null);
+            setRegistrations([]);
+            setRegGradeFilter(null);
+            setShowCancelled(false);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between gap-2 flex-wrap">
-              <span>{selectedAppForReg?.title} — 명단 ({registrations.filter((r) => r.status !== "CANCELLED").length}명)</span>
+              <span>{selectedAppForReg?.title} — 명단 ({approvedCount}명)</span>
               <div className="flex gap-1">
                 <Button size="sm" variant="outline" onClick={() => { setStudentSearch(""); setAddStudentDialogOpen(true); fetchUsers(); }}>
                   <Plus className="h-4 w-4 mr-1" /> 학생 추가
@@ -1014,15 +1065,32 @@ export default function AdminPage() {
               </div>
             </DialogTitle>
           </DialogHeader>
-          <div className="flex gap-2 mb-3">
+          <div className="flex gap-2 mb-3 items-center flex-wrap">
             {[{ value: null, label: "전체" }, { value: 1, label: "1학년" }, { value: 2, label: "2학년" }, { value: 3, label: "3학년" }].map(({ value, label }) => (
-              <Button key={label} variant={regGradeFilter === value ? "default" : "outline"} size="sm" onClick={() => setRegGradeFilter(value)}>{label}</Button>
+              <Button
+                key={label}
+                variant={regGradeFilter === value ? "default" : "outline"}
+                size="sm"
+                onClick={() => setRegGradeFilter(value)}
+                className="whitespace-nowrap"
+              >
+                {label}
+              </Button>
             ))}
+            <Button
+              variant={showCancelled ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowCancelled((v) => !v)}
+              className="ml-auto whitespace-nowrap"
+            >
+              취소자 보기
+            </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="sticky top-0 z-20">
                 <tr>
+                  <th className="p-2 text-left bg-muted whitespace-nowrap">연번</th>
                   <th className="p-2 text-left bg-muted whitespace-nowrap">학년</th>
                   <th className="p-2 text-left bg-muted whitespace-nowrap">반</th>
                   <th className="p-2 text-left bg-muted whitespace-nowrap">번호</th>
@@ -1033,34 +1101,34 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {registrations
-                  .filter((r) => regGradeFilter === null || r.user.grade === regGradeFilter)
-                  .sort((a, b) => {
-                    if (a.user.grade !== b.user.grade) return a.user.grade - b.user.grade;
-                    if (a.user.classNum !== b.user.classNum) return a.user.classNum - b.user.classNum;
-                    return a.user.number - b.user.number;
-                  })
-                  .map((r) => (
-                    <tr key={r.id} className="border-t">
-                      <td className="p-2 whitespace-nowrap">{r.user.grade}</td>
-                      <td className="p-2 whitespace-nowrap">{r.user.classNum}</td>
-                      <td className="p-2 whitespace-nowrap">{r.user.number}</td>
-                      <td className="p-2 whitespace-nowrap">{r.user.name}</td>
-                      <td className="p-2 whitespace-nowrap">{new Date(r.createdAt).toLocaleDateString("ko-KR")}</td>
-                      <td className="p-2 text-center whitespace-nowrap">
-                        <Badge variant={r.status === "CANCELLED" ? "secondary" : "default"} className="text-xs">
-                          {r.status === "CANCELLED" ? "취소" : r.addedBy === "ADMIN" ? "관리자추가" : "승인"}
-                        </Badge>
-                      </td>
-                      <td className="p-2 text-center whitespace-nowrap">
-                        {r.status === "CANCELLED" ? (
-                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleRestoreReg(r.id)}>복원</Button>
-                        ) : (
-                          <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => handleCancelReg(r.id)}>취소</Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                {(() => {
+                  let seq = 0;
+                  return visibleRegs.map((r) => {
+                    const n = r.status !== "CANCELLED" ? ++seq : null;
+                    return (
+                      <tr key={r.id} className="border-t">
+                        <td className="p-2 whitespace-nowrap">{n ?? "—"}</td>
+                        <td className="p-2 whitespace-nowrap">{r.user.grade}</td>
+                        <td className="p-2 whitespace-nowrap">{r.user.classNum}</td>
+                        <td className="p-2 whitespace-nowrap">{r.user.number}</td>
+                        <td className="p-2 whitespace-nowrap">{r.user.name}</td>
+                        <td className="p-2 whitespace-nowrap">{new Date(r.createdAt).toLocaleDateString("ko-KR")}</td>
+                        <td className="p-2 text-center whitespace-nowrap">
+                          <Badge variant={r.status === "CANCELLED" ? "secondary" : "default"} className="text-xs">
+                            {r.status === "CANCELLED" ? "취소" : r.addedBy === "ADMIN" ? "관리자추가" : "승인"}
+                          </Badge>
+                        </td>
+                        <td className="p-2 text-center whitespace-nowrap">
+                          {r.status === "CANCELLED" ? (
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleRestoreReg(r.id)}>복원</Button>
+                          ) : (
+                            <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => handleCancelReg(r.id)}>취소</Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>

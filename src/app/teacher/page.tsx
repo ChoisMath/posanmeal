@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { signOut } from "next-auth/react";
+import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -69,13 +69,13 @@ export default function TeacherPage() {
         <div className="flex items-center gap-1">
           {canRead && isTeacher && (
             <Link href="/admin">
-              <Button variant="outline" size="sm" className="rounded-xl">
+              <Button variant="outline" size="sm" className="rounded-xl bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white">
                 관리자 페이지
               </Button>
             </Link>
           )}
           <ThemeToggle />
-          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => signOut({ callbackUrl: "/" })}>
+          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => clearClientStateAndSignOut("/")}>
             <LogOut className="h-4 w-4" />
           </Button>
         </div>

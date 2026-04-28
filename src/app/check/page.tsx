@@ -127,12 +127,7 @@ export default function CheckPage() {
   const [modeLoaded, setModeLoaded] = useState(false);
   const prevModeRef = useRef<"online" | "local">("online");
 
-  // Register Service Worker
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js");
-    }
-  }, []);
+  // Service Worker registration is handled globally in <SwUpdater /> (layout).
 
   // Sync logic (defined before useEffect that references it)
   const performSync = useCallback(async () => {

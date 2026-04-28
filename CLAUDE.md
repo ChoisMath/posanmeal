@@ -51,11 +51,12 @@
 - `/api/uploads/[filename]` API Route로 서빙 (Next.js static이 아닌 API 경유)
 - photoUrl 형식: `/api/uploads/{userId}.webp?t={timestamp}`
 
-## 브랜치 전략
+## 브랜치 전략 (2026-04-14 개정)
 
-- **`main`** — 정식 배포 버전
-- **`feat/posanmeal-mvp`** — 개발/테스트 브랜치 (Railway에서 배포 테스트)
-- 워크플로우: `feat/posanmeal-mvp`에서 개발 → 테스트 → 안정화 후 `main`으로 머지
+- **`feat/posanmeal-mvp`** — **개발 + 배포 브랜치** (Railway가 이 브랜치를 watch). 모든 신규 작업은 여기서 직접 commit & push.
+- **`main`** — 과거 기준 브랜치. 현재는 사용하지 않으며 `feat/posanmeal-mvp`보다 뒤처진 상태로 남아있을 수 있음.
+- 워크플로우: `feat/posanmeal-mvp`에서 직접 작업 → commit → `git push origin feat/posanmeal-mvp` → Railway 자동 배포.
+- 별도 테스트 환경 없음 (배포 환경에서 바로 검증).
 
 ## 라우팅 구조
 

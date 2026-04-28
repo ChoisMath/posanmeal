@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
+import { ResetOnQuery } from "@/components/ResetOnQuery";
 
 export default async function HomePage() {
   const session = await auth();
@@ -17,6 +18,7 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col">
+      <ResetOnQuery />
       <BrandMark variant="floating" label="PosanMeal" />
       <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
@@ -64,6 +66,15 @@ export default async function HomePage() {
 
           <Link href="/admin/login" className="block text-center text-sm text-muted-foreground hover:text-foreground transition-colors">
             관리자 로그인 →
+          </Link>
+        </div>
+        <div className="mt-4 text-center">
+          <Link
+            href="/?reset=1"
+            prefetch={false}
+            className="text-[11px] text-muted-foreground/70 hover:text-muted-foreground underline underline-offset-2"
+          >
+            앱이 안 풀려요? 초기화
           </Link>
         </div>
       </div>
