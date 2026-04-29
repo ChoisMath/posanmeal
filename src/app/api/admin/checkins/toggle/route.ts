@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   if (action === "cycle") {
     if (!existing) {
       await prisma.checkIn.create({
-        data: { userId, date: targetDate, type: "WORK" },
+        data: { userId, date: targetDate, type: "WORK", source: "ADMIN_MANUAL" },
       });
       return NextResponse.json({ success: true, state: "WORK" });
     }
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 
   if (!existing) {
     await prisma.checkIn.create({
-      data: { userId, date: targetDate, type: "STUDENT" },
+      data: { userId, date: targetDate, type: "STUDENT", source: "ADMIN_MANUAL" },
     });
     return NextResponse.json({ success: true, state: "STUDENT" });
   }

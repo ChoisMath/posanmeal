@@ -79,6 +79,7 @@ export async function POST(request: Request) {
         userId: payload.userId,
         date: todayDate,
         type: payload.type,
+        source: "QR",
       },
     });
 

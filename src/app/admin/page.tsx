@@ -17,7 +17,8 @@ import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
-import { todayKST } from "@/lib/timezone";
+import { todayKST, formatDateTimeKST } from "@/lib/timezone";
+import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -51,7 +52,9 @@ interface RegistrationItem {
 }
 
 interface DashboardRecord {
-  id: number; userName: string; role: string; type: string; checkedAt: string; grade?: number; classNum?: number; number?: number;
+  id: number; userName: string; role: string; type: string;
+  source: CheckInSourceLabel;
+  checkedAt: string; grade?: number; classNum?: number; number?: number;
 }
 
 interface DashboardData {
@@ -833,17 +836,18 @@ export default function AdminPage() {
                       <table className="w-full text-sm whitespace-nowrap">
                         <thead className="sticky top-0 z-20">
                           <tr>
-                            <th className="p-2 text-left bg-muted">이름</th>
-                            <th className="p-2 text-left bg-muted">구분</th>
-                            <th className="p-2 text-left bg-muted">체크인 시각</th>
-                            <th className="p-2 text-center w-16 bg-muted">수정</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">이름</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">구분</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">체크인 시각</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">출처</th>
+                            <th className="p-2 text-center w-16 bg-muted whitespace-nowrap">수정</th>
                           </tr>
                         </thead>
                         <tbody>
                           {sortedRecords.map((r, i) => (
                             <tr key={i} className="border-t">
                               <td className="p-2 whitespace-nowrap">{r.role === "STUDENT" ? `${r.grade}-${r.classNum} ${r.number}번 ${r.userName}` : `${r.userName} 선생님`}</td>
-                              <td className="p-2">
+                              <td className="p-2 whitespace-nowrap">
                                 <Badge variant="outline" className={`text-xs ${
                                   r.type === "WORK" ? "border-blue-300 text-blue-600 dark:text-blue-400" :
                                   r.type === "PERSONAL" ? "border-green-300 text-green-600 dark:text-green-400" : ""
@@ -851,8 +855,21 @@ export default function AdminPage() {
                                   {r.type === "STUDENT" ? `${r.grade}학년` : r.type === "WORK" ? "근무" : "개인"}
                                 </Badge>
                               </td>
-                              <td className="p-2">{new Date(r.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</td>
-                              <td className="p-2 text-center">
+                              <td className="p-2 whitespace-nowrap">{formatDateTimeKST(new Date(r.checkedAt))}</td>
+                              <td className="p-2 whitespace-nowrap">
+                                {r.source ? (
+                                  <Badge variant="outline" className={`text-xs ${
+                                    r.source === "ADMIN_MANUAL" ? "border-amber-300 text-amber-600 dark:text-amber-400" :
+                                    r.source === "LOCAL_SYNC" ? "border-sky-300 text-sky-600 dark:text-sky-400" :
+                                    "border-muted-foreground/40 text-muted-foreground"
+                                  }`}>
+                                    {sourceLabel(r.source)}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">—</span>
+                                )}
+                              </td>
+                              <td className="p-2 text-center whitespace-nowrap">
                                 {r.role === "TEACHER" && (
                                   <Button
                                     variant="ghost"

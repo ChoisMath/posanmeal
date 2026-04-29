@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { formatDateTimeKST } from "@/lib/timezone";
+import { sourceLabel } from "@/lib/checkin-source";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -236,6 +238,7 @@ async function exportDaily(dateParam: string) {
     where: { date: targetDate },
     select: {
       type: true,
+      source: true,
       checkedAt: true,
       user: {
         select: {
@@ -258,6 +261,7 @@ async function exportDaily(dateParam: string) {
     name: string;
     subject: string | null;
     checkedAt: Date;
+    source: "QR" | "ADMIN_MANUAL" | "LOCAL_SYNC" | null;
   };
 
   const categoryOrder: Record<Row["category"], number> = {
@@ -279,6 +283,7 @@ async function exportDaily(dateParam: string) {
       name: c.user.name,
       subject: c.user.subject,
       checkedAt: c.checkedAt,
+      source: c.source,
     };
   });
 
@@ -304,7 +309,7 @@ async function exportDaily(dateParam: string) {
   const workbook = new ExcelJS.default.Workbook();
   const sheet = workbook.addWorksheet(dateParam);
 
-  const headers = ["구분", "학년", "반", "번호", "이름", "교과", "체크인 시각"];
+  const headers = ["구분", "학년", "반", "번호", "이름", "교과", "체크인 시각", "출처"];
   const lastCol = headers.length;
 
   const dow = ["일", "월", "화", "수", "목", "금", "토"][targetDate.getDay()];
@@ -327,14 +332,11 @@ async function exportDaily(dateParam: string) {
   headerRow.font = { bold: true };
   headerRow.alignment = { horizontal: "center" };
 
-  const widths = [10, 6, 6, 6, 12, 14, 12];
+  const widths = [10, 6, 6, 6, 12, 14, 18, 8];
   widths.forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
 
   for (const r of rows) {
     const isStudent = r.category.endsWith("학년");
-    const time = r.checkedAt.toLocaleTimeString("ko-KR", {
-      timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false,
-    });
     const row = sheet.addRow([
       r.category,
       isStudent ? r.grade : "",
@@ -342,7 +344,8 @@ async function exportDaily(dateParam: string) {
       isStudent ? r.number : "",
       r.name,
       isStudent ? "" : (r.subject ?? ""),
-      time,
+      formatDateTimeKST(r.checkedAt),
+      sourceLabel(r.source),
     ]);
     for (let c = 1; c <= lastCol; c++) {
       row.getCell(c).alignment = { horizontal: c === 5 || c === 6 ? "left" : "center" };

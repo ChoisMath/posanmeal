@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       select: {
         id: true,
         type: true,
+        source: true,
         checkedAt: true,
         user: { select: { name: true, role: true, grade: true, classNum: true, number: true } },
       },
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
       userName: c.user.name,
       role: c.user.role,
       type: c.type,
+      source: c.source,
       checkedAt: c.checkedAt.toISOString(),
       grade: c.user.grade,
       classNum: c.user.classNum,

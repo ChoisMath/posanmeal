@@ -18,6 +18,12 @@ enum CheckInType {
   PERSONAL
 }
 
+enum CheckInSource {
+  QR
+  ADMIN_MANUAL
+  LOCAL_SYNC
+}
+
 enum AdminLevel {
   NONE
   SUBADMIN
@@ -96,11 +102,12 @@ model MealRegistration {
 }
 
 model CheckIn {
-  id        Int         @id @default(autoincrement())
+  id        Int            @id @default(autoincrement())
   userId    Int
-  date      DateTime    @db.Date
-  checkedAt DateTime    @default(now())
+  date      DateTime       @db.Date
+  checkedAt DateTime       @default(now())
   type      CheckInType
+  source    CheckInSource?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

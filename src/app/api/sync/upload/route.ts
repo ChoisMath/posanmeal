@@ -66,6 +66,7 @@ export async function POST(request: Request) {
           date: dateObj,
           checkedAt: new Date(ci.checkedAt),
           type: ci.type,
+          source: "LOCAL_SYNC",
         },
       });
       accepted++;
