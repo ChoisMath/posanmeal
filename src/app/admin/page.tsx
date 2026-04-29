@@ -12,11 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
+import { todayKST } from "@/lib/timezone";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -76,6 +77,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [dashboardDate, setDashboardDate] = useState<string>(() => todayKST());
 
   // Add dialog
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -218,14 +220,26 @@ export default function AdminPage() {
     setUsers(data.users || []);
   }
 
-  async function fetchDashboard() {
-    const res = await fetch("/api/admin/dashboard");
+  async function fetchDashboard(date: string = dashboardDate) {
+    const res = await fetch(`/api/admin/dashboard?date=${date}`);
     const data = await res.json();
     setDashboard(data);
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchUsers(); fetchDashboard(); fetchSystemSettings(); fetchApps(); }, [userFilter]);
+  useEffect(() => { fetchUsers(); fetchSystemSettings(); fetchApps(); }, [userFilter]);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchDashboard(dashboardDate); }, [dashboardDate]);
+
+  function shiftDashboardDate(deltaDays: number) {
+    const d = new Date(`${dashboardDate}T00:00:00`);
+    d.setDate(d.getDate() + deltaDays);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    setDashboardDate(`${yyyy}-${mm}-${dd}`);
+  }
 
   const [importError, setImportError] = useState("");
 
@@ -366,11 +380,12 @@ export default function AdminPage() {
   }
 
   async function handleExport() {
-    const res = await fetch("/api/admin/export");
+    const res = await fetch(`/api/admin/export?date=${dashboardDate}`);
+    if (!res.ok) { toast.error("Excel 다운로드 실패"); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url;
-    a.download = `석식현황_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `석식현황_${dashboardDate}.xlsx`;
     a.click(); URL.revokeObjectURL(url);
   }
 
@@ -562,7 +577,7 @@ export default function AdminPage() {
           defaultValue="users"
           className="flex flex-col flex-1 min-h-0"
           onValueChange={(v) => {
-            if (v === "dashboard") fetchDashboard();
+            if (v === "dashboard") fetchDashboard(dashboardDate);
             if (v === "applications") fetchApps();
           }}
         >
@@ -753,13 +768,49 @@ export default function AdminPage() {
           <TabsContent value="dashboard" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-semibold">오늘의 석식 현황</h3>
+                <div className="flex justify-between items-center gap-2 flex-wrap mb-4">
+                  <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => shiftDashboardDate(-1)}
+                      aria-label="이전 날짜"
+                      title="이전 날짜"
+                      className="min-h-11 min-w-11"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Input
+                      type="date"
+                      value={dashboardDate}
+                      onChange={(e) => { if (e.target.value) setDashboardDate(e.target.value); }}
+                      className="w-auto min-w-[10rem] min-h-11 rounded-xl whitespace-nowrap"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => shiftDashboardDate(1)}
+                      aria-label="다음 날짜"
+                      title="다음 날짜"
+                      className="min-h-11 min-w-11"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setDashboardDate(todayKST())}
+                      disabled={dashboardDate === todayKST()}
+                      className="min-h-11 whitespace-nowrap"
+                    >
+                      오늘
+                    </Button>
+                  </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="icon" onClick={fetchDashboard} aria-label="새로고침" title="새로고침">
+                    <Button variant="outline" size="icon" onClick={() => fetchDashboard(dashboardDate)} aria-label="새로고침" title="새로고침" className="min-h-11 min-w-11">
                       <RefreshCw className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={handleExport}><Download className="h-4 w-4 mr-1" /> Excel 다운로드</Button>
+                    <Button variant="outline" size="sm" onClick={handleExport} className="min-h-11 whitespace-nowrap"><Download className="h-4 w-4 mr-1" /> Excel 다운로드</Button>
                   </div>
                 </div>
                 {dashboard && (

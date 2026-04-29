@@ -3,6 +3,12 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const dateParam = searchParams.get("date");
+
+  if (dateParam) {
+    return exportDaily(dateParam);
+  }
+
   const year = parseInt(searchParams.get("year") || new Date().getFullYear().toString());
   const month = parseInt(searchParams.get("month") || (new Date().getMonth() + 1).toString());
 
@@ -213,6 +219,141 @@ export async function GET(request: Request) {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="${encodeURIComponent(`석식현황_${year}_${month}`)}.xlsx"`,
+    },
+  });
+}
+
+async function exportDaily(dateParam: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+    return NextResponse.json({ error: "잘못된 날짜 형식입니다." }, { status: 400 });
+  }
+  const targetDate = new Date(dateParam);
+  if (Number.isNaN(targetDate.getTime())) {
+    return NextResponse.json({ error: "잘못된 날짜입니다." }, { status: 400 });
+  }
+
+  const checkIns = await prisma.checkIn.findMany({
+    where: { date: targetDate },
+    select: {
+      type: true,
+      checkedAt: true,
+      user: {
+        select: {
+          name: true,
+          role: true,
+          grade: true,
+          classNum: true,
+          number: true,
+          subject: true,
+        },
+      },
+    },
+  });
+
+  type Row = {
+    category: "1학년" | "2학년" | "3학년" | "교사 근무" | "교사 개인";
+    grade: number | null;
+    classNum: number | null;
+    number: number | null;
+    name: string;
+    subject: string | null;
+    checkedAt: Date;
+  };
+
+  const categoryOrder: Record<Row["category"], number> = {
+    "1학년": 0, "2학년": 1, "3학년": 2, "교사 근무": 3, "교사 개인": 4,
+  };
+
+  const rows: Row[] = checkIns.map((c) => {
+    let category: Row["category"];
+    if (c.user.role === "STUDENT") {
+      category = (c.user.grade === 1 ? "1학년" : c.user.grade === 2 ? "2학년" : "3학년");
+    } else {
+      category = c.type === "WORK" ? "교사 근무" : "교사 개인";
+    }
+    return {
+      category,
+      grade: c.user.grade,
+      classNum: c.user.classNum,
+      number: c.user.number,
+      name: c.user.name,
+      subject: c.user.subject,
+      checkedAt: c.checkedAt,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.category !== b.category) return categoryOrder[a.category] - categoryOrder[b.category];
+    if (a.category.endsWith("학년")) {
+      const ag = a.grade ?? 0, bg = b.grade ?? 0;
+      if (ag !== bg) return ag - bg;
+      const ac = a.classNum ?? 0, bc = b.classNum ?? 0;
+      if (ac !== bc) return ac - bc;
+      return (a.number ?? 0) - (b.number ?? 0);
+    }
+    return a.name.localeCompare(b.name, "ko");
+  });
+
+  const counts: Record<Row["category"], number> = {
+    "1학년": 0, "2학년": 0, "3학년": 0, "교사 근무": 0, "교사 개인": 0,
+  };
+  for (const r of rows) counts[r.category]++;
+  const total = rows.length;
+
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.default.Workbook();
+  const sheet = workbook.addWorksheet(dateParam);
+
+  const headers = ["구분", "학년", "반", "번호", "이름", "교과", "체크인 시각"];
+  const lastCol = headers.length;
+
+  const dow = ["일", "월", "화", "수", "목", "금", "토"][targetDate.getDay()];
+  sheet.mergeCells(1, 1, 1, lastCol);
+  const titleCell = sheet.getCell(1, 1);
+  titleCell.value = `포산고등학교 석식 현황 — ${dateParam} (${dow})`;
+  titleCell.font = { bold: true, size: 14 };
+  titleCell.alignment = { horizontal: "center" };
+
+  sheet.mergeCells(2, 1, 2, lastCol);
+  const summaryCell = sheet.getCell(2, 1);
+  summaryCell.value =
+    `합계: 1학년 ${counts["1학년"]} · 2학년 ${counts["2학년"]} · 3학년 ${counts["3학년"]}` +
+    ` · 교사 근무 ${counts["교사 근무"]} · 교사 개인 ${counts["교사 개인"]} · 총 ${total}`;
+  summaryCell.alignment = { horizontal: "center" };
+  summaryCell.font = { italic: true };
+
+  const headerRow = sheet.getRow(4);
+  headers.forEach((h, i) => { headerRow.getCell(i + 1).value = h; });
+  headerRow.font = { bold: true };
+  headerRow.alignment = { horizontal: "center" };
+
+  const widths = [10, 6, 6, 6, 12, 14, 12];
+  widths.forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
+
+  for (const r of rows) {
+    const isStudent = r.category.endsWith("학년");
+    const time = r.checkedAt.toLocaleTimeString("ko-KR", {
+      timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    const row = sheet.addRow([
+      r.category,
+      isStudent ? r.grade : "",
+      isStudent ? r.classNum : "",
+      isStudent ? r.number : "",
+      r.name,
+      isStudent ? "" : (r.subject ?? ""),
+      time,
+    ]);
+    for (let c = 1; c <= lastCol; c++) {
+      row.getCell(c).alignment = { horizontal: c === 5 || c === 6 ? "left" : "center" };
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new NextResponse(buffer, {
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${encodeURIComponent(`석식현황_${dateParam}`)}.xlsx"`,
     },
   });
 }
