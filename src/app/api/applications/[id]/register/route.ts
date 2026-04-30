@@ -31,9 +31,28 @@ export async function POST(
   }
 
   try {
-    const registration = await prisma.mealRegistration.create({
-      data: { applicationId, userId: session.user.dbUserId, signature },
+    const existing = await prisma.mealRegistration.findUnique({
+      where: { applicationId_userId: { applicationId, userId: session.user.dbUserId } },
     });
+
+    if (existing?.status === "APPROVED") {
+      return NextResponse.json({ error: "이미 신청되었습니다." }, { status: 409 });
+    }
+
+    const registration = existing
+      ? await prisma.mealRegistration.update({
+          where: { id: existing.id },
+          data: {
+            status: "APPROVED",
+            signature,
+            cancelledAt: null,
+            cancelledBy: null,
+          },
+        })
+      : await prisma.mealRegistration.create({
+          data: { applicationId, userId: session.user.dbUserId, signature },
+        });
+
     return NextResponse.json({ registration }, { status: 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
