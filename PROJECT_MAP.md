@@ -2,7 +2,7 @@
 
 > **Purpose of this file:** Fast index of the entire codebase. Future Claude sessions read this FIRST and only open the specific files relevant to the current task. When the map is stale, run the `project-map-keeper` agent to refresh it.
 >
-> **Last update:** 2026-04-29 (split into prod/test deployments — main=prod meal.posan.kr, feat/posanmeal-mvp=test posanmeal.up.railway.app, shared DB+Volume)
+> **Last update:** 2026-04-30 (석식 신청 취소 후 재신청 허용 — register POST upsert; 잠금 UI 미도입)
 
 ---
 
@@ -123,7 +123,7 @@ posanmeal/
 ### Student — applications (STUDENT/TEACHER)
 - `GET  /api/applications` — open applications with current user's registration status
 - `GET  /api/applications/my` — all registrations for the current user
-- `POST /api/applications/[id]/register` — body `{ signature }` → create MealRegistration (STUDENT only)
+- `POST /api/applications/[id]/register` — body `{ signature }` → upsert MealRegistration (STUDENT only). 신규는 `create` (201). 기존 row 가 CANCELLED 면 `update` (200) 로 status:APPROVED + 새 signature, cancelledAt/cancelledBy 초기화 — 학생/관리자 누가 취소했든 신청 기간 내 재신청 허용. APPROVED 상태에서 재요청 시 409.
 - `DELETE /api/applications/[id]/register` — cancel own registration (within apply window)
 
 ### Teacher
