@@ -95,7 +95,9 @@ export default function StudentPage() {
   const hasActiveMeal = activeRegistrations.length > 0;
   const hasApplicationTab = applications.length > 0;
   const pendingCount = applications.filter(
-    (a) => a.registrations.length === 0
+    (a) =>
+      a.registrations.length === 0 ||
+      a.registrations[0]?.status === "CANCELLED"
   ).length;
 
   const handleRegister = async () => {
