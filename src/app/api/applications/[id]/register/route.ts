@@ -53,7 +53,7 @@ export async function POST(
           data: { applicationId, userId: session.user.dbUserId, signature },
         });
 
-    return NextResponse.json({ registration }, { status: 201 });
+    return NextResponse.json({ registration }, { status: existing ? 200 : 201 });
   } catch (err: unknown) {
     if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
       return NextResponse.json({ error: "이미 신청되었습니다." }, { status: 409 });
