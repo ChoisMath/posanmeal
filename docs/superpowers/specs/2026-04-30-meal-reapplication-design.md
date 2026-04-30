@@ -74,10 +74,12 @@ const registration = existing
       data: { applicationId, userId, signature },
     });
 
-return NextResponse.json({ registration }, { status: 201 });
+return NextResponse.json({ registration }, { status: existing ? 200 : 201 });
 ```
 
 기간 검증(`today >= applyStart && today <= applyEnd`, `app.status === "OPEN"`)과 입력 검증(`signature` 필수, 200KB 제한)은 기존 코드 그대로 유지. P2002 catch 는 동시성 안전망으로 남기되, `existing` 분기로 정상 경로에서는 트리거되지 않는다.
+
+응답 코드: 신규 `create` 경로는 `201 Created`, 기존 row 를 재활성화하는 `update` 경로는 `200 OK` 로 HTTP 의미를 분리한다. UI 의 `handleRegister` 는 `res.ok` 만 보므로 동작 변화는 없다.
 
 ### 변경 없는 엔드포인트
 
