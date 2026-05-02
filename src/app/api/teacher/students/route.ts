@@ -34,8 +34,8 @@ export async function GET(request: Request) {
       id: true, name: true, number: true, photoUrl: true,
       checkIns: {
         where: { date: { gte: startDate, lte: endDate } },
-        select: { date: true, checkedAt: true },
-        orderBy: { date: "asc" },
+        select: { date: true, checkedAt: true, mealKind: true },
+        orderBy: [{ date: "asc" }, { mealKind: "asc" }],
       },
     },
     orderBy: { number: "asc" },

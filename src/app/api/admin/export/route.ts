@@ -26,8 +26,8 @@ export async function GET(request: Request) {
         name: true, subject: true,
         checkIns: {
           where: { date: { gte: startDate, lte: endDate } },
-          select: { date: true, type: true },
-          orderBy: { date: "asc" },
+          select: { date: true, type: true, mealKind: true },
+          orderBy: [{ date: "asc" }, { mealKind: "asc" }],
         },
       },
       orderBy: { name: "asc" },
@@ -39,8 +39,8 @@ export async function GET(request: Request) {
           name: true, number: true, classNum: true,
           checkIns: {
             where: { date: { gte: startDate, lte: endDate } },
-            select: { date: true },
-            orderBy: { date: "asc" },
+            select: { date: true, mealKind: true },
+            orderBy: [{ date: "asc" }, { mealKind: "asc" }],
           },
         },
         orderBy: [{ classNum: "asc" }, { number: "asc" }],
@@ -109,14 +109,18 @@ export async function GET(request: Request) {
     const dailyWork = new Array(daysInMonth + 1).fill(0);
     const dailyTotal = new Array(daysInMonth + 1).fill(0);
 
-    // 행4~: 데이터
+    type DaySlot = { dinner?: { type?: string; mealKind?: string | null }; breakfast?: { type?: string; mealKind?: string | null } };
     for (const user of users) {
       const row = sheet.addRow([]);
-      const checkedDaysMap = new Map(
-        user.checkIns.map((c: { date: Date; type?: string }) => [new Date(c.date).getDate(), c])
-      );
+      const slotMap = new Map<number, DaySlot>();
+      for (const c of user.checkIns as { date: Date; type?: string; mealKind?: string | null }[]) {
+        const day = new Date(c.date).getDate();
+        const slot = slotMap.get(day) ?? {};
+        if (c.mealKind === "BREAKFAST") slot.breakfast = c;
+        else slot.dinner = c;
+        slotMap.set(day, slot);
+      }
 
-      // A열: 이름
       if (isTeacher) {
         row.getCell(1).value = (user as { name: string }).name;
       } else {
@@ -124,31 +128,33 @@ export async function GET(request: Request) {
         row.getCell(1).value = `${s.classNum}-${s.number} ${s.name}`;
       }
 
-      // 날짜열
       let count = 0;
       let personalCount = 0;
       let workCount = 0;
       for (let d = 1; d <= daysInMonth; d++) {
-        const checkIn = checkedDaysMap.get(d);
-        if (checkIn) {
-          count++;
-          dailyTotal[d]++;
-          if (isTeacher) {
-            const type = (checkIn as { type?: string }).type;
-            if (type === "WORK") {
-              workCount++;
-              dailyWork[d]++;
-              row.getCell(d + 1).value = "근";
-            } else {
-              personalCount++;
-              dailyPersonal[d]++;
-              row.getCell(d + 1).value = "개";
-            }
+        const slot = slotMap.get(d);
+        if (!slot) continue;
+        count++;
+        dailyTotal[d]++;
+        let cellValue = "";
+        if (isTeacher && slot.dinner) {
+          if (slot.dinner.type === "WORK") {
+            workCount++;
+            dailyWork[d]++;
+            cellValue = "근";
           } else {
+            personalCount++;
             dailyPersonal[d]++;
-            row.getCell(d + 1).value = "O";
+            cellValue = "개";
           }
+        } else if (!isTeacher && slot.dinner) {
+          dailyPersonal[d]++;
+          cellValue = "O";
         }
+        if (slot.breakfast) {
+          cellValue = cellValue ? `${cellValue}+조` : "조";
+        }
+        row.getCell(d + 1).value = cellValue;
       }
 
       // 합계
@@ -238,6 +244,7 @@ async function exportDaily(dateParam: string) {
     where: { date: targetDate },
     select: {
       type: true,
+      mealKind: true,
       source: true,
       checkedAt: true,
       user: {
@@ -260,6 +267,7 @@ async function exportDaily(dateParam: string) {
     number: number | null;
     name: string;
     subject: string | null;
+    mealKind: "BREAKFAST" | "DINNER";
     checkedAt: Date;
     source: "QR" | "ADMIN_MANUAL" | "LOCAL_SYNC" | null;
   };
@@ -282,6 +290,7 @@ async function exportDaily(dateParam: string) {
       number: c.user.number,
       name: c.user.name,
       subject: c.user.subject,
+      mealKind: c.mealKind ?? "DINNER",
       checkedAt: c.checkedAt,
       source: c.source,
     };
@@ -309,7 +318,7 @@ async function exportDaily(dateParam: string) {
   const workbook = new ExcelJS.default.Workbook();
   const sheet = workbook.addWorksheet(dateParam);
 
-  const headers = ["구분", "학년", "반", "번호", "이름", "교과", "체크인 시각", "출처"];
+  const headers = ["구분", "학년", "반", "번호", "이름", "교과", "식사", "체크인 시각", "출처"];
   const lastCol = headers.length;
 
   const dow = ["일", "월", "화", "수", "목", "금", "토"][targetDate.getDay()];
@@ -332,7 +341,7 @@ async function exportDaily(dateParam: string) {
   headerRow.font = { bold: true };
   headerRow.alignment = { horizontal: "center" };
 
-  const widths = [10, 6, 6, 6, 12, 14, 18, 8];
+  const widths = [10, 6, 6, 6, 12, 14, 8, 18, 8];
   widths.forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
 
   for (const r of rows) {
@@ -344,6 +353,7 @@ async function exportDaily(dateParam: string) {
       isStudent ? r.number : "",
       r.name,
       isStudent ? "" : (r.subject ?? ""),
+      r.mealKind === "BREAKFAST" ? "조식" : "석식",
       formatDateTimeKST(r.checkedAt),
       sourceLabel(r.source),
     ]);

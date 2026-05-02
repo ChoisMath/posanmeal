@@ -42,12 +42,16 @@ export async function GET(request: Request) {
         ? { name: "asc" }
         : [{ classNum: "asc" }, { number: "asc" }],
     }),
-    prisma.mealApplicationDate.findMany({
+    prisma.mealRegistrationDate.findMany({
       where: {
         date: { gte: startDate, lte: endDate },
-        application: { type: "BREAKFAST" },
+        registration: {
+          status: "APPROVED",
+          application: { type: "BREAKFAST" },
+        },
       },
       select: { date: true },
+      distinct: ["date"],
       orderBy: { date: "asc" },
     }),
   ]);

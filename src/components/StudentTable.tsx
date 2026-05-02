@@ -10,7 +10,13 @@ interface Student {
   name: string;
   number: number;
   photoUrl: string | null;
-  checkIns: { date: string; checkedAt: string }[];
+  checkIns: { date: string; checkedAt: string; mealKind?: "BREAKFAST" | "DINNER" | null }[];
+}
+
+function uniqueCheckedDayKeys(checkIns: Student["checkIns"]): Set<number> {
+  const set = new Set<number>();
+  for (const c of checkIns) set.add(new Date(c.date).getDate());
+  return set;
 }
 
 export function StudentTable() {
@@ -51,7 +57,6 @@ export function StudentTable() {
     );
   }
 
-  // 일자별 합계 계산 (memoized)
   const { dailyTotals, grandTotal } = useMemo(() => {
     const totals = Array.from({ length: daysInMonth }, (_, i) => {
       const day = i + 1;
@@ -59,7 +64,10 @@ export function StudentTable() {
         s.checkIns.some((c) => new Date(c.date).getDate() === day)
       ).length;
     });
-    const total = students.reduce((sum, s) => sum + s.checkIns.length, 0);
+    const total = students.reduce(
+      (sum, s) => sum + uniqueCheckedDayKeys(s.checkIns).size,
+      0,
+    );
     return { dailyTotals: totals, grandTotal: total };
   }, [students, daysInMonth]);
 
@@ -108,9 +116,7 @@ export function StudentTable() {
           </thead>
           <tbody>
             {students.map((student) => {
-              const checkedDaysSet = new Set(
-                student.checkIns.map((c) => new Date(c.date).getDate())
-              );
+              const checkedDaysSet = uniqueCheckedDayKeys(student.checkIns);
               return (
                 <tr key={student.id} className="hover:bg-muted/50">
                   {/* 학생명 셀 - 좌측 고정 */}
@@ -142,7 +148,7 @@ export function StudentTable() {
                   })}
                   {/* 합계 셀 - 우측 고정 */}
                   <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-1.5 font-medium">
-                    {student.checkIns.length}/{daysInMonth}
+                    {checkedDaysSet.size}/{daysInMonth}
                   </td>
                 </tr>
               );

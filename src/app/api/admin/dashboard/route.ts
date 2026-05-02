@@ -7,8 +7,7 @@ export async function GET(request: Request) {
   const dateParam = searchParams.get("date") || todayKST();
   const targetDate = new Date(dateParam);
 
-  // Parallel: groupBy for counts + findMany for records
-  const [counts, records] = await Promise.all([
+  const [counts, records, breakfastApproved] = await Promise.all([
     prisma.checkIn.groupBy({
       by: ["type", "mealKind"],
       where: { date: targetDate },
@@ -26,7 +25,19 @@ export async function GET(request: Request) {
       },
       orderBy: { checkedAt: "asc" },
     }),
+    prisma.mealRegistrationDate.findFirst({
+      where: {
+        date: targetDate,
+        registration: {
+          status: "APPROVED",
+          application: { type: "BREAKFAST" },
+        },
+      },
+      select: { date: true },
+    }),
   ]);
+
+  const hasBreakfast = Boolean(breakfastApproved);
 
   const studentBreakfastCount = counts
     .filter((c) => c.type === "STUDENT" && c.mealKind === "BREAKFAST")
@@ -43,6 +54,7 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     date: dateParam,
+    hasBreakfast,
     studentCount: studentDinnerCount,
     breakfastStudentCount: studentBreakfastCount,
     dinnerStudentCount: studentDinnerCount,

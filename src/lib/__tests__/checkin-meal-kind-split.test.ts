@@ -7,12 +7,11 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   userFindMany: vi.fn(),
   userFindUnique: vi.fn(),
-  checkInFindFirst: vi.fn(),
   checkInFindUnique: vi.fn(),
   checkInCreate: vi.fn(),
   checkInUpdate: vi.fn(),
   checkInDelete: vi.fn(),
-  mealApplicationDateFindMany: vi.fn(),
+  mealRegistrationDateFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
@@ -24,14 +23,13 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: mocks.userFindUnique,
     },
     checkIn: {
-      findFirst: mocks.checkInFindFirst,
       findUnique: mocks.checkInFindUnique,
       create: mocks.checkInCreate,
       update: mocks.checkInUpdate,
       delete: mocks.checkInDelete,
     },
-    mealApplicationDate: {
-      findMany: mocks.mealApplicationDateFindMany,
+    mealRegistrationDate: {
+      findMany: mocks.mealRegistrationDateFindMany,
     },
   },
 }));
@@ -86,7 +84,7 @@ describe("CheckIn mealKind split", () => {
   it("returns meal columns for admin monthly check-in rows", async () => {
     const { GET } = await import("@/app/api/admin/checkins/route");
     mocks.userFindMany.mockResolvedValue([]);
-    mocks.mealApplicationDateFindMany.mockResolvedValue([{ date: new Date("2026-05-30T00:00:00.000Z") }]);
+    mocks.mealRegistrationDateFindMany.mockResolvedValue([{ date: new Date("2026-05-30T00:00:00.000Z") }]);
 
     const response = await GET(new Request("http://localhost/api/admin/checkins?year=2026&month=5&category=teacher"));
     const body = await response.json();
@@ -111,7 +109,6 @@ describe("CheckIn mealKind split", () => {
   it("looks up admin toggle rows by user/date/mealKind", async () => {
     const { POST } = await import("@/app/api/admin/checkins/toggle/route");
     mocks.userFindUnique.mockResolvedValue({ id: 7, role: "TEACHER" });
-    mocks.checkInFindFirst.mockResolvedValue(null);
     mocks.checkInFindUnique.mockResolvedValue(null);
     mocks.checkInCreate.mockResolvedValue({ id: 10 });
 

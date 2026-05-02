@@ -37,17 +37,20 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
 
+  interface DaySlot { breakfast?: CheckInRecord; dinner?: CheckInRecord }
   const checkInMap = useMemo(() => {
-    const map = new Map<string, CheckInRecord>();
+    const map = new Map<string, DaySlot>();
     checkIns.forEach((c) => {
       const key = c.date.slice(0, 10);
-      const existing = map.get(key);
-      if (!existing || c.mealKind === "BREAKFAST") map.set(key, c);
+      const slot = map.get(key) ?? {};
+      if (c.mealKind === "BREAKFAST") slot.breakfast = c;
+      else slot.dinner = c;
+      map.set(key, slot);
     });
     return map;
   }, [checkIns]);
 
-  const getCheckIn = (day: number) => {
+  const getDaySlot = (day: number): DaySlot | undefined => {
     const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     return checkInMap.get(dateStr);
   };
@@ -83,16 +86,28 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
         {Array.from({ length: firstDayOfWeek }, (_, i) => <div key={`empty-${i}`} />)}
         {Array.from({ length: daysInMonth }, (_, i) => {
           const day = i + 1;
-          const checkIn = getCheckIn(day);
+          const slot = getDaySlot(day);
+          const dinner = slot?.dinner;
+          const breakfast = slot?.breakfast;
+          const primary = dinner ?? breakfast;
+          const cellBg = !primary
+            ? ""
+            : primary.type === "WORK"
+              ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
+              : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200";
           return (
-            <div key={day} className={`py-2 rounded-md text-sm ${checkIn ? checkIn.type === "WORK" ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200" : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200" : ""}`}>
+            <div key={day} className={`py-2 rounded-md text-sm ${cellBg}`}>
               <div>{day}</div>
-              {checkIn && showType && (
-                <div className={`text-[10px] font-medium ${checkIn.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
-                  {checkIn.mealKind === "BREAKFAST" ? "조식" : checkIn.type === "WORK" ? "근무" : "석식"}
+              {breakfast && (
+                <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                  {showType ? "조식 " : ""}{formatTime(breakfast.checkedAt)}
                 </div>
               )}
-              {checkIn && <div className="text-[10px] text-muted-foreground">{formatTime(checkIn.checkedAt)}</div>}
+              {dinner && (
+                <div className={`text-[10px] font-medium ${dinner.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-emerald-700 dark:text-emerald-300"}`}>
+                  {showType ? `${dinner.type === "WORK" ? "근무" : "석식"} ` : ""}{formatTime(dinner.checkedAt)}
+                </div>
+              )}
             </div>
           );
         })}

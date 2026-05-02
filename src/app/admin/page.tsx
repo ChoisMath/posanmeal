@@ -59,12 +59,19 @@ interface RegistrationItem {
 
 interface DashboardRecord {
   id: number; userName: string; role: string; type: string;
+  mealKind?: "BREAKFAST" | "DINNER" | null;
   source: CheckInSourceLabel;
   checkedAt: string; grade?: number; classNum?: number; number?: number;
 }
 
 interface DashboardData {
-  date: string; studentCount: number; teacherWorkCount: number; teacherPersonalCount: number;
+  date: string;
+  hasBreakfast: boolean;
+  studentCount: number;
+  breakfastStudentCount: number;
+  dinnerStudentCount: number;
+  teacherWorkCount: number;
+  teacherPersonalCount: number;
   records: DashboardRecord[];
 }
 
@@ -581,13 +588,28 @@ export default function AdminPage() {
       });
   }, [addStudentDialogOpen, users, registrations, studentSearch]);
 
-  // 당일현황: 학년별 카운트 + 정렬 (memoized)
-  const { grade1Count, grade2Count, grade3Count, sortedRecords } = useMemo(() => {
+  const {
+    grade1Count, grade2Count, grade3Count,
+    grade1Breakfast, grade2Breakfast, grade3Breakfast,
+    grade1Dinner, grade2Dinner, grade3Dinner,
+    sortedRecords,
+  } = useMemo(() => {
     const records = dashboard?.records || [];
+    const isStudent = (r: DashboardRecord, g: number) => r.role === "STUDENT" && r.grade === g;
+    const byGrade = (g: number) => records.filter((r) => isStudent(r, g));
+    const breakfast = (rs: DashboardRecord[]) => rs.filter((r) => r.mealKind === "BREAKFAST").length;
+    const dinner = (rs: DashboardRecord[]) => rs.filter((r) => r.mealKind !== "BREAKFAST").length;
+    const g1 = byGrade(1), g2 = byGrade(2), g3 = byGrade(3);
     return {
-      grade1Count: records.filter((r) => r.role === "STUDENT" && r.grade === 1).length,
-      grade2Count: records.filter((r) => r.role === "STUDENT" && r.grade === 2).length,
-      grade3Count: records.filter((r) => r.role === "STUDENT" && r.grade === 3).length,
+      grade1Count: g1.length,
+      grade2Count: g2.length,
+      grade3Count: g3.length,
+      grade1Breakfast: breakfast(g1),
+      grade2Breakfast: breakfast(g2),
+      grade3Breakfast: breakfast(g3),
+      grade1Dinner: dinner(g1),
+      grade2Dinner: dinner(g2),
+      grade3Dinner: dinner(g3),
       sortedRecords: [...records].sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime()),
     };
   }, [dashboard]);
@@ -862,14 +884,17 @@ export default function AdminPage() {
                   <>
                     <div className="grid grid-cols-5 gap-2 sm:gap-3 mb-5">
                       {[
-                        { count: grade1Count, label: "1학년", color: "from-amber-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-amber-500/10" },
-                        { count: grade2Count, label: "2학년", color: "from-orange-500/10 to-orange-500/5 dark:from-orange-500/20 dark:to-orange-500/10" },
-                        { count: grade3Count, label: "3학년", color: "from-rose-500/10 to-rose-500/5 dark:from-rose-500/20 dark:to-rose-500/10" },
-                        { count: dashboard.teacherWorkCount, label: "교사(근무)", color: "from-blue-500/10 to-blue-500/5 dark:from-blue-500/20 dark:to-blue-500/10" },
-                        { count: dashboard.teacherPersonalCount, label: "교사(개인)", color: "from-emerald-500/10 to-emerald-500/5 dark:from-emerald-500/20 dark:to-emerald-500/10" },
-                      ].map(({ count, label, color }) => (
+                        { count: grade1Count, breakfast: grade1Breakfast, dinner: grade1Dinner, label: "1학년", color: "from-amber-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-amber-500/10" },
+                        { count: grade2Count, breakfast: grade2Breakfast, dinner: grade2Dinner, label: "2학년", color: "from-orange-500/10 to-orange-500/5 dark:from-orange-500/20 dark:to-orange-500/10" },
+                        { count: grade3Count, breakfast: grade3Breakfast, dinner: grade3Dinner, label: "3학년", color: "from-rose-500/10 to-rose-500/5 dark:from-rose-500/20 dark:to-rose-500/10" },
+                        { count: dashboard.teacherWorkCount, breakfast: 0, dinner: 0, label: "교사(근무)", color: "from-blue-500/10 to-blue-500/5 dark:from-blue-500/20 dark:to-blue-500/10" },
+                        { count: dashboard.teacherPersonalCount, breakfast: 0, dinner: 0, label: "교사(개인)", color: "from-emerald-500/10 to-emerald-500/5 dark:from-emerald-500/20 dark:to-emerald-500/10" },
+                      ].map(({ count, breakfast, dinner, label, color }) => (
                         <div key={label} className={`bg-gradient-to-b ${color} rounded-xl p-3 text-center`}>
                           <p className="text-2xl font-bold">{count}</p>
+                          {dashboard.hasBreakfast && label.endsWith("학년") && (
+                            <p className="text-[10px] text-muted-foreground whitespace-nowrap">조 {breakfast} · 석 {dinner}</p>
+                          )}
                           <p className="text-[11px] text-muted-foreground font-medium">{label}</p>
                         </div>
                       ))}
@@ -880,6 +905,9 @@ export default function AdminPage() {
                           <tr>
                             <th className="p-2 text-left bg-muted whitespace-nowrap">이름</th>
                             <th className="p-2 text-left bg-muted whitespace-nowrap">구분</th>
+                            {dashboard.hasBreakfast && (
+                              <th className="p-2 text-left bg-muted whitespace-nowrap">식사</th>
+                            )}
                             <th className="p-2 text-left bg-muted whitespace-nowrap">체크인 시각</th>
                             <th className="p-2 text-left bg-muted whitespace-nowrap">출처</th>
                             <th className="p-2 text-center w-16 bg-muted whitespace-nowrap">수정</th>
@@ -897,6 +925,17 @@ export default function AdminPage() {
                                   {r.type === "STUDENT" ? `${r.grade}학년` : r.type === "WORK" ? "근무" : "개인"}
                                 </Badge>
                               </td>
+                              {dashboard.hasBreakfast && (
+                                <td className="p-2 whitespace-nowrap">
+                                  <Badge variant="outline" className={`text-xs ${
+                                    r.mealKind === "BREAKFAST"
+                                      ? "border-amber-300 text-amber-600 dark:text-amber-400"
+                                      : "border-slate-300 text-slate-600 dark:text-slate-400"
+                                  }`}>
+                                    {r.mealKind === "BREAKFAST" ? "조식" : "석식"}
+                                  </Badge>
+                                </td>
+                              )}
                               <td className="p-2 whitespace-nowrap">{formatDateTimeKST(new Date(r.checkedAt))}</td>
                               <td className="p-2 whitespace-nowrap">
                                 {r.source ? (
