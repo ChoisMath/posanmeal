@@ -60,9 +60,9 @@ describe("CheckIn mealKind split", () => {
     );
 
     expect(migration).toContain('ALTER COLUMN "mealKind" SET NOT NULL');
-    expect(migration).toContain('DROP CONSTRAINT "CheckIn_userId_date_key"');
+    expect(migration).toContain('DROP INDEX IF EXISTS "CheckIn_userId_date_key"');
     expect(migration).toContain(
-      'ADD CONSTRAINT "CheckIn_userId_date_mealKind_key" UNIQUE ("userId", "date", "mealKind")',
+      'CREATE UNIQUE INDEX "CheckIn_userId_date_mealKind_key"',
     );
   });
 

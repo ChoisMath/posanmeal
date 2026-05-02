@@ -6,7 +6,9 @@ ALTER TABLE "CheckIn"
   ALTER COLUMN "mealKind" SET NOT NULL;
 
 ALTER TABLE "CheckIn"
-  DROP CONSTRAINT "CheckIn_userId_date_key";
+  DROP CONSTRAINT IF EXISTS "CheckIn_userId_date_key";
 
-ALTER TABLE "CheckIn"
-  ADD CONSTRAINT "CheckIn_userId_date_mealKind_key" UNIQUE ("userId", "date", "mealKind");
+DROP INDEX IF EXISTS "CheckIn_userId_date_key";
+
+CREATE UNIQUE INDEX "CheckIn_userId_date_mealKind_key"
+  ON "CheckIn"("userId", "date", "mealKind");
