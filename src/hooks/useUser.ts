@@ -16,7 +16,15 @@ interface UserProfile {
   registrations?: Array<{
     id: number;
     createdAt: string;
-    application: { id: number; title: string; type: string; mealStart: string | null; mealEnd: string | null };
+    selectedDates?: Array<{ date: string }>;
+    application: {
+      id: number;
+      title: string;
+      type: string;
+      mealStart: string | null;
+      mealEnd: string | null;
+      allowedDates?: Array<{ date: string }>;
+    };
   }>;
 }
 

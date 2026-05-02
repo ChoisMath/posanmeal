@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   // Parallel: groupBy for counts + findMany for records
   const [counts, records] = await Promise.all([
     prisma.checkIn.groupBy({
-      by: ["type"],
+      by: ["type", "mealKind"],
       where: { date: targetDate },
       _count: { id: true },
     }),
@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       select: {
         id: true,
         type: true,
+        mealKind: true,
         source: true,
         checkedAt: true,
         user: { select: { name: true, role: true, grade: true, classNum: true, number: true } },
@@ -27,18 +28,32 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  const countMap = Object.fromEntries(counts.map((c) => [c.type, c._count.id]));
+  const studentBreakfastCount = counts
+    .filter((c) => c.type === "STUDENT" && c.mealKind === "BREAKFAST")
+    .reduce((sum, c) => sum + c._count.id, 0);
+  const studentDinnerCount = counts
+    .filter((c) => c.type === "STUDENT" && c.mealKind !== "BREAKFAST")
+    .reduce((sum, c) => sum + c._count.id, 0);
+  const teacherWorkCount = counts
+    .filter((c) => c.type === "WORK")
+    .reduce((sum, c) => sum + c._count.id, 0);
+  const teacherPersonalCount = counts
+    .filter((c) => c.type === "PERSONAL")
+    .reduce((sum, c) => sum + c._count.id, 0);
 
   return NextResponse.json({
     date: dateParam,
-    studentCount: countMap.STUDENT || 0,
-    teacherWorkCount: countMap.WORK || 0,
-    teacherPersonalCount: countMap.PERSONAL || 0,
+    studentCount: studentDinnerCount,
+    breakfastStudentCount: studentBreakfastCount,
+    dinnerStudentCount: studentDinnerCount,
+    teacherWorkCount,
+    teacherPersonalCount,
     records: records.map((c) => ({
       id: c.id,
       userName: c.user.name,
       role: c.user.role,
       type: c.type,
+      mealKind: c.mealKind,
       source: c.source,
       checkedAt: c.checkedAt.toISOString(),
       grade: c.user.grade,

@@ -15,6 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
+import { DateMultiPicker } from "@/components/DateMultiPicker";
+import { BreakfastMatrixTable } from "@/components/BreakfastMatrixTable";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
@@ -39,6 +41,9 @@ interface MealAppItem {
   status: string;
   _count: { registrations: number };
   cancelledCount: number;
+  allowedDates?: Array<{ date: string }>;
+  allowedDatesCount?: number;
+  dailyCounts?: Record<string, number>;
 }
 
 interface RegistrationItem {
@@ -49,6 +54,7 @@ interface RegistrationItem {
   addedBy: string | null;
   cancelledBy: string | null;
   user: { id: number; name: string; grade: number; classNum: number; number: number };
+  selectedDates?: Array<{ date: string }>;
 }
 
 interface DashboardRecord {
@@ -68,7 +74,16 @@ const emptyForm = {
   subject: "", homeroom: "", position: "",
 };
 
-const emptyAppForm = { title: "", description: "", type: "DINNER", applyStart: "", applyEnd: "", mealStart: "", mealEnd: "" };
+const emptyAppForm = {
+  title: "",
+  description: "",
+  type: "DINNER",
+  applyStart: "",
+  applyEnd: "",
+  mealStart: "",
+  mealEnd: "",
+  allowedDates: [] as string[],
+};
 
 const sheetImportGuides = [
   { label: "학생", columns: ["email", "grade", "classNum", "number", "name"] },
@@ -741,6 +756,7 @@ export default function AdminPage() {
                                 applyEnd: app.applyEnd.slice(0, 10),
                                 mealStart: app.mealStart ? app.mealStart.slice(0, 10) : "",
                                 mealEnd: app.mealEnd ? app.mealEnd.slice(0, 10) : "",
+                                allowedDates: (app.allowedDates ?? []).map((d) => d.date.slice(0, 10)),
                               });
                               setAppDialogOpen(true);
                             }}>
@@ -1099,6 +1115,15 @@ export default function AdminPage() {
               <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
             </div>
             <p className="text-xs text-muted-foreground">급식 기간을 비워두면 명단 수합용 공고로 사용됩니다.</p>
+            {appForm.type === "BREAKFAST" && (
+              <div>
+                <Label>운영 날짜</Label>
+                <DateMultiPicker
+                  value={new Set(appForm.allowedDates)}
+                  onChange={(dates) => setAppForm({ ...appForm, allowedDates: Array.from(dates).sort() })}
+                />
+              </div>
+            )}
             <Button onClick={editingApp ? handleUpdateApp : handleCreateApp} className="w-full">{editingApp ? "수정" : "생성"}</Button>
           </div>
         </DialogContent>
@@ -1154,6 +1179,25 @@ export default function AdminPage() {
               취소자 보기
             </Button>
           </div>
+          {selectedAppForReg?.type === "BREAKFAST" && (
+            <div className="mb-3">
+              <BreakfastMatrixTable
+                allowedDates={(selectedAppForReg.allowedDates ?? []).map((d) => d.date.slice(0, 10))}
+                students={visibleRegs.map((r) => r.user)}
+                registrations={visibleRegs}
+                showCancelled={showCancelled}
+                onCellClick={async (registrationId, date, selected) => {
+                  const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${registrationId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(selected ? { removeDates: [date] } : { addDates: [date] }),
+                  });
+                  if (res.ok) fetchRegistrations(selectedAppForReg.id);
+                  else toast.error("날짜 변경에 실패했습니다.");
+                }}
+              />
+            </div>
+          )}
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="sticky top-0 z-20">

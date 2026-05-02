@@ -16,11 +16,18 @@ import {
   markCheckInsSynced,
   replaceAllUsers,
   replaceAllEligibleUsers,
+  replaceAllEligibleEntries,
   clearSyncedCheckIns,
   clearAllData,
 } from "@/lib/local-db";
 import type { LocalUser } from "@/lib/local-db";
 import { RefreshCw, Wifi, WifiOff, Trash2 } from "lucide-react";
+import {
+  DEFAULT_MEAL_WINDOWS,
+  resolveMealKindLocal,
+  type MealKind,
+  type MealWindows,
+} from "@/lib/meal-kind-local";
 
 interface CheckInResult {
   success: boolean;
@@ -37,6 +44,7 @@ interface CheckInResult {
   };
   type?: string;
   checkedAt?: string;
+  mealKind?: MealKind;
 }
 
 // AudioContext singleton
@@ -107,12 +115,13 @@ function todayLocal(): string {
   return `${y}-${m}-${d}`;
 }
 
-function parseLocalQR(data: string): { userId: number; generation: string; type: string } | null {
+function parseLocalQR(data: string): { userId: number; generation: string; type: string; mealKind?: MealKind } | null {
   const parts = data.split(":");
-  if (parts.length !== 4 || parts[0] !== "posanmeal") return null;
+  if ((parts.length !== 4 && parts.length !== 5) || parts[0] !== "posanmeal") return null;
   const userId = parseInt(parts[1], 10);
   if (isNaN(userId)) return null;
-  return { userId, generation: parts[2], type: parts[3] };
+  const mealKind = parts[4] === "BREAKFAST" || parts[4] === "DINNER" ? parts[4] : undefined;
+  return { userId, generation: parts[2], type: parts[3], mealKind };
 }
 
 export default function CheckPage() {
@@ -125,6 +134,7 @@ export default function CheckPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [modeLoaded, setModeLoaded] = useState(false);
+  const [mealWindows, setMealWindows] = useState<MealWindows>(DEFAULT_MEAL_WINDOWS);
   const prevModeRef = useRef<"online" | "local">("online");
 
   // Service Worker registration is handled globally in <SwUpdater /> (layout).
@@ -142,6 +152,7 @@ export default function CheckPage() {
         const payload = unsynced.map((ci) => ({
           userId: ci.userId,
           date: ci.date,
+          mealKind: ci.mealKind,
           checkedAt: ci.checkedAt,
           type: ci.type,
         }));
@@ -176,13 +187,19 @@ export default function CheckPage() {
 
         await setSetting("operationMode", data.operationMode);
         await setSetting("qrGeneration", data.qrGeneration.toString());
+        await setSetting("mealWindows", JSON.stringify(data.mealWindows || DEFAULT_MEAL_WINDOWS));
         await replaceAllUsers(data.users);
-        await replaceAllEligibleUsers(data.eligibleUserIds);
+        if (Array.isArray(data.eligibleEntries)) {
+          await replaceAllEligibleEntries(data.eligibleEntries);
+        } else {
+          await replaceAllEligibleUsers(data.eligibleUserIds);
+        }
 
         const now = new Date().toISOString();
         await setSetting("lastSyncAt", now);
 
         setOperationMode(data.operationMode);
+        setMealWindows(data.mealWindows || DEFAULT_MEAL_WINDOWS);
         setLastSyncAt(now);
 
         // Check server time drift
@@ -229,6 +246,10 @@ export default function CheckPage() {
         if (data.qrGeneration) {
           await setSetting("qrGeneration", data.qrGeneration.toString());
         }
+        if (data.mealWindows) {
+          setMealWindows(data.mealWindows);
+          await setSetting("mealWindows", JSON.stringify(data.mealWindows));
+        }
         return serverMode;
       }
     } catch {}
@@ -261,6 +282,8 @@ export default function CheckPage() {
             setOperationMode(savedMode);
             prevModeRef.current = savedMode;
           }
+          const savedWindows = await getSetting("mealWindows");
+          if (savedWindows) setMealWindows(JSON.parse(savedWindows));
         } catch {}
       }
       setModeLoaded(true);
@@ -370,19 +393,26 @@ export default function CheckPage() {
         return;
       }
 
+      const today = todayLocal();
+      const currentMealKind = parsed.mealKind ?? resolveMealKindLocal(new Date(), mealWindows);
+      if (!currentMealKind) {
+        setResult({ success: false, error: "현재 식사 시간이 아닙니다." });
+        playDoubleBeep();
+        return;
+      }
+
       // 5. Eligibility check (students only)
       if (user.role === "STUDENT") {
-        const eligible = await isEligible(parsed.userId);
+        const eligible = await isEligible(parsed.userId, today, currentMealKind);
         if (!eligible) {
-          setResult({ success: false, error: "석식 대상이 아닙니다." });
+          setResult({ success: false, error: `오늘 ${currentMealKind === "BREAKFAST" ? "조식" : "석식"} 신청 내역이 없습니다.` });
           playDoubleBeep();
           return;
         }
       }
 
       // 6. Duplicate check
-      const today = todayLocal();
-      const existing = await getCheckIn(parsed.userId, today);
+      const existing = await getCheckIn(parsed.userId, today, currentMealKind);
       if (existing) {
         const time = new Date(existing.checkedAt);
         const hh = String(time.getHours()).padStart(2, "0");
@@ -391,8 +421,9 @@ export default function CheckPage() {
           success: false,
           duplicate: true,
           user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
+          mealKind: currentMealKind,
           checkedAt: existing.checkedAt,
-          error: `이미 체크인되었습니다 (${hh}:${mm})`,
+          error: `이미 ${currentMealKind === "BREAKFAST" ? "조식" : "석식"} 체크인 하였습니다 (${hh}:${mm})`,
         });
         playLongBeep();
         return;
@@ -403,6 +434,7 @@ export default function CheckPage() {
       await addCheckIn({
         userId: parsed.userId,
         date: today,
+        mealKind: currentMealKind,
         checkedAt,
         type: parsed.type as "STUDENT" | "WORK" | "PERSONAL",
         synced: 0,
@@ -412,6 +444,7 @@ export default function CheckPage() {
         success: true,
         user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
         type: parsed.type,
+        mealKind: currentMealKind,
         checkedAt,
       });
       playChime();
@@ -426,7 +459,7 @@ export default function CheckPage() {
         processingRef.current = false;
       }, 2000);
     }
-  }, []);
+  }, [mealWindows]);
 
   const handleScan = useCallback(
     (data: string) => {
@@ -556,7 +589,7 @@ export default function CheckPage() {
                     <p className="text-emerald-700 dark:text-emerald-300 text-fit-sm mt-1.5 font-medium">
                       {result.user?.role === "TEACHER" && result.checkedAt
                         ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
-                        : "석식 체크인 되었습니다."}
+                        : `${result.mealKind === "BREAKFAST" ? "조식" : "석식"} 체크인 하였습니다.`}
                     </p>
                   )}
 

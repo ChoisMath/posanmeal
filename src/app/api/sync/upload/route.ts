@@ -8,6 +8,7 @@ interface UploadCheckIn {
   date: string;
   checkedAt: string;
   type: "STUDENT" | "WORK" | "PERSONAL";
+  mealKind?: "BREAKFAST" | "DINNER";
 }
 
 export async function POST(request: Request) {
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
   for (const ci of checkins) {
     try {
       const dateObj = new Date(ci.date + "T00:00:00Z");
+      const mealKind = ci.mealKind ?? "DINNER";
 
       // Check if user exists
       const user = await prisma.user.findUnique({
@@ -45,12 +47,20 @@ export async function POST(request: Request) {
       if (user.role === "STUDENT") {
         const activeReg = await prisma.mealRegistration.findFirst({
           where: {
-            userId: ci.userId,
-            status: "APPROVED",
-            application: {
-              mealStart: { not: null, lte: dateObj },
-              mealEnd: { not: null, gte: dateObj },
-            },
+              userId: ci.userId,
+              status: "APPROVED",
+              ...(mealKind === "DINNER"
+                ? {
+                    application: {
+                      type: "DINNER",
+                      mealStart: { not: null, lte: dateObj },
+                      mealEnd: { not: null, gte: dateObj },
+                    },
+                  }
+                : {
+                    application: { type: "BREAKFAST" },
+                    selectedDates: { some: { date: dateObj } },
+                  }),
           },
         });
         if (!activeReg) {
@@ -64,6 +74,7 @@ export async function POST(request: Request) {
         data: {
           userId: ci.userId,
           date: dateObj,
+          mealKind,
           checkedAt: new Date(ci.checkedAt),
           type: ci.type,
           source: "LOCAL_SYNC",

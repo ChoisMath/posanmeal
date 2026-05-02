@@ -10,6 +10,7 @@ interface CheckInRecord {
   date: string;
   checkedAt: string;
   type: string;
+  mealKind?: "BREAKFAST" | "DINNER" | null;
 }
 
 interface MonthlyCalendarProps {
@@ -38,7 +39,11 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
 
   const checkInMap = useMemo(() => {
     const map = new Map<string, CheckInRecord>();
-    checkIns.forEach((c) => map.set(c.date.slice(0, 10), c));
+    checkIns.forEach((c) => {
+      const key = c.date.slice(0, 10);
+      const existing = map.get(key);
+      if (!existing || c.mealKind === "BREAKFAST") map.set(key, c);
+    });
     return map;
   }, [checkIns]);
 
@@ -84,7 +89,7 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
               <div>{day}</div>
               {checkIn && showType && (
                 <div className={`text-[10px] font-medium ${checkIn.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400"}`}>
-                  {checkIn.type === "WORK" ? "근무" : "개인"}
+                  {checkIn.mealKind === "BREAKFAST" ? "조식" : checkIn.type === "WORK" ? "근무" : "석식"}
                 </div>
               )}
               {checkIn && <div className="text-[10px] text-muted-foreground">{formatTime(checkIn.checkedAt)}</div>}

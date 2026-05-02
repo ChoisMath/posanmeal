@@ -6,6 +6,7 @@ interface CheckInRecord {
   date: string;
   checkedAt: string;
   type: string;
+  mealKind?: "BREAKFAST" | "DINNER" | null;
 }
 
 export function useCheckins(year: number, month: number) {

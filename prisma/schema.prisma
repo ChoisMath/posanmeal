@@ -24,6 +24,11 @@ enum CheckInSource {
   LOCAL_SYNC
 }
 
+enum MealKind {
+  BREAKFAST
+  DINNER
+}
+
 enum AdminLevel {
   NONE
   SUBADMIN
@@ -77,9 +82,20 @@ model MealApplication {
   updatedAt   DateTime  @updatedAt
 
   registrations MealRegistration[]
+  allowedDates  MealApplicationDate[]
 
   @@index([status])
   @@index([applyStart, applyEnd])
+}
+
+model MealApplicationDate {
+  applicationId Int
+  date          DateTime @db.Date
+
+  application MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([applicationId, date])
+  @@index([date])
 }
 
 model MealRegistration {
@@ -89,22 +105,36 @@ model MealRegistration {
   signature     String    @db.Text
   status        String    @default("APPROVED") // "APPROVED" | "CANCELLED"
   createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   cancelledAt   DateTime?
   cancelledBy   String?   // "STUDENT" | "ADMIN"
   addedBy       String?   // null = 학생 본인, "ADMIN" = 관리자 추가
 
   application   MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  selectedDates MealRegistrationDate[]
 
   @@unique([applicationId, userId])
   @@index([userId])
   @@index([applicationId, status])
 }
 
+model MealRegistrationDate {
+  registrationId Int
+  date           DateTime @db.Date
+  createdAt      DateTime @default(now())
+
+  registration MealRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@id([registrationId, date])
+  @@index([date])
+}
+
 model CheckIn {
   id        Int            @id @default(autoincrement())
   userId    Int
   date      DateTime       @db.Date
+  mealKind  MealKind?
   checkedAt DateTime       @default(now())
   type      CheckInType
   source    CheckInSource?
@@ -114,6 +144,7 @@ model CheckIn {
   @@unique([userId, date])
   @@index([date])
   @@index([userId])
+  @@index([date, mealKind])
 }
 
 model SystemSetting {

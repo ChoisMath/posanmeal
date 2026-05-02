@@ -20,6 +20,13 @@ export async function GET(request: Request) {
       userId: session.user.dbUserId,
       date: { gte: startDate, lte: endDate },
     },
+    select: {
+      id: true,
+      date: true,
+      checkedAt: true,
+      type: true,
+      mealKind: true,
+    },
     orderBy: { date: "asc" },
   });
 
