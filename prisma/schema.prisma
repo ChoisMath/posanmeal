@@ -134,14 +134,14 @@ model CheckIn {
   id        Int            @id @default(autoincrement())
   userId    Int
   date      DateTime       @db.Date
-  mealKind  MealKind?
+  mealKind  MealKind
   checkedAt DateTime       @default(now())
   type      CheckInType
   source    CheckInSource?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, date])
+  @@unique([userId, date, mealKind])
   @@index([date])
   @@index([userId])
   @@index([date, mealKind])

@@ -50,8 +50,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "학생에게만 적용합니다." }, { status: 400 });
   }
 
-  const existing = await prisma.checkIn.findFirst({
-    where: { userId, date: targetDate, mealKind },
+  const existing = await prisma.checkIn.findUnique({
+    where: { userId_date_mealKind: { userId, date: targetDate, mealKind } },
     select: { id: true, type: true },
   });
 

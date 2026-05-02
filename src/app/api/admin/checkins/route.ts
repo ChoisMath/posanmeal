@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canWriteAdmin } from "@/lib/permissions";
+import { buildMonthlyMealColumns, getDateDayKey } from "@/lib/meal-columns";
 
 // GET /api/admin/checkins?year=2026&month=3&category=teacher|1|2|3
 export async function GET(request: Request) {
@@ -10,36 +11,58 @@ export async function GET(request: Request) {
   const month = parseInt(searchParams.get("month") || (new Date().getMonth() + 1).toString());
   const category = searchParams.get("category") || "teacher";
 
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const startDate = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00.000Z`);
+  const endDate = new Date(`${monthKey}-${String(daysInMonth).padStart(2, "0")}T00:00:00.000Z`);
 
   const isTeacher = category === "teacher";
   const grade = isTeacher ? undefined : parseInt(category);
 
-  const users = await prisma.user.findMany({
-    where: isTeacher
-      ? { role: "TEACHER" }
-      : { role: "STUDENT", grade },
-    select: {
-      id: true,
-      name: true,
-      number: true,
-      grade: true,
-      classNum: true,
-      subject: true,
-      homeroom: true,
-      checkIns: {
-        where: { date: { gte: startDate, lte: endDate } },
-        select: { id: true, date: true, checkedAt: true, type: true, mealKind: true },
-        orderBy: { date: "asc" },
+  const [users, breakfastDates] = await Promise.all([
+    prisma.user.findMany({
+      where: isTeacher
+        ? { role: "TEACHER" }
+        : { role: "STUDENT", grade },
+      select: {
+        id: true,
+        name: true,
+        number: true,
+        grade: true,
+        classNum: true,
+        subject: true,
+        homeroom: true,
+        checkIns: {
+          where: { date: { gte: startDate, lte: endDate } },
+          select: { id: true, date: true, checkedAt: true, type: true, mealKind: true },
+          orderBy: [{ date: "asc" }, { mealKind: "asc" }],
+        },
       },
-    },
-    orderBy: isTeacher
-      ? { name: "asc" }
-      : [{ classNum: "asc" }, { number: "asc" }],
-  });
+      orderBy: isTeacher
+        ? { name: "asc" }
+        : [{ classNum: "asc" }, { number: "asc" }],
+    }),
+    prisma.mealApplicationDate.findMany({
+      where: {
+        date: { gte: startDate, lte: endDate },
+        application: { type: "BREAKFAST" },
+      },
+      select: { date: true },
+      orderBy: { date: "asc" },
+    }),
+  ]);
 
-  return NextResponse.json({ users, year, month, category });
+  const breakfastDateKeys = new Set(breakfastDates.map((item) => getDateDayKey(item.date)));
+  for (const user of users) {
+    for (const checkIn of user.checkIns) {
+      if (checkIn.mealKind === "BREAKFAST") {
+        breakfastDateKeys.add(getDateDayKey(checkIn.date));
+      }
+    }
+  }
+  const mealColumns = buildMonthlyMealColumns(year, month, Array.from(breakfastDateKeys));
+
+  return NextResponse.json({ users, year, month, category, mealColumns });
 }
 
 // PATCH /api/admin/checkins — 체크인 타입 수정 (교사 근무↔개인)

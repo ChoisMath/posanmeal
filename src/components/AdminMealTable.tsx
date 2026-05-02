@@ -7,12 +7,19 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import {
+  buildMonthlyMealColumns,
+  getDateDayKey,
+  type MealColumn,
+  type MealKind,
+} from "@/lib/meal-columns";
 
 interface CheckInRecord {
   id: number;
   date: string;
   checkedAt: string;
   type: string;
+  mealKind?: MealKind | null;
 }
 
 interface UserRecord {
@@ -38,6 +45,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
   const isTeacher = category === "teacher";
 
   const daysInMonth = new Date(year, month, 0).getDate();
+  const mealColumns: MealColumn[] = data?.mealColumns ?? buildMonthlyMealColumns(year, month);
 
   const weekendSet = useMemo(() => {
     const set = new Set<number>();
@@ -60,13 +68,12 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
 
   // 일자별 합계 계산 (memoized)
   const { dailyTotals, grandTotal } = useMemo(() => {
-    const totals = Array.from({ length: daysInMonth }, (_, i) => {
-      const day = i + 1;
+    const totals = mealColumns.map((column) => {
       let total = 0;
       let work = 0;
       let personal = 0;
       users.forEach((user) => {
-        const checkIn = user.checkIns.find((c) => new Date(c.date).getDate() === day);
+        const checkIn = user.checkIns.find((c) => checkInCellKey(c) === column.key);
         if (checkIn) {
           total++;
           if (checkIn.type === "WORK") work++;
@@ -77,18 +84,16 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
     });
     const grand = users.reduce((sum, u) => sum + u.checkIns.length, 0);
     return { dailyTotals: totals, grandTotal: grand };
-  }, [users, daysInMonth]);
+  }, [users, mealColumns]);
 
   // 날짜를 "YYYY-MM-DD" (KST 달력 기준)로 포맷
-  function formatDayKey(day: number): string {
-    const mm = String(month).padStart(2, "0");
-    const dd = String(day).padStart(2, "0");
-    return `${year}-${mm}-${dd}`;
+  function checkInCellKey(checkIn: CheckInRecord): string {
+    return `${getDateDayKey(checkIn.date)}:${checkIn.mealKind ?? "DINNER"}`;
   }
 
   // 셀 클릭: 교사=cycle, 학생=toggle
-  async function handleCellClick(userId: number, day: number) {
-    const key = `${userId}:${day}`;
+  async function handleCellClick(userId: number, column: MealColumn) {
+    const key = `${userId}:${column.key}`;
     if (pendingCells.has(key)) return;
     setPendingCells((prev) => new Set(prev).add(key));
     const action = isTeacher ? "cycle" : "toggle";
@@ -96,7 +101,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
       const res = await fetch("/api/admin/checkins/toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, date: formatDayKey(day), action }),
+        body: JSON.stringify({ userId, date: column.date, mealKind: column.mealKind, action }),
       });
       if (res.ok) {
         mutateGrid();
@@ -127,22 +132,23 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
             <th className="sticky left-0 z-30 bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[100px] text-fit-sm">
               {isTeacher ? "이름" : "반 번호 이름"}
             </th>
-            {Array.from({ length: daysInMonth }, (_, i) => {
-              const day = i + 1;
-              const weekend = isWeekend(day);
+            {mealColumns.map((column) => {
+              const weekend = isWeekend(column.day);
               return (
                 <th
-                  key={day}
+                  key={column.key}
                   className={`px-1 py-2 text-center font-medium border-b min-w-[28px] ${
                     weekend
                       ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                       : "bg-muted text-muted-foreground"
                   }`}
-                  style={colHoverStyle(day)}
-                  onMouseEnter={() => setHoveredDay(day)}
+                  style={colHoverStyle(column.day)}
+                  onMouseEnter={() => setHoveredDay(column.day)}
                   onMouseLeave={() => setHoveredDay(null)}
+                  title={column.label}
                 >
-                  {day}
+                  <span>{column.day}</span>
+                  <span className="block text-[10px] leading-none text-muted-foreground">{column.shortLabel}</span>
                 </th>
               );
             })}
@@ -164,7 +170,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
         <tbody>
           {users.map((user) => {
             const checkedDaysMap = new Map(
-              user.checkIns.map((c) => [new Date(c.date).getDate(), c])
+              user.checkIns.map((c) => [checkInCellKey(c), c])
             );
 
             return (
@@ -182,15 +188,14 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                     )}
                   </div>
                 </td>
-                {Array.from({ length: daysInMonth }, (_, i) => {
-                  const day = i + 1;
-                  const checkIn = checkedDaysMap.get(day);
-                  const weekend = isWeekend(day);
-                  const pending = pendingCells.has(`${user.id}:${day}`);
+                {mealColumns.map((column) => {
+                  const checkIn = checkedDaysMap.get(column.key);
+                  const weekend = isWeekend(column.day);
+                  const pending = pendingCells.has(`${user.id}:${column.key}`);
                   const clickable = !readonly && !pending;
                   return (
                     <td
-                      key={day}
+                      key={column.key}
                       className={`text-center border-b px-0.5 py-1.5 ${
                         checkIn
                           ? isTeacher
@@ -202,19 +207,19 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""
                       } ${clickable ? "cursor-pointer hover:opacity-70 select-none" : ""} ${pending ? "opacity-50" : ""}`}
-                      style={colHoverStyle(day)}
-                      onMouseEnter={() => setHoveredDay(day)}
+                      style={colHoverStyle(column.day)}
+                      onMouseEnter={() => setHoveredDay(column.day)}
                       onMouseLeave={() => setHoveredDay(null)}
                       title={
                         clickable
                           ? checkIn
-                            ? `${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} (클릭하여 ${isTeacher ? "변경" : "삭제"})`
-                            : "클릭하여 추가"
+                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} (클릭하여 ${isTeacher ? "변경" : "삭제"})`
+                            : `${column.label} 클릭하여 추가`
                           : checkIn
-                            ? new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`
                             : undefined
                       }
-                      onClick={clickable ? () => handleCellClick(user.id, day) : undefined}
+                      onClick={clickable ? () => handleCellClick(user.id, column) : undefined}
                     >
                       {checkIn ? (isTeacher ? (checkIn.type === "WORK" ? "근" : "개") : "O") : ""}
                     </td>
@@ -235,7 +240,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   );
                 })()}
                 <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-1.5 font-medium">
-                  {user.checkIns.length}{isTeacher ? "" : `/${daysInMonth}`}
+                  {user.checkIns.length}{isTeacher ? "" : `/${mealColumns.length}`}
                 </td>
               </tr>
             );
@@ -249,10 +254,10 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                 <td className="sticky left-0 z-30 bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
                 {dailyTotals.map((d, i) => (
                   <td
-                    key={i}
+                    key={mealColumns[i]?.key ?? i}
                     className={`text-center border-t px-0.5 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 ${d.work > 0 ? "" : "opacity-30"}`}
-                    style={colHoverStyle(i + 1)}
-                    onMouseEnter={() => setHoveredDay(i + 1)}
+                    style={colHoverStyle(mealColumns[i]?.day ?? i + 1)}
+                    onMouseEnter={() => setHoveredDay(mealColumns[i]?.day ?? i + 1)}
                     onMouseLeave={() => setHoveredDay(null)}
                   >
                     {d.work || ""}
@@ -270,10 +275,10 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                 <td className="sticky left-0 z-30 bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
                 {dailyTotals.map((d, i) => (
                   <td
-                    key={i}
+                    key={mealColumns[i]?.key ?? i}
                     className={`text-center border-t px-0.5 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 ${d.personal > 0 ? "" : "opacity-30"}`}
-                    style={colHoverStyle(i + 1)}
-                    onMouseEnter={() => setHoveredDay(i + 1)}
+                    style={colHoverStyle(mealColumns[i]?.day ?? i + 1)}
+                    onMouseEnter={() => setHoveredDay(mealColumns[i]?.day ?? i + 1)}
                     onMouseLeave={() => setHoveredDay(null)}
                   >
                     {d.personal || ""}
@@ -291,10 +296,10 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                 <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
                 {dailyTotals.map((d, i) => (
                   <td
-                    key={i}
+                    key={mealColumns[i]?.key ?? i}
                     className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}
-                    style={colHoverStyle(i + 1)}
-                    onMouseEnter={() => setHoveredDay(i + 1)}
+                    style={colHoverStyle(mealColumns[i]?.day ?? i + 1)}
+                    onMouseEnter={() => setHoveredDay(mealColumns[i]?.day ?? i + 1)}
                     onMouseLeave={() => setHoveredDay(null)}
                   >
                     {d.total || ""}
@@ -315,7 +320,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
             <tr>
               <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
               {dailyTotals.map((d, i) => (
-                <td key={i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
+                <td key={mealColumns[i]?.key ?? i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
                   {d.total || ""}
                 </td>
               ))}
