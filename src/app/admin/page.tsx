@@ -418,10 +418,36 @@ export default function AdminPage() {
     if (res.ok) { const data = await res.json(); setRegistrations(data.registrations); }
   }
 
+  function buildAppPayload() {
+    const base = {
+      title: appForm.title,
+      description: appForm.description,
+      type: appForm.type,
+    };
+    if (appForm.type === "BREAKFAST") {
+      return {
+        ...base,
+        applyStart: appForm.applyStart,
+        applyEnd: appForm.applyEnd,
+        allowedDates: appForm.allowedDates,
+      };
+    }
+    if (appForm.type === "DINNER") {
+      return {
+        ...base,
+        applyStart: appForm.applyStart,
+        applyEnd: appForm.applyEnd,
+        mealStart: appForm.mealStart,
+        mealEnd: appForm.mealEnd,
+      };
+    }
+    return { ...base, applyStart: appForm.applyStart, applyEnd: appForm.applyEnd };
+  }
+
   async function handleCreateApp() {
     const res = await fetch("/api/admin/applications", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(appForm),
+      body: JSON.stringify(buildAppPayload()),
     });
     if (res.ok) { toast.success("공고가 생성되었습니다."); setAppDialogOpen(false); setAppForm(emptyAppForm); fetchApps(); }
     else { const d = await res.json(); toast.error(d.error || "생성 실패"); }
@@ -431,7 +457,7 @@ export default function AdminPage() {
     if (!editingApp) return;
     const res = await fetch(`/api/admin/applications/${editingApp.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(appForm),
+      body: JSON.stringify(buildAppPayload()),
     });
     if (res.ok) { toast.success("공고가 수정되었습니다."); setAppDialogOpen(false); setEditingApp(null); setAppForm(emptyAppForm); fetchApps(); }
     else { const d = await res.json(); toast.error(d.error || "수정 실패"); }
@@ -1107,14 +1133,18 @@ export default function AdminPage() {
             <div><Label>제목</Label><Input value={appForm.title} onChange={(e) => setAppForm({ ...appForm, title: e.target.value })} className="rounded-xl" placeholder="예: 4월 석식 신청" /></div>
             <div><Label>설명 (선택)</Label><textarea className="flex w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" rows={2} value={appForm.description} onChange={(e) => setAppForm({ ...appForm, description: e.target.value })} placeholder="공고 설명..." /></div>
             <div className="grid grid-cols-2 gap-2">
-              <div><Label>신청 시작일</Label><Input type="date" value={appForm.applyStart} onChange={(e) => setAppForm({ ...appForm, applyStart: e.target.value })} className="rounded-xl" /></div>
-              <div><Label>신청 마감일</Label><Input type="date" value={appForm.applyEnd} onChange={(e) => setAppForm({ ...appForm, applyEnd: e.target.value })} className="rounded-xl" /></div>
+                <div><Label>신청 시작일</Label><Input type="date" value={appForm.applyStart} onChange={(e) => setAppForm({ ...appForm, applyStart: e.target.value })} className="rounded-xl" /></div>
+                <div><Label>신청 마감일</Label><Input type="date" value={appForm.applyEnd} onChange={(e) => setAppForm({ ...appForm, applyEnd: e.target.value })} className="rounded-xl" /></div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div><Label>급식 시작일</Label><Input type="date" value={appForm.mealStart} onChange={(e) => setAppForm({ ...appForm, mealStart: e.target.value })} className="rounded-xl" /></div>
-              <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
-            </div>
-            <p className="text-xs text-muted-foreground">급식 기간을 비워두면 명단 수합용 공고로 사용됩니다.</p>
+            {appForm.type === "DINNER" && (
+              <div className="grid grid-cols-2 gap-2">
+                <div><Label>급식 시작일</Label><Input type="date" value={appForm.mealStart} onChange={(e) => setAppForm({ ...appForm, mealStart: e.target.value })} className="rounded-xl" /></div>
+                <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
+              </div>
+            )}
+            {appForm.type === "OTHER" && (
+              <p className="text-xs text-muted-foreground">명단 수합용 공고입니다.</p>
+            )}
             {appForm.type === "BREAKFAST" && (
               <div>
                 <Label>운영 날짜</Label>
