@@ -1,6 +1,6 @@
 # Project Map — PosanMeal
 
-> Last full regeneration: 2026-05-02
+> Last full regeneration: 2026-05-02 (revised 2026-05-02: CheckIn.mealKind required + composite unique)
 
 ## §1 개요
 
@@ -29,6 +29,7 @@
 | bcryptjs | ^3.0.3 | 관리자 패스워드 해시 |
 | jsonwebtoken | ^9.0.3 | QR JWT 토큰 |
 | @base-ui/react | ^1.3.0 | 헤드리스 UI 프리미티브 |
+| vitest | ^4.1.5 | 단위 테스트 (devDep) |
 
 ## §3 폴더 구조
 
@@ -105,10 +106,10 @@ prisma/
 |-----|--------|------|------|
 | `/api/admin/users` | CRUD | 관리자 | 사용자 관리 |
 | `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 사용자 가져오기 |
-| `/api/admin/checkins` | GET | 관리자 | 월별 체크인 (category: teacher/1/2/3) |
-| `/api/admin/checkins/toggle` | POST | 관리자 | 체크인 수동 토글 (학생: on/off, 교사: cycle WORK→PERSONAL→삭제) |
-| `/api/admin/dashboard` | GET | 관리자 | 당일 석식 현황 |
-| `/api/admin/export` | GET | 관리자 | 월별 Excel 다운로드 |
+| `/api/admin/checkins` | GET | 관리자 | 월별 체크인 + `mealColumns`(승인된 BREAKFAST 신청일에만 조 컬럼 삽입) (category: teacher/1/2/3) |
+| `/api/admin/checkins/toggle` | POST | 관리자 | 체크인 수동 토글 (body.mealKind 필수, 학생: on/off, 교사: cycle WORK→PERSONAL→삭제) |
+| `/api/admin/dashboard` | GET | 관리자 | 당일 현황 + `hasBreakfast`/`breakfastStudentCount`/`dinnerStudentCount` |
+| `/api/admin/export` | GET | 관리자 | 월별/일별 Excel 다운로드 (mealKind 표시: 월별 셀 "O+조"/"근+조", 일별 "식사" 컬럼) |
 | `/api/admin/applications` | GET/POST | 관리자 | 신청 공고 목록 조회 / 신규 생성 |
 | `/api/admin/applications/[id]` | PUT/DELETE | 관리자 | 신청 공고 수정/삭제 |
 | `/api/admin/applications/[id]/close` | POST | 관리자 | 신청 공고 강제 마감 |
@@ -134,14 +135,15 @@ prisma/
 | `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) |
 | `MealApplication` | id, title, description?, type(DINNER/BREAKFAST/OTHER), applyStart/End(@db.Date), mealStart/End?(@db.Date), status(OPEN/CLOSED) | registrations | @@index([status]), @@index([applyStart,applyEnd]) |
 | `MealRegistration` | id, applicationId, userId, signature(Text), status(APPROVED/CANCELLED), cancelledAt?, cancelledBy?, addedBy? | application, user | @@unique([applicationId,userId]) — 취소 후 재신청 시 row 재활성화 |
-| `CheckIn` | id, userId, date(@db.Date), checkedAt, type(STUDENT/WORK/PERSONAL), source?(QR/ADMIN_MANUAL/LOCAL_SYNC) | user | @@unique([userId,date]) |
-| `SystemSetting` | key(PK), value, updatedAt | — | operationMode(online/local), qrGeneration(정수) |
+| `CheckIn` | id, userId, date(@db.Date), **mealKind(BREAKFAST/DINNER, NOT NULL)**, checkedAt, type(STUDENT/WORK/PERSONAL), source?(QR/ADMIN_MANUAL/LOCAL_SYNC) | user | @@unique([userId,date,mealKind]), @@index([date,mealKind]) |
+| `SystemSetting` | key(PK), value, updatedAt | — | operationMode, qrGeneration, breakfast_window_start/end, dinner_window_start/end |
 
 ### Enums
 - `Role`: STUDENT, TEACHER
 - `CheckInType`: STUDENT, WORK, PERSONAL
 - `CheckInSource`: QR, ADMIN_MANUAL, LOCAL_SYNC
 - `AdminLevel`: NONE, SUBADMIN, ADMIN
+- `MealKind`: BREAKFAST, DINNER
 
 > `MealPeriod` 는 제거됨. 신청 기간은 `MealApplication.applyStart/End` 로 관리.
 
@@ -178,6 +180,9 @@ prisma/
 | `src/lib/clearClientState.ts` | SW 해제 + Cache API + IndexedDB 전체 삭제 후 signOut |
 | `src/lib/fetcher.ts` | SWR 전용 fetch 래퍼 |
 | `src/lib/utils.ts` | 공통 유틸 (clsx/tailwind-merge 등) |
+| `src/lib/meal-kind.ts` | 서버 헬퍼: `MealKind`/`MealWindows`/`resolveMealKind`(시각→조식/석식/null)/`isStudentEligibleToday` |
+| `src/lib/meal-kind-local.ts` | 클라이언트 헬퍼 (오프라인 모드 태블릿용 mealKind 결정) |
+| `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, breakfastDates)` (관리자 표·엑셀 헤더 생성용 — 조식 운영일에만 BREAKFAST 컬럼 삽입) |
 
 ## §9 인증 / 미들웨어
 
@@ -227,6 +232,10 @@ prisma/
 - `SwUpdater` + `ResetOnQuery`: PWA 업데이트 시 SW SKIP_WAITING → controllerchange → 페이지 리로드; ?reset=1 시 브라우저 상태 전체 초기화
 - `NEIS` 급식 API: 오피스코드 D10, 학교코드 7240189, 1시간 캐시
 - 사진: Volume `/app/uploads` 저장 → `/api/uploads/[filename]` 서빙
+- **CheckIn unique 마이그레이션 (`20260502120000`)**: `mealKind` NOT NULL + `@@unique([userId,date,mealKind])`. SQL은 반드시 `DROP INDEX IF EXISTS "CheckIn_userId_date_key"` + `CREATE UNIQUE INDEX ...` 형태로 작성 — `DROP CONSTRAINT` 는 init 마이그레이션이 `CREATE UNIQUE INDEX` 로 만든 unique를 인식하지 못해 E42704 로 실패함
+- **mealKind 시간 분기**: `lib/meal-kind.ts:resolveMealKind(now, windows)` 가 KST 시각으로 BREAKFAST/DINNER/null 결정. QR 토큰 발급 시점에 mealKind를 페이로드에 박고 (3분 만료), 체크인은 `payload.mealKind ?? resolveMealKind(...)` 로 토큰 우선
+- **조식 컬럼 노출 조건**: 관리자 석식확인·당일현황 모두 `MealRegistrationDate` 중 status=APPROVED + application.type=BREAKFAST 인 날짜에만 BREAKFAST 컬럼/카드 부제 표시. `MealApplicationDate` (공고 허용일) 가 아닌 점 주의
+- **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트
 
 ## §13 Project-Map Maintenance
 
