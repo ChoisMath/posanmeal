@@ -11,13 +11,15 @@ export async function GET() {
   const registrations = await prisma.mealRegistration.findMany({
     where: { userId: session.user.dbUserId },
     include: {
-      application: {
-        select: {
-          id: true, title: true, type: true, description: true,
-          applyStart: true, applyEnd: true, mealStart: true, mealEnd: true, status: true,
+          application: {
+            select: {
+              id: true, title: true, type: true, description: true,
+              applyStart: true, applyEnd: true, mealStart: true, mealEnd: true, status: true,
+              allowedDates: { orderBy: { date: "asc" } },
+            },
+          },
+          selectedDates: { orderBy: { date: "asc" } },
         },
-      },
-    },
     orderBy: { createdAt: "desc" },
   });
 

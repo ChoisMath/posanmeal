@@ -11,7 +11,13 @@ interface MealApplicationItem {
   mealStart: string | null;
   mealEnd: string | null;
   status: string;
-  registrations: Array<{ id: number; status: string; createdAt: string }>;
+  allowedDates?: Array<{ date: string }>;
+  registrations: Array<{
+    id: number;
+    status: string;
+    createdAt: string;
+    selectedDates?: Array<{ date: string }>;
+  }>;
 }
 
 export function useApplications() {

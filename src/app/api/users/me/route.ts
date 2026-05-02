@@ -21,8 +21,16 @@ export async function GET() {
           id: true,
           createdAt: true,
           application: {
-            select: { id: true, title: true, type: true, mealStart: true, mealEnd: true },
+            select: {
+              id: true,
+              title: true,
+              type: true,
+              mealStart: true,
+              mealEnd: true,
+              allowedDates: { orderBy: { date: "asc" } },
+            },
           },
+          selectedDates: { orderBy: { date: "asc" } },
         },
         orderBy: { createdAt: "desc" as const },
       },

@@ -15,6 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
+import { DateMultiPicker } from "@/components/DateMultiPicker";
+import { BreakfastMatrixTable } from "@/components/BreakfastMatrixTable";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
@@ -39,6 +41,9 @@ interface MealAppItem {
   status: string;
   _count: { registrations: number };
   cancelledCount: number;
+  allowedDates?: Array<{ date: string }>;
+  allowedDatesCount?: number;
+  dailyCounts?: Record<string, number>;
 }
 
 interface RegistrationItem {
@@ -49,6 +54,7 @@ interface RegistrationItem {
   addedBy: string | null;
   cancelledBy: string | null;
   user: { id: number; name: string; grade: number; classNum: number; number: number };
+  selectedDates?: Array<{ date: string }>;
 }
 
 interface DashboardRecord {
@@ -68,7 +74,16 @@ const emptyForm = {
   subject: "", homeroom: "", position: "",
 };
 
-const emptyAppForm = { title: "", description: "", type: "DINNER", applyStart: "", applyEnd: "", mealStart: "", mealEnd: "" };
+const emptyAppForm = {
+  title: "",
+  description: "",
+  type: "DINNER",
+  applyStart: "",
+  applyEnd: "",
+  mealStart: "",
+  mealEnd: "",
+  allowedDates: [] as string[],
+};
 
 const sheetImportGuides = [
   { label: "학생", columns: ["email", "grade", "classNum", "number", "name"] },
@@ -403,10 +418,36 @@ export default function AdminPage() {
     if (res.ok) { const data = await res.json(); setRegistrations(data.registrations); }
   }
 
+  function buildAppPayload() {
+    const base = {
+      title: appForm.title,
+      description: appForm.description,
+      type: appForm.type,
+    };
+    if (appForm.type === "BREAKFAST") {
+      return {
+        ...base,
+        applyStart: appForm.applyStart,
+        applyEnd: appForm.applyEnd,
+        allowedDates: appForm.allowedDates,
+      };
+    }
+    if (appForm.type === "DINNER") {
+      return {
+        ...base,
+        applyStart: appForm.applyStart,
+        applyEnd: appForm.applyEnd,
+        mealStart: appForm.mealStart,
+        mealEnd: appForm.mealEnd,
+      };
+    }
+    return { ...base, applyStart: appForm.applyStart, applyEnd: appForm.applyEnd };
+  }
+
   async function handleCreateApp() {
     const res = await fetch("/api/admin/applications", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(appForm),
+      body: JSON.stringify(buildAppPayload()),
     });
     if (res.ok) { toast.success("공고가 생성되었습니다."); setAppDialogOpen(false); setAppForm(emptyAppForm); fetchApps(); }
     else { const d = await res.json(); toast.error(d.error || "생성 실패"); }
@@ -416,7 +457,7 @@ export default function AdminPage() {
     if (!editingApp) return;
     const res = await fetch(`/api/admin/applications/${editingApp.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(appForm),
+      body: JSON.stringify(buildAppPayload()),
     });
     if (res.ok) { toast.success("공고가 수정되었습니다."); setAppDialogOpen(false); setEditingApp(null); setAppForm(emptyAppForm); fetchApps(); }
     else { const d = await res.json(); toast.error(d.error || "수정 실패"); }
@@ -741,6 +782,7 @@ export default function AdminPage() {
                                 applyEnd: app.applyEnd.slice(0, 10),
                                 mealStart: app.mealStart ? app.mealStart.slice(0, 10) : "",
                                 mealEnd: app.mealEnd ? app.mealEnd.slice(0, 10) : "",
+                                allowedDates: (app.allowedDates ?? []).map((d) => d.date.slice(0, 10)),
                               });
                               setAppDialogOpen(true);
                             }}>
@@ -1077,7 +1119,7 @@ export default function AdminPage() {
 
       {/* Application Create/Edit Dialog */}
       <Dialog open={appDialogOpen} onOpenChange={(open) => { setAppDialogOpen(open); if (!open) { setEditingApp(null); setAppForm(emptyAppForm); } }}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingApp ? "공고 수정" : "새 공고"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -1091,14 +1133,27 @@ export default function AdminPage() {
             <div><Label>제목</Label><Input value={appForm.title} onChange={(e) => setAppForm({ ...appForm, title: e.target.value })} className="rounded-xl" placeholder="예: 4월 석식 신청" /></div>
             <div><Label>설명 (선택)</Label><textarea className="flex w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" rows={2} value={appForm.description} onChange={(e) => setAppForm({ ...appForm, description: e.target.value })} placeholder="공고 설명..." /></div>
             <div className="grid grid-cols-2 gap-2">
-              <div><Label>신청 시작일</Label><Input type="date" value={appForm.applyStart} onChange={(e) => setAppForm({ ...appForm, applyStart: e.target.value })} className="rounded-xl" /></div>
-              <div><Label>신청 마감일</Label><Input type="date" value={appForm.applyEnd} onChange={(e) => setAppForm({ ...appForm, applyEnd: e.target.value })} className="rounded-xl" /></div>
+                <div><Label>신청 시작일</Label><Input type="date" value={appForm.applyStart} onChange={(e) => setAppForm({ ...appForm, applyStart: e.target.value })} className="rounded-xl" /></div>
+                <div><Label>신청 마감일</Label><Input type="date" value={appForm.applyEnd} onChange={(e) => setAppForm({ ...appForm, applyEnd: e.target.value })} className="rounded-xl" /></div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div><Label>급식 시작일</Label><Input type="date" value={appForm.mealStart} onChange={(e) => setAppForm({ ...appForm, mealStart: e.target.value })} className="rounded-xl" /></div>
-              <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
-            </div>
-            <p className="text-xs text-muted-foreground">급식 기간을 비워두면 명단 수합용 공고로 사용됩니다.</p>
+            {appForm.type === "DINNER" && (
+              <div className="grid grid-cols-2 gap-2">
+                <div><Label>급식 시작일</Label><Input type="date" value={appForm.mealStart} onChange={(e) => setAppForm({ ...appForm, mealStart: e.target.value })} className="rounded-xl" /></div>
+                <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
+              </div>
+            )}
+            {appForm.type === "OTHER" && (
+              <p className="text-xs text-muted-foreground">명단 수합용 공고입니다.</p>
+            )}
+            {appForm.type === "BREAKFAST" && (
+              <div>
+                <Label>운영 날짜</Label>
+                <DateMultiPicker
+                  value={new Set(appForm.allowedDates)}
+                  onChange={(dates) => setAppForm({ ...appForm, allowedDates: Array.from(dates).sort() })}
+                />
+              </div>
+            )}
             <Button onClick={editingApp ? handleUpdateApp : handleCreateApp} className="w-full">{editingApp ? "수정" : "생성"}</Button>
           </div>
         </DialogContent>
@@ -1154,6 +1209,25 @@ export default function AdminPage() {
               취소자 보기
             </Button>
           </div>
+          {selectedAppForReg?.type === "BREAKFAST" && (
+            <div className="mb-3">
+              <BreakfastMatrixTable
+                allowedDates={(selectedAppForReg.allowedDates ?? []).map((d) => d.date.slice(0, 10))}
+                students={visibleRegs.map((r) => r.user)}
+                registrations={visibleRegs}
+                showCancelled={showCancelled}
+                onCellClick={async (registrationId, date, selected) => {
+                  const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${registrationId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(selected ? { removeDates: [date] } : { addDates: [date] }),
+                  });
+                  if (res.ok) fetchRegistrations(selectedAppForReg.id);
+                  else toast.error("날짜 변경에 실패했습니다.");
+                }}
+              />
+            </div>
+          )}
           <div className="flex-1 min-h-0 overflow-auto">
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="sticky top-0 z-20">

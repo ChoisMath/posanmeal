@@ -18,9 +18,15 @@ export async function GET() {
       applyEnd: { gte: today },
     },
     include: {
+      allowedDates: { orderBy: { date: "asc" } },
       registrations: {
         where: { userId: session.user.dbUserId },
-        select: { id: true, status: true, createdAt: true },
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          selectedDates: { orderBy: { date: "asc" } },
+        },
       },
     },
     orderBy: { applyEnd: "asc" },

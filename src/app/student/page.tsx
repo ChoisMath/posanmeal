@@ -15,6 +15,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
+import { DateCheckboxList } from "@/components/DateCheckboxList";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { SignaturePad } from "@/components/SignaturePad";
 import { LogOut } from "lucide-react";
@@ -36,6 +37,7 @@ interface UserProfile {
     id: number;
     createdAt: string;
     application: { id: number; title: string; type: string; mealStart: string | null; mealEnd: string | null };
+    selectedDates?: Array<{ date: string }>;
   }>;
 }
 
@@ -49,7 +51,13 @@ interface MealApplicationItem {
   mealStart: string | null;
   mealEnd: string | null;
   status: string;
-  registrations: Array<{ id: number; status: string; createdAt: string }>;
+  allowedDates?: Array<{ date: string }>;
+  registrations: Array<{
+    id: number;
+    status: string;
+    createdAt: string;
+    selectedDates?: Array<{ date: string }>;
+  }>;
 }
 
 function typeBadge(type: string) {
@@ -84,12 +92,16 @@ export default function StudentPage() {
     null
   );
   const [submitting, setSubmitting] = useState(false);
+  const [selectedBreakfastDates, setSelectedBreakfastDates] = useState<Set<string>>(new Set());
 
   if (!user) return <PageLoadingSkeleton />;
 
+  const today = new Date().toISOString().slice(0, 10);
   const activeRegistrations = (user.registrations || []).filter((r) => {
+    if (r.application.type === "BREAKFAST") {
+      return (r.selectedDates ?? []).some((date) => date.date.slice(0, 10) === today);
+    }
     if (!r.application.mealStart || !r.application.mealEnd) return false;
-    const today = new Date().toISOString().slice(0, 10);
     return today >= r.application.mealStart.slice(0, 10) && today <= r.application.mealEnd.slice(0, 10);
   });
   const hasActiveMeal = activeRegistrations.length > 0;
@@ -104,12 +116,19 @@ export default function StudentPage() {
     if (!selectedApp || !signatureData) return;
     setSubmitting(true);
     try {
+      const body =
+        selectedApp.type === "BREAKFAST"
+          ? {
+              signature: signatureData,
+              selectedDates: Array.from(selectedBreakfastDates).sort(),
+            }
+          : { signature: signatureData };
       const res = await fetch(
         `/api/applications/${selectedApp.id}/register`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signature: signatureData }),
+          body: JSON.stringify(body),
         }
       );
       if (res.ok) {
@@ -275,20 +294,51 @@ export default function StudentPage() {
 
                         <div className="flex justify-end">
                           {isRegistered ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="rounded-lg text-xs"
-                              onClick={() => handleCancel(app)}
-                            >
-                              신청 취소
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-lg text-xs"
+                                onClick={() => {
+                                  setSelectedApp(app);
+                                  setSelectedBreakfastDates(
+                                    new Set(
+                                      app.type === "BREAKFAST"
+                                        ? app.registrations[0]?.selectedDates?.map((d) => d.date.slice(0, 10)) ?? []
+                                        : [],
+                                    ),
+                                  );
+                                  setSignatureData(null);
+                                  setSignDialogOpen(true);
+                                }}
+                              >
+                                수정
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-lg text-xs"
+                                onClick={() => handleCancel(app)}
+                              >
+                                신청 취소
+                              </Button>
+                            </div>
                           ) : (
                             <Button
                               size="sm"
                               className="rounded-lg text-xs"
                               onClick={() => {
                                 setSelectedApp(app);
+                                const existingDates = app.registrations[0]?.selectedDates?.map((d) => d.date.slice(0, 10));
+                                setSelectedBreakfastDates(
+                                  new Set(
+                                    app.type === "BREAKFAST"
+                                      ? existingDates?.length
+                                        ? existingDates
+                                        : (app.allowedDates ?? []).map((d) => d.date.slice(0, 10))
+                                      : [],
+                                  ),
+                                );
                                 setSignatureData(null);
                                 setSignDialogOpen(true);
                               }}
@@ -317,7 +367,9 @@ export default function StudentPage() {
                     </p>
                     {activeRegistrations.map((r) => (
                       <p key={r.id} className="text-xs text-muted-foreground whitespace-nowrap">
-                        {r.application.title}: {new Date(r.application.mealStart!).toLocaleDateString("ko-KR")} ~ {new Date(r.application.mealEnd!).toLocaleDateString("ko-KR")}
+                        {r.application.type === "BREAKFAST"
+                          ? `${r.application.title}: 오늘 조식`
+                          : `${r.application.title}: ${new Date(r.application.mealStart!).toLocaleDateString("ko-KR")} ~ ${new Date(r.application.mealEnd!).toLocaleDateString("ko-KR")}`}
                       </p>
                     ))}
                   </>
@@ -402,6 +454,14 @@ export default function StudentPage() {
                 )}
               </div>
 
+              {selectedApp.type === "BREAKFAST" && (
+                <DateCheckboxList
+                  dates={(selectedApp.allowedDates ?? []).map((date) => date.date.slice(0, 10))}
+                  value={selectedBreakfastDates}
+                  onChange={setSelectedBreakfastDates}
+                />
+              )}
+
               <div>
                 <p className="text-sm font-medium mb-2">서명</p>
                 <SignaturePad onSignatureChange={setSignatureData} />
@@ -421,7 +481,7 @@ export default function StudentPage() {
                 </Button>
                 <Button
                   className="rounded-lg"
-                  disabled={!signatureData || submitting}
+                  disabled={!signatureData || submitting || (selectedApp.type === "BREAKFAST" && selectedBreakfastDates.size === 0)}
                   onClick={handleRegister}
                 >
                   {submitting ? "처리 중..." : "신청 완료"}

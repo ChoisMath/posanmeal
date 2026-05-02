@@ -2,8 +2,8 @@ import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { signQRToken, getQRExpirySeconds } from "@/lib/qr-token";
 import { getCachedSettings } from "@/lib/settings-cache";
-import { prisma } from "@/lib/prisma";
-import { todayKST } from "@/lib/timezone";
+import { isStudentEligibleToday, resolveMealKind } from "@/lib/meal-kind";
+import { nowKST, todayKST } from "@/lib/timezone";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -16,57 +16,51 @@ export async function GET(request: Request) {
 
   const userId = session.user.dbUserId;
   const role = session.user.role as "STUDENT" | "TEACHER";
-
-  // Check operation mode and qr generation from cache
   const settings = await getCachedSettings();
-  const isLocal = settings.operationMode === "local";
+  const mealKind = resolveMealKind(nowKST(), settings.mealWindows);
 
-  // For students, check meal registration (both modes)
+  if (!mealKind) {
+    return NextResponse.json(
+      { error: "현재 식사 시간이 아닙니다.", errorCode: "NO_MEAL_WINDOW" },
+      { status: 400 },
+    );
+  }
+
   if (role === "STUDENT") {
-    const today = new Date(todayKST());
-    const activeReg = await prisma.mealRegistration.findFirst({
-      where: {
-        userId,
-        status: "APPROVED",
-        application: {
-          mealStart: { not: null, lte: today },
-          mealEnd: { not: null, gte: today },
-        },
-      },
-    });
-
-    if (!activeReg) {
+    const eligible = await isStudentEligibleToday(userId, mealKind, new Date(todayKST()));
+    if (!eligible) {
       return NextResponse.json(
-        { error: "현재 석식 신청 기간이 없습니다." },
-        { status: 400 }
+        { error: `오늘 ${mealKind === "BREAKFAST" ? "조식" : "석식"} 신청 내역이 없습니다.`, errorCode: "NO_MEAL_PERIOD" },
+        { status: 400 },
       );
     }
   }
 
   const validType = role === "STUDENT" ? "STUDENT" : (type as "WORK" | "PERSONAL");
 
-  // Local mode: return fixed QR string
-  if (isLocal) {
+  if (settings.operationMode === "local") {
     const generation = settings.qrGeneration;
-    const qrString = `posanmeal:${userId}:${generation}:${validType}`;
+    const qrString = `posanmeal:${userId}:${generation}:${validType}:${mealKind}`;
 
     return NextResponse.json({
       token: qrString,
-      expiresIn: 0, // 0 signals "no expiry" to the client
+      expiresIn: 0,
       mode: "local",
+      mealKind,
     });
   }
 
-  // Online mode: existing JWT behavior
   const token = signQRToken({
     userId,
     role,
     type: validType,
+    mealKind,
   });
 
   return NextResponse.json({
     token,
     expiresIn: getQRExpirySeconds(),
     mode: "online",
+    mealKind,
   });
 }

@@ -10,6 +10,7 @@ export interface QRTokenPayload {
   userId: number;
   role: "STUDENT" | "TEACHER";
   type: "STUDENT" | "WORK" | "PERSONAL";
+  mealKind?: "BREAKFAST" | "DINNER";
 }
 
 export function signQRToken(payload: QRTokenPayload): string {

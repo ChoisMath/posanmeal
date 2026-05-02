@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { verifyQRToken } from "@/lib/qr-token";
 import { prisma } from "@/lib/prisma";
-import { todayKST } from "@/lib/timezone";
+import { todayKST, nowKST } from "@/lib/timezone";
+import { getCachedSettings } from "@/lib/settings-cache";
+import { isStudentEligibleToday, resolveMealKind, type MealKind } from "@/lib/meal-kind";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +12,7 @@ export async function POST(request: Request) {
     if (!token) {
       return NextResponse.json(
         { success: false, error: "토큰이 없습니다." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -20,29 +22,32 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json(
         { success: false, error: "QR이 만료되었습니다. 새로고침 해주세요." },
-        { status: 400 }
+        { status: 400 },
+      );
+    }
+
+    const settings = await getCachedSettings();
+    const mealKind = payload.mealKind ?? resolveMealKind(nowKST(), settings.mealWindows);
+    if (!mealKind) {
+      return NextResponse.json(
+        { success: false, error: "현재 식사 시간이 아닙니다.", errorCode: "NO_MEAL_WINDOW" },
+        { status: 400 },
       );
     }
 
     const today = todayKST();
     const todayDate = new Date(today);
 
-    // Parallel queries: mealRegistration + existing checkIn + user info
-    const [activeReg, existing, user] = await Promise.all([
+    const [eligible, existing, user] = await Promise.all([
       payload.role === "STUDENT"
-        ? prisma.mealRegistration.findFirst({
-            where: {
-              userId: payload.userId,
-              status: "APPROVED",
-              application: {
-                mealStart: { not: null, lte: todayDate },
-                mealEnd: { not: null, gte: todayDate },
-              },
-            },
-          })
-        : Promise.resolve(null),
-      prisma.checkIn.findUnique({
-        where: { userId_date: { userId: payload.userId, date: todayDate } },
+        ? isStudentEligibleToday(payload.userId, mealKind as MealKind, todayDate)
+        : Promise.resolve(true),
+      prisma.checkIn.findFirst({
+        where: {
+          userId: payload.userId,
+          date: todayDate,
+          mealKind: mealKind as MealKind,
+        },
       }),
       prisma.user.findUnique({
         where: { id: payload.userId },
@@ -53,15 +58,14 @@ export async function POST(request: Request) {
     if (!user) {
       return NextResponse.json(
         { success: false, error: "사용자를 찾을 수 없습니다." },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
-    // Student meal registration validation
-    if (payload.role === "STUDENT" && !activeReg) {
+    if (payload.role === "STUDENT" && !eligible) {
       return NextResponse.json(
-        { success: false, error: "석식 신청 기간이 아닙니다.", errorCode: "NO_MEAL_PERIOD" },
-        { status: 400 }
+        { success: false, error: "식사 신청 기간이 아닙니다.", errorCode: "NO_MEAL_PERIOD" },
+        { status: 400 },
       );
     }
 
@@ -70,7 +74,9 @@ export async function POST(request: Request) {
         success: false,
         duplicate: true,
         user,
-        error: "이미 Checkin 되었습니다. 확인해 주세요.",
+        mealKind,
+        checkedAt: existing.checkedAt,
+        error: `이미 ${mealKind === "BREAKFAST" ? "조식" : "석식"} 체크인 하였습니다.`,
       });
     }
 
@@ -78,6 +84,7 @@ export async function POST(request: Request) {
       data: {
         userId: payload.userId,
         date: todayDate,
+        mealKind: mealKind as MealKind,
         type: payload.type,
         source: "QR",
       },
@@ -87,12 +94,25 @@ export async function POST(request: Request) {
       success: true,
       user,
       type: payload.type,
+      mealKind,
       checkedAt: checkIn.checkedAt,
     });
-  } catch {
+  } catch (err: unknown) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code: string }).code === "P2002"
+    ) {
+      return NextResponse.json({
+        success: false,
+        duplicate: true,
+        error: "이미 체크인 하였습니다.",
+      });
+    }
     return NextResponse.json(
       { success: false, error: "서버 오류가 발생했습니다." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

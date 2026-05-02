@@ -1,5 +1,5 @@
 const DB_NAME = "posanmeal-local";
-const DB_VERSION = 3; // v3: replace mealPeriods store with eligibleUsers
+const DB_VERSION = 4; // v4: mealKind-aware eligibility and check-ins
 
 export interface LocalUser {
   id: number;
@@ -14,9 +14,16 @@ export interface LocalCheckIn {
   id?: number; // auto-increment
   userId: number;
   date: string; // "YYYY-MM-DD"
+  mealKind: "BREAKFAST" | "DINNER";
   checkedAt: string; // ISO string
   type: "STUDENT" | "WORK" | "PERSONAL";
   synced: number; // 0 = not synced, 1 = synced (IndexedDB keys don't support booleans)
+}
+
+export interface LocalEligibleEntry {
+  userId: number;
+  date: string;
+  mealKind: "BREAKFAST" | "DINNER";
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -45,6 +52,14 @@ function openDB(): Promise<IDBDatabase> {
         db.createObjectStore("eligibleUsers", { keyPath: "userId" });
       }
 
+      if (oldVersion < 4 && db.objectStoreNames.contains("eligibleUsers")) {
+        db.deleteObjectStore("eligibleUsers");
+      }
+
+      if (!db.objectStoreNames.contains("eligibleEntries")) {
+        db.createObjectStore("eligibleEntries", { keyPath: ["userId", "date", "mealKind"] });
+      }
+
       // v1→v2: recreate checkins store with number-based synced field
       if (oldVersion < 2 && db.objectStoreNames.contains("checkins")) {
         db.deleteObjectStore("checkins");
@@ -55,8 +70,28 @@ function openDB(): Promise<IDBDatabase> {
           keyPath: "id",
           autoIncrement: true,
         });
-        checkinStore.createIndex("byUserDate", ["userId", "date"], { unique: true });
+        checkinStore.createIndex("byUserDateMealKind", ["userId", "date", "mealKind"], { unique: true });
         checkinStore.createIndex("bySynced", "synced");
+      } else if (oldVersion < 4) {
+        const tx = request.transaction;
+        if (tx) {
+          const checkinStore = tx.objectStore("checkins");
+          if (checkinStore.indexNames.contains("byUserDate")) {
+            checkinStore.deleteIndex("byUserDate");
+          }
+          if (!checkinStore.indexNames.contains("byUserDateMealKind")) {
+            checkinStore.createIndex("byUserDateMealKind", ["userId", "date", "mealKind"], { unique: true });
+          }
+          checkinStore.openCursor().onsuccess = (cursorEvent) => {
+            const cursor = (cursorEvent.target as IDBRequest<IDBCursorWithValue | null>).result;
+            if (!cursor) return;
+            const value = cursor.value as LocalCheckIn;
+            if (!value.mealKind) {
+              cursor.update({ ...value, mealKind: "DINNER" });
+            }
+            cursor.continue();
+          };
+        }
       }
     };
 
@@ -115,24 +150,33 @@ export async function replaceAllUsers(users: LocalUser[]): Promise<void> {
 
 // --- Eligible Users ---
 
-export async function isEligible(userId: number): Promise<boolean> {
+export async function isEligible(
+  userId: number,
+  date: string,
+  mealKind: "BREAKFAST" | "DINNER",
+): Promise<boolean> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction("eligibleUsers", "readonly");
-    const req = tx.objectStore("eligibleUsers").get(userId);
+    const tx = db.transaction("eligibleEntries", "readonly");
+    const req = tx.objectStore("eligibleEntries").get([userId, date, mealKind]);
     req.onsuccess = () => resolve(!!req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
 export async function replaceAllEligibleUsers(userIds: number[]): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  return replaceAllEligibleEntries(userIds.map((userId) => ({ userId, date: today, mealKind: "DINNER" })));
+}
+
+export async function replaceAllEligibleEntries(entries: LocalEligibleEntry[]): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction("eligibleUsers", "readwrite");
-    const store = tx.objectStore("eligibleUsers");
+    const tx = db.transaction("eligibleEntries", "readwrite");
+    const store = tx.objectStore("eligibleEntries");
     store.clear();
-    for (const userId of userIds) {
-      store.put({ userId });
+    for (const entry of entries) {
+      store.put(entry);
     }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -141,12 +185,16 @@ export async function replaceAllEligibleUsers(userIds: number[]): Promise<void> 
 
 // --- Check-ins ---
 
-export async function getCheckIn(userId: number, date: string): Promise<LocalCheckIn | undefined> {
+export async function getCheckIn(
+  userId: number,
+  date: string,
+  mealKind: "BREAKFAST" | "DINNER",
+): Promise<LocalCheckIn | undefined> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readonly");
-    const index = tx.objectStore("checkins").index("byUserDate");
-    const req = index.get([userId, date]);
+    const index = tx.objectStore("checkins").index("byUserDateMealKind");
+    const req = index.get([userId, date, mealKind]);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -228,7 +276,7 @@ export async function clearSyncedCheckIns(): Promise<number> {
 export async function clearAllData(): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const storeNames = ["settings", "users", "eligibleUsers", "checkins"] as const;
+    const storeNames = ["settings", "users", "eligibleEntries", "checkins"] as const;
     const tx = db.transaction([...storeNames], "readwrite");
     for (const name of storeNames) {
       tx.objectStore(name).clear();

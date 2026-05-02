@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       homeroom: true,
       checkIns: {
         where: { date: { gte: startDate, lte: endDate } },
-        select: { id: true, date: true, checkedAt: true, type: true },
+        select: { id: true, date: true, checkedAt: true, type: true, mealKind: true },
         orderBy: { date: "asc" },
       },
     },
