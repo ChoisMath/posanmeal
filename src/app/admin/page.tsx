@@ -1119,7 +1119,7 @@ export default function AdminPage() {
 
       {/* Application Create/Edit Dialog */}
       <Dialog open={appDialogOpen} onOpenChange={(open) => { setAppDialogOpen(open); if (!open) { setEditingApp(null); setAppForm(emptyAppForm); } }}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingApp ? "공고 수정" : "새 공고"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
