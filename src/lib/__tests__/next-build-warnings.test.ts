@@ -10,7 +10,7 @@ describe("Next build warning guardrails", () => {
     expect(existsSync(join(root, "src/proxy.ts"))).toBe(true);
 
     const proxySource = readFileSync(join(root, "src/proxy.ts"), "utf8");
-    expect(proxySource).toContain('export const runtime = "nodejs"');
+    expect(proxySource).not.toContain("export const runtime");
     expect(proxySource).toContain("matcher");
   });
 });
