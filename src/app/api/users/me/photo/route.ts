@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import sharp from "sharp";
 import { writeFile, unlink, mkdir } from "fs/promises";
-import path from "path";
+import path from "node:path";
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || "./public/uploads";
+const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 const MAX_SIZE = (parseInt(process.env.MAX_FILE_SIZE_MB || "5")) * 1024 * 1024;
 
 export async function POST(request: Request) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const filepath = path.join(UPLOAD_DIR, filename);
   await writeFile(filepath, resized);
 
-  const photoUrl = `/api/uploads/${filename}?t=${Date.now()}`;
+  const photoUrl = `/uploads/${filename}?t=${Date.now()}`;
   await prisma.user.update({
     where: { id: session.user.dbUserId },
     data: { photoUrl },
