@@ -1,3 +1,5 @@
+import { formatMonthDateKey, getDaysInMonthUtc } from "@/lib/date-range";
+
 export type MealKind = "BREAKFAST" | "DINNER";
 
 export interface MealColumn {
@@ -17,10 +19,6 @@ export function getDateDayKey(value: string | Date): string {
   return new Date(value).toISOString().slice(0, 10);
 }
 
-export function formatMonthDateKey(year: number, month: number, day: number): string {
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
 function createMealColumn(date: string, day: number, mealKind: MealKind): MealColumn {
   return {
     key: `${date}:${mealKind}`,
@@ -38,7 +36,7 @@ export function buildMonthlyMealColumns(
   breakfastDates: Array<string | Date> = [],
 ): MealColumn[] {
   const breakfastSet = new Set(breakfastDates.map(getDateDayKey));
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const daysInMonth = getDaysInMonthUtc(year, month);
   const columns: MealColumn[] = [];
 
   for (let day = 1; day <= daysInMonth; day++) {

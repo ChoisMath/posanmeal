@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel } from "@/lib/checkin-source";
+import { buildMonthDateRange, dateKeyToUtcDate } from "@/lib/date-range";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -14,9 +15,7 @@ export async function GET(request: Request) {
   const year = parseInt(searchParams.get("year") || new Date().getFullYear().toString());
   const month = parseInt(searchParams.get("month") || (new Date().getMonth() + 1).toString());
 
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0);
-  const daysInMonth = endDate.getDate();
+  const { startDate, endDate, daysInMonth } = buildMonthDateRange(year, month);
 
   // 4개 카테고리 데이터를 병렬 쿼리
   const [teachers, grade1, grade2, grade3] = await Promise.all([
@@ -235,8 +234,10 @@ async function exportDaily(dateParam: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
     return NextResponse.json({ error: "잘못된 날짜 형식입니다." }, { status: 400 });
   }
-  const targetDate = new Date(dateParam);
-  if (Number.isNaN(targetDate.getTime())) {
+  let targetDate: Date;
+  try {
+    targetDate = dateKeyToUtcDate(dateParam);
+  } catch {
     return NextResponse.json({ error: "잘못된 날짜입니다." }, { status: 400 });
   }
 

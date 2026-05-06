@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canWriteAdmin } from "@/lib/permissions";
 import { buildMonthlyMealColumns, getDateDayKey } from "@/lib/meal-columns";
+import { buildMonthDateRange } from "@/lib/date-range";
 
 // GET /api/admin/checkins?year=2026&month=3&category=teacher|1|2|3
 export async function GET(request: Request) {
@@ -11,10 +12,7 @@ export async function GET(request: Request) {
   const month = parseInt(searchParams.get("month") || (new Date().getMonth() + 1).toString());
   const category = searchParams.get("category") || "teacher";
 
-  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const startDate = new Date(`${year}-${String(month).padStart(2, "0")}-01T00:00:00.000Z`);
-  const endDate = new Date(`${monthKey}-${String(daysInMonth).padStart(2, "0")}T00:00:00.000Z`);
+  const { startDate, endDate } = buildMonthDateRange(year, month);
 
   const isTeacher = category === "teacher";
   const grade = isTeacher ? undefined : parseInt(category);

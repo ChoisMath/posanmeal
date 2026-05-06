@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayKST } from "@/lib/timezone";
+import { dateKeyToUtcDate } from "@/lib/date-range";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const dateParam = searchParams.get("date") || todayKST();
-  const targetDate = new Date(dateParam);
+  let targetDate: Date;
+  try {
+    targetDate = dateKeyToUtcDate(dateParam);
+  } catch {
+    return NextResponse.json({ error: "Invalid date" }, { status: 400 });
+  }
 
   const [counts, records, breakfastApproved] = await Promise.all([
     prisma.checkIn.groupBy({
