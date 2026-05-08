@@ -183,6 +183,7 @@ prisma/
 | `src/lib/meal-kind.ts` | 서버 헬퍼: `MealKind`/`MealWindows`/`resolveMealKind`(시각→조식/석식/null)/`isStudentEligibleToday` |
 | `src/lib/meal-kind-local.ts` | 클라이언트 헬퍼 (오프라인 모드 태블릿용 mealKind 결정) |
 | `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, breakfastDates)` (관리자 표·엑셀 헤더 생성용 — 조식 운영일에만 BREAKFAST 컬럼 삽입) |
+| `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
 
 ## §9 인증 / 미들웨어
 

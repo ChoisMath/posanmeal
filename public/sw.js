@@ -1,4 +1,4 @@
-const CACHE_VERSION = "posanmeal-v5";
+const CACHE_VERSION = "posanmeal-v6";
 // Only precache fully-public routes. Authenticated pages redirect when
 // anonymous, which would cause cache.addAll to reject and abort install.
 const PRECACHE_URLS = ["/check"];

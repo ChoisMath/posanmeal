@@ -4,11 +4,20 @@ import { prisma } from "@/lib/prisma";
 import { canWriteAdmin } from "@/lib/permissions";
 
 interface UploadCheckIn {
+  clientId?: number;
   userId: number;
   date: string;
   checkedAt: string;
   type: "STUDENT" | "WORK" | "PERSONAL";
   mealKind?: "BREAKFAST" | "DINNER";
+}
+
+interface RejectedItem {
+  clientId: number | null;
+  userId: number;
+  date: string;
+  mealKind: "BREAKFAST" | "DINNER";
+  reason: "USER_NOT_FOUND" | "SERVER_ERROR" | "INVALID_PAYLOAD";
 }
 
 export async function POST(request: Request) {
@@ -20,56 +29,43 @@ export async function POST(request: Request) {
   const { checkins } = (await request.json()) as { checkins: UploadCheckIn[] };
 
   if (!Array.isArray(checkins) || checkins.length === 0) {
-    return NextResponse.json({ accepted: 0, duplicates: 0, rejected: [] });
+    return NextResponse.json({
+      acceptedCount: 0,
+      duplicatesCount: 0,
+      rejectedCount: 0,
+      syncedClientIds: [],
+      rejected: [],
+    });
   }
 
-  let accepted = 0;
-  let duplicates = 0;
-  const rejected: { userId: number; date: string; reason: string }[] = [];
+  let acceptedCount = 0;
+  let duplicatesCount = 0;
+  const syncedClientIds: number[] = [];
+  const rejected: RejectedItem[] = [];
 
   for (const ci of checkins) {
+    const clientId = typeof ci.clientId === "number" ? ci.clientId : null;
+    const mealKind = ci.mealKind ?? "DINNER";
+
     try {
       const dateObj = new Date(ci.date + "T00:00:00Z");
-      const mealKind = ci.mealKind ?? "DINNER";
 
-      // Check if user exists
       const user = await prisma.user.findUnique({
         where: { id: ci.userId },
-        select: { id: true, role: true },
+        select: { id: true },
       });
 
       if (!user) {
-        rejected.push({ userId: ci.userId, date: ci.date, reason: "USER_NOT_FOUND" });
+        rejected.push({
+          clientId,
+          userId: ci.userId,
+          date: ci.date,
+          mealKind,
+          reason: "USER_NOT_FOUND",
+        });
         continue;
       }
 
-      // Check meal registration for students
-      if (user.role === "STUDENT") {
-        const activeReg = await prisma.mealRegistration.findFirst({
-          where: {
-              userId: ci.userId,
-              status: "APPROVED",
-              ...(mealKind === "DINNER"
-                ? {
-                    application: {
-                      type: "DINNER",
-                      mealStart: { not: null, lte: dateObj },
-                      mealEnd: { not: null, gte: dateObj },
-                    },
-                  }
-                : {
-                    application: { type: "BREAKFAST" },
-                    selectedDates: { some: { date: dateObj } },
-                  }),
-          },
-        });
-        if (!activeReg) {
-          rejected.push({ userId: ci.userId, date: ci.date, reason: "NO_MEAL_PERIOD" });
-          continue;
-        }
-      }
-
-      // Try to create (unique constraint handles duplicates)
       await prisma.checkIn.create({
         data: {
           userId: ci.userId,
@@ -80,21 +76,34 @@ export async function POST(request: Request) {
           source: "LOCAL_SYNC",
         },
       });
-      accepted++;
+      acceptedCount++;
+      if (clientId !== null) syncedClientIds.push(clientId);
     } catch (err: unknown) {
-      // Prisma unique constraint violation
       if (
         typeof err === "object" &&
         err !== null &&
         "code" in err &&
         (err as { code: string }).code === "P2002"
       ) {
-        duplicates++;
+        duplicatesCount++;
+        if (clientId !== null) syncedClientIds.push(clientId);
       } else {
-        rejected.push({ userId: ci.userId, date: ci.date, reason: "SERVER_ERROR" });
+        rejected.push({
+          clientId,
+          userId: ci.userId,
+          date: ci.date,
+          mealKind,
+          reason: "SERVER_ERROR",
+        });
       }
     }
   }
 
-  return NextResponse.json({ accepted, duplicates, rejected });
+  return NextResponse.json({
+    acceptedCount,
+    duplicatesCount,
+    rejectedCount: rejected.length,
+    syncedClientIds,
+    rejected,
+  });
 }

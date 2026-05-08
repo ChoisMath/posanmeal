@@ -107,6 +107,20 @@ function playDoubleBeep() {
   } catch {}
 }
 
+function playLockClick() {
+  try {
+    const ctx = getAudioCtx();
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.value = 0.35;
+    const osc = ctx.createOscillator();
+    osc.frequency.value = 280;
+    osc.connect(gain);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.08);
+  } catch {}
+}
+
 function todayLocal(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -133,6 +147,7 @@ export default function CheckPage() {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncRejectedCount, setSyncRejectedCount] = useState(0);
   const [modeLoaded, setModeLoaded] = useState(false);
   const [mealWindows, setMealWindows] = useState<MealWindows>(DEFAULT_MEAL_WINDOWS);
   const prevModeRef = useRef<"online" | "local">("online");
@@ -149,13 +164,16 @@ export default function CheckPage() {
       // 1. Upload unsynced check-ins
       const unsynced = await getUnsyncedCheckIns();
       if (unsynced.length > 0) {
-        const payload = unsynced.map((ci) => ({
-          userId: ci.userId,
-          date: ci.date,
-          mealKind: ci.mealKind,
-          checkedAt: ci.checkedAt,
-          type: ci.type,
-        }));
+        const payload = unsynced
+          .filter((ci) => typeof ci.id === "number")
+          .map((ci) => ({
+            clientId: ci.id!,
+            userId: ci.userId,
+            date: ci.date,
+            mealKind: ci.mealKind,
+            checkedAt: ci.checkedAt,
+            type: ci.type,
+          }));
 
         const upRes = await fetch("/api/sync/upload", {
           method: "POST",
@@ -165,9 +183,19 @@ export default function CheckPage() {
 
         if (upRes.ok) {
           const upData = await upRes.json();
-          const ids = unsynced.map((ci) => ci.id!);
-          await markCheckInsSynced(ids);
-          setSyncMessage(`업로드: ${upData.accepted}건 전송, ${upData.duplicates}건 중복`);
+          const syncedIds: number[] = Array.isArray(upData.syncedClientIds)
+            ? upData.syncedClientIds.filter((id: unknown): id is number => typeof id === "number")
+            : [];
+          if (syncedIds.length > 0) {
+            await markCheckInsSynced(syncedIds);
+          }
+          const accepted = upData.acceptedCount ?? 0;
+          const duplicates = upData.duplicatesCount ?? 0;
+          const rejectedCount = upData.rejectedCount ?? 0;
+          setSyncRejectedCount(rejectedCount);
+          let msg = `업로드: ${accepted}건 전송, ${duplicates}건 중복`;
+          if (rejectedCount > 0) msg += `, 미반영 ${rejectedCount}건 (재시도 대기)`;
+          setSyncMessage(msg);
         } else if (upRes.status === 403) {
           setSyncMessage("업로드 실패: 관리자 로그인이 필요합니다. /admin/login에서 먼저 로그인하세요.");
           setSyncing(false);
@@ -326,7 +354,10 @@ export default function CheckPage() {
 
   // --- Online mode: existing server-based check-in ---
   const handleOnlineScan = useCallback(async (data: string) => {
-    if (processingRef.current) return;
+    if (processingRef.current) {
+      playLockClick();
+      return;
+    }
     processingRef.current = true;
 
     try {
@@ -347,14 +378,19 @@ export default function CheckPage() {
     }
 
     setTimeout(() => {
-      setResult(null);
       processingRef.current = false;
+    }, 1000);
+    setTimeout(() => {
+      setResult(null);
     }, 2000);
   }, []);
 
   // --- Local mode: IndexedDB-based check-in ---
   const handleLocalScan = useCallback(async (data: string) => {
-    if (processingRef.current) return;
+    if (processingRef.current) {
+      playLockClick();
+      return;
+    }
     processingRef.current = true;
 
     try {
@@ -455,8 +491,10 @@ export default function CheckPage() {
       playDoubleBeep();
     } finally {
       setTimeout(() => {
-        setResult(null);
         processingRef.current = false;
+      }, 1000);
+      setTimeout(() => {
+        setResult(null);
       }, 2000);
     }
   }, [mealWindows]);
@@ -624,12 +662,17 @@ export default function CheckPage() {
       </div>
 
       {/* Sync Footer */}
-      {(operationMode === "local" || unsyncedCount > 0) && (
+      {(operationMode === "local" || unsyncedCount > 0 || syncRejectedCount > 0) && (
         <div className="fixed bottom-0 left-0 right-0 bg-black/80 text-white text-xs px-4 py-2 flex items-center justify-between z-20">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <span className="text-white/60 whitespace-nowrap">
               마지막 동기화: {lastSyncAt ? new Date(lastSyncAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "없음"}
             </span>
+            {syncRejectedCount > 0 && (
+              <span className="px-2 py-0.5 rounded bg-red-500 text-white font-semibold whitespace-nowrap">
+                서버 미반영 {syncRejectedCount}건 — 재시도 대기
+              </span>
+            )}
             {syncMessage && <span className="text-amber-400">{syncMessage}</span>}
           </div>
           <div className="flex items-center gap-2">
