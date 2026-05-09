@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight, AlertTriangle, Database } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { DateMultiPicker } from "@/components/DateMultiPicker";
@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
+import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import {
   validateMealWindows,
   mapServerError,
@@ -152,6 +153,12 @@ export default function AdminPage() {
   const [windowsForm, setWindowsForm] = useState<MealWindowsForm | null>(null);
   const [windowsError, setWindowsError] = useState<string | null>(null);
   const [windowsLoadFailed, setWindowsLoadFailed] = useState(false);
+  const [localDataDialogOpen, setLocalDataDialogOpen] = useState(false);
+  const [localRows, setLocalRows] = useState<LocalCheckInRow[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [unsyncedBadgeCount, setUnsyncedBadgeCount] = useState(0);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   async function fetchSystemSettings(): Promise<boolean> {
     try {
@@ -264,6 +271,87 @@ export default function AdminPage() {
     }
   }
 
+  async function refreshUnsyncedBadge() {
+    try {
+      const { getUnsyncedCount } = await import("@/lib/local-db");
+      setUnsyncedBadgeCount(await getUnsyncedCount());
+    } catch {
+      setUnsyncedBadgeCount(0);
+    }
+  }
+
+  async function handleOpenLocalData() {
+    setLocalDataDialogOpen(true);
+    setLocalLoading(true);
+    setLocalError(null);
+    setLocalRows([]);
+    try {
+      const { getUnsyncedCheckIns, getUser } = await import("@/lib/local-db");
+      const checkins = await getUnsyncedCheckIns();
+      const userIds = Array.from(new Set(checkins.map((c) => c.userId)));
+      const userMap = new Map<number, Awaited<ReturnType<typeof getUser>>>();
+      await Promise.all(
+        userIds.map(async (id) => {
+          const u = await getUser(id);
+          if (u) userMap.set(id, u);
+        }),
+      );
+      const rows: LocalCheckInRow[] = checkins.map((c) => ({
+        id: c.id!,
+        userId: c.userId,
+        userLabel: buildUserLabel(userMap.get(c.userId), c.userId),
+        name: userMap.get(c.userId)?.name ?? "-",
+        date: c.date,
+        mealKind: c.mealKind,
+        type: c.type,
+        checkedAt: c.checkedAt,
+      }));
+      setLocalRows(rows);
+    } catch (err) {
+      setLocalError("로컬 데이터를 불러오지 못했습니다");
+      toast.error("로컬 데이터를 불러오지 못했습니다");
+      console.error(err);
+    } finally {
+      setLocalLoading(false);
+    }
+  }
+
+  function handleCloseLocalData(open: boolean) {
+    setLocalDataDialogOpen(open);
+    if (!open) {
+      setLocalRows([]);
+      setLocalError(null);
+      refreshUnsyncedBadge();
+    }
+  }
+
+  async function handleExportLocalDataExcel() {
+    if (localRows.length === 0) return;
+    setExportingExcel(true);
+    try {
+      const { exportLocalCheckInsXlsx } = await import("@/lib/local-checkins-export");
+      const blob = await exportLocalCheckInsXlsx(localRows);
+      const filename = `local-checkins-${todayKST()}.xlsx`;
+      triggerDownload(blob, filename);
+    } catch (err) {
+      toast.error("엑셀 다운로드 실패");
+      console.error(err);
+    } finally {
+      setExportingExcel(false);
+    }
+  }
+
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -343,6 +431,7 @@ export default function AdminPage() {
       console.error("Admin sync error:", err);
       setSyncStatus(`동기화 오류: ${msg}`);
     }
+    await refreshUnsyncedBadge();
     setIsSyncing(false);
   }
 
@@ -360,6 +449,7 @@ export default function AdminPage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchUsers(); fetchSystemSettings(); fetchApps(); }, [userFilter]);
+  useEffect(() => { refreshUnsyncedBadge(); }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchDashboard(dashboardDate); }, [dashboardDate]);
