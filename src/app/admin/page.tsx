@@ -21,6 +21,11 @@ import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
+import {
+  validateMealWindows,
+  mapServerError,
+  type MealWindowsForm,
+} from "@/lib/meal-windows-validation";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -143,12 +148,40 @@ export default function AdminPage() {
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
   const [sysGeneration, setSysGeneration] = useState(1);
   const [sysLoading, setSysLoading] = useState(false);
+  const [sysWindows, setSysWindows] = useState<MealWindowsForm | null>(null);
+  const [windowsForm, setWindowsForm] = useState<MealWindowsForm | null>(null);
+  const [windowsError, setWindowsError] = useState<string | null>(null);
+  const [windowsLoadFailed, setWindowsLoadFailed] = useState(false);
 
   async function fetchSystemSettings() {
-    const res = await fetch("/api/system/settings");
-    const data = await res.json();
-    setSysMode(data.operationMode);
-    setSysGeneration(data.qrGeneration);
+    try {
+      const res = await fetch("/api/system/settings");
+      if (!res.ok) {
+        setWindowsLoadFailed(true);
+        return;
+      }
+      const data = await res.json();
+      setSysMode(data.operationMode);
+      setSysGeneration(data.qrGeneration);
+      if (data.mealWindows) {
+        const windows: MealWindowsForm = {
+          breakfast: {
+            start: data.mealWindows.breakfast.start,
+            end: data.mealWindows.breakfast.end,
+          },
+          dinner: {
+            start: data.mealWindows.dinner.start,
+            end: data.mealWindows.dinner.end,
+          },
+        };
+        setSysWindows(windows);
+        setWindowsForm(windows);
+        setWindowsError(null);
+        setWindowsLoadFailed(false);
+      }
+    } catch {
+      setWindowsLoadFailed(true);
+    }
   }
 
   async function handleModeToggle() {
@@ -178,6 +211,48 @@ export default function AdminPage() {
     });
     await fetchSystemSettings();
     setSysLoading(false);
+  }
+
+  function handleWindowsChange(
+    meal: "breakfast" | "dinner",
+    edge: "start" | "end",
+    value: string,
+  ) {
+    if (!windowsForm) return;
+    const next: MealWindowsForm = {
+      breakfast: { ...windowsForm.breakfast },
+      dinner: { ...windowsForm.dinner },
+    };
+    next[meal][edge] = value;
+    setWindowsForm(next);
+    setWindowsError(validateMealWindows(next));
+  }
+
+  async function handleSaveWindows() {
+    if (!windowsForm) return;
+    const validationError = validateMealWindows(windowsForm);
+    if (validationError) {
+      setWindowsError(validationError);
+      return;
+    }
+    setSysLoading(true);
+    try {
+      const res = await fetch("/api/system/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mealWindows: windowsForm }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setWindowsError(mapServerError(data?.error) ?? "저장에 실패했습니다");
+        toast.error("식사 시간 저장 실패");
+        return;
+      }
+      await fetchSystemSettings();
+      toast.success("식사 시간이 저장되었습니다 · 새 QR부터 적용");
+    } finally {
+      setSysLoading(false);
+    }
   }
 
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
