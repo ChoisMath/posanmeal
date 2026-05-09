@@ -182,6 +182,8 @@ prisma/
 | `src/lib/utils.ts` | 공통 유틸 (clsx/tailwind-merge 등) |
 | `src/lib/meal-kind.ts` | 서버 헬퍼: `MealKind`/`MealWindows`/`resolveMealKind`(시각→조식/석식/null)/`isStudentEligibleToday` |
 | `src/lib/meal-kind-local.ts` | 클라이언트 헬퍼 (오프라인 모드 태블릿용 mealKind 결정) |
+| `src/lib/meal-windows-validation.ts` | 클라이언트 검증 + 서버 에러 한국어 매핑 (관리자 설정 UI 전용) |
+| `src/lib/checkin-client.ts` | `/check` 페이지의 `/api/checkin` POST 재시도 클라이언트 (네트워크/5xx 3회) |
 | `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, breakfastDates)` (관리자 표·엑셀 헤더 생성용 — 조식 운영일에만 BREAKFAST 컬럼 삽입) |
 | `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
 
