@@ -1233,15 +1233,31 @@ export default function AdminPage() {
                         <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">{syncStatus}</p>
                       )}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleAdminSync}
-                      disabled={isSyncing}
-                    >
-                      <Download className="h-4 w-4 mr-1" />
-                      {isSyncing ? "동기화 중..." : "데이터 동기화"}
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleOpenLocalData}
+                        className="relative"
+                      >
+                        <Database className="h-4 w-4 mr-1" />
+                        로컬 데이터
+                        {unsyncedBadgeCount > 0 && (
+                          <span className="ml-1 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-medium rounded-full bg-red-500 text-white">
+                            {unsyncedBadgeCount}
+                          </span>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAdminSync}
+                        disabled={isSyncing}
+                      >
+                        <Download className="h-4 w-4 mr-1" />
+                        {isSyncing ? "동기화 중..." : "데이터 동기화"}
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Meal Time Windows */}
@@ -1339,6 +1355,39 @@ export default function AdminPage() {
           )}
         </Tabs>
       </div>
+
+      <Dialog open={localDataDialogOpen} onOpenChange={handleCloseLocalData}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>로컬 저장 데이터 (서버 미전송)</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <LocalCheckInsTable
+              rows={localRows}
+              loading={localLoading}
+              errorMessage={localError}
+            />
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportLocalDataExcel}
+                disabled={exportingExcel || localRows.length === 0}
+              >
+                <FileSpreadsheet className="h-4 w-4 mr-1" />
+                {exportingExcel ? "다운로드 중..." : "Excel 다운로드"}
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => handleCloseLocalData(false)}
+              >
+                닫기
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Sheet Import Dialog */}
       <Dialog open={sheetDialogOpen} onOpenChange={setSheetDialogOpen}>
