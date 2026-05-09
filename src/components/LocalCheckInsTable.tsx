@@ -1,5 +1,7 @@
+import { useMemo } from "react";
 import type { LocalUser } from "@/lib/local-db";
 import { formatDateTimeSecondsKST } from "@/lib/timezone";
+import { Info } from "lucide-react";
 
 export interface LocalCheckInRow {
   id: number;
@@ -37,7 +39,10 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">동기화되지 않은 데이터가 없습니다</p>;
   }
-  const missingUserCount = rows.filter((r) => r.userLabel.startsWith("id:")).length;
+  const missingUserCount = useMemo(
+    () => rows.filter((r) => r.userLabel.startsWith("id:")).length,
+    [rows],
+  );
 
   return (
     <>
@@ -45,8 +50,9 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
         {rows.length}건의 체크인이 아직 서버로 전송되지 않았습니다.
       </p>
       {missingUserCount > 0 && (
-        <p className="text-sm text-amber-600 dark:text-amber-400 mb-2">
-          ⓘ {missingUserCount}건은 사용자 정보 매핑 실패
+        <p className="text-sm text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1">
+          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {missingUserCount}건은 사용자 정보 매핑 실패
         </p>
       )}
       <div className="overflow-x-auto border rounded-lg max-h-[60vh]">
