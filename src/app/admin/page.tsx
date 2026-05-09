@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { DateMultiPicker } from "@/components/DateMultiPicker";
@@ -163,7 +163,6 @@ export default function AdminPage() {
       const data = await res.json();
       setSysMode(data.operationMode);
       setSysGeneration(data.qrGeneration);
-      setWindowsLoadFailed(false);
       if (data.mealWindows) {
         const windows: MealWindowsForm = {
           breakfast: {
@@ -178,6 +177,9 @@ export default function AdminPage() {
         setSysWindows(windows);
         setWindowsForm(windows);
         setWindowsError(null);
+        setWindowsLoadFailed(false);
+      } else {
+        setWindowsLoadFailed(true);
       }
       return true;
     } catch {
@@ -1210,8 +1212,9 @@ export default function AdminPage() {
                         </div>
 
                         {windowsError && (
-                          <p className="text-sm text-red-600 dark:text-red-400 mt-3">
-                            ⚠ {windowsError}
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-center gap-1">
+                            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            {windowsError}
                           </p>
                         )}
 
