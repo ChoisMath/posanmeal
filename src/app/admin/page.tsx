@@ -153,16 +153,17 @@ export default function AdminPage() {
   const [windowsError, setWindowsError] = useState<string | null>(null);
   const [windowsLoadFailed, setWindowsLoadFailed] = useState(false);
 
-  async function fetchSystemSettings() {
+  async function fetchSystemSettings(): Promise<boolean> {
     try {
       const res = await fetch("/api/system/settings");
       if (!res.ok) {
         setWindowsLoadFailed(true);
-        return;
+        return false;
       }
       const data = await res.json();
       setSysMode(data.operationMode);
       setSysGeneration(data.qrGeneration);
+      setWindowsLoadFailed(false);
       if (data.mealWindows) {
         const windows: MealWindowsForm = {
           breakfast: {
@@ -177,10 +178,11 @@ export default function AdminPage() {
         setSysWindows(windows);
         setWindowsForm(windows);
         setWindowsError(null);
-        setWindowsLoadFailed(false);
       }
+      return true;
     } catch {
       setWindowsLoadFailed(true);
+      return false;
     }
   }
 
@@ -248,8 +250,12 @@ export default function AdminPage() {
         toast.error("식사 시간 저장 실패");
         return;
       }
-      await fetchSystemSettings();
-      toast.success("식사 시간이 저장되었습니다 · 새 QR부터 적용");
+      const refreshed = await fetchSystemSettings();
+      if (refreshed) {
+        toast.success("식사 시간이 저장되었습니다 · 새 QR부터 적용");
+      } else {
+        toast.warning("저장되었으나 설정을 다시 불러오지 못했습니다. 새로고침 해주세요");
+      }
     } finally {
       setSysLoading(false);
     }
