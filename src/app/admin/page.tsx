@@ -187,15 +187,24 @@ export default function AdminPage() {
     setIsSyncing(true);
     setSyncStatus(null);
     try {
-      const { setSetting, replaceAllUsers, replaceAllEligibleUsers, getUnsyncedCheckIns, markCheckInsSynced } = await import("@/lib/local-db");
+      const {
+        setSetting,
+        replaceAllUsers,
+        replaceAllEligibleUsers,
+        replaceAllEligibleEntries,
+        getUnsyncedCheckIns,
+        markCheckInsSynced,
+      } = await import("@/lib/local-db");
       const messages: string[] = [];
 
       // 1. Upload unsynced check-ins first (data loss prevention)
       const unsynced = await getUnsyncedCheckIns();
       if (unsynced.length > 0) {
         const payload = unsynced.map((ci) => ({
+          clientId: ci.id!,
           userId: ci.userId,
           date: ci.date,
+          mealKind: ci.mealKind,
           checkedAt: ci.checkedAt,
           type: ci.type,
         }));
@@ -206,9 +215,16 @@ export default function AdminPage() {
         });
         if (upRes.ok) {
           const upData = await upRes.json();
-          const ids = unsynced.map((ci) => ci.id!);
-          await markCheckInsSynced(ids);
-          messages.push(`업로드: ${upData.accepted}건 전송, ${upData.duplicates}건 중복`);
+          const syncedIds: number[] = Array.isArray(upData.syncedClientIds)
+            ? upData.syncedClientIds.filter((id: unknown): id is number => typeof id === "number")
+            : [];
+          if (syncedIds.length > 0) {
+            await markCheckInsSynced(syncedIds);
+          }
+          const accepted = upData.acceptedCount ?? 0;
+          const duplicates = upData.duplicatesCount ?? 0;
+          const rejected = upData.rejectedCount ?? 0;
+          messages.push(`업로드: ${accepted}건 전송, ${duplicates}건 중복, ${rejected}건 미반영`);
         } else {
           messages.push("체크인 업로드 실패");
         }
@@ -225,8 +241,15 @@ export default function AdminPage() {
 
       await setSetting("operationMode", data.operationMode);
       await setSetting("qrGeneration", data.qrGeneration.toString());
+      if (data.mealWindows) {
+        await setSetting("mealWindows", JSON.stringify(data.mealWindows));
+      }
       await replaceAllUsers(data.users);
-      await replaceAllEligibleUsers(data.eligibleUserIds);
+      if (Array.isArray(data.eligibleEntries)) {
+        await replaceAllEligibleEntries(data.eligibleEntries);
+      } else {
+        await replaceAllEligibleUsers(data.eligibleUserIds);
+      }
       await setSetting("lastSyncAt", new Date().toISOString());
 
       messages.push(`다운로드: 사용자 ${data.users.length}명, 자격자 ${data.eligibleUserIds.length}명`);
