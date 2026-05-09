@@ -180,6 +180,7 @@ export default function AdminPage() {
         setWindowsLoadFailed(false);
       } else {
         setWindowsLoadFailed(true);
+        return false;
       }
       return true;
     } catch {
