@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { canWriteAdmin } from "@/lib/permissions";
+import { dateKeyToUtcDate } from "@/lib/date-range";
 
 interface UploadCheckIn {
   clientId?: number;
@@ -16,8 +17,21 @@ interface RejectedItem {
   clientId: number | null;
   userId: number;
   date: string;
-  mealKind: "BREAKFAST" | "DINNER";
+  mealKind: "BREAKFAST" | "DINNER" | null;
   reason: "USER_NOT_FOUND" | "SERVER_ERROR" | "INVALID_PAYLOAD";
+}
+
+function isMealKind(value: unknown): value is "BREAKFAST" | "DINNER" {
+  return value === "BREAKFAST" || value === "DINNER";
+}
+
+function isCheckInType(value: unknown): value is "STUDENT" | "WORK" | "PERSONAL" {
+  return value === "STUDENT" || value === "WORK" || value === "PERSONAL";
+}
+
+function isValidIsoDate(value: string): boolean {
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime());
 }
 
 export async function POST(request: Request) {
@@ -45,10 +59,40 @@ export async function POST(request: Request) {
 
   for (const ci of checkins) {
     const clientId = typeof ci.clientId === "number" ? ci.clientId : null;
-    const mealKind = ci.mealKind ?? "DINNER";
+    const mealKind = isMealKind(ci.mealKind) ? ci.mealKind : null;
 
     try {
-      const dateObj = new Date(ci.date + "T00:00:00Z");
+      if (
+        typeof ci.userId !== "number" ||
+        typeof ci.date !== "string" ||
+        !mealKind ||
+        !isCheckInType(ci.type) ||
+        typeof ci.checkedAt !== "string" ||
+        !isValidIsoDate(ci.checkedAt)
+      ) {
+        rejected.push({
+          clientId,
+          userId: typeof ci.userId === "number" ? ci.userId : 0,
+          date: typeof ci.date === "string" ? ci.date : "",
+          mealKind,
+          reason: "INVALID_PAYLOAD",
+        });
+        continue;
+      }
+
+      let dateObj: Date;
+      try {
+        dateObj = dateKeyToUtcDate(ci.date);
+      } catch {
+        rejected.push({
+          clientId,
+          userId: ci.userId,
+          date: ci.date,
+          mealKind,
+          reason: "INVALID_PAYLOAD",
+        });
+        continue;
+      }
 
       const user = await prisma.user.findUnique({
         where: { id: ci.userId },

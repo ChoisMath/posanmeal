@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -128,6 +129,74 @@ describe("/api/sync/upload — local-mode sync preserves IDB-saved check-ins", (
     ]);
   });
 
+  it("rejects missing mealKind without defaulting to DINNER or marking the client id synced", async () => {
+    const { POST } = await import("@/app/api/sync/upload/route");
+
+    const res = await POST(
+      buildRequest({
+        checkins: [
+          {
+            clientId: 100,
+            userId: 42,
+            date: "2026-05-08",
+            checkedAt: "2026-05-08T10:30:00.000Z",
+            type: "STUDENT",
+          },
+        ],
+      }),
+    );
+    const body = await res.json();
+
+    expect(mocks.userFindUnique).not.toHaveBeenCalled();
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+    expect(body.acceptedCount).toBe(0);
+    expect(body.duplicatesCount).toBe(0);
+    expect(body.rejectedCount).toBe(1);
+    expect(body.syncedClientIds).toEqual([]);
+    expect(body.rejected).toEqual([
+      expect.objectContaining({ clientId: 100, userId: 42, reason: "INVALID_PAYLOAD" }),
+    ]);
+  });
+
+  it("rejects invalid upload fields before touching prisma", async () => {
+    const { POST } = await import("@/app/api/sync/upload/route");
+
+    const res = await POST(
+      buildRequest({
+        checkins: [
+          {
+            clientId: 101,
+            userId: 42,
+            date: "not-a-date",
+            mealKind: "DINNER",
+            checkedAt: "2026-05-08T10:30:00.000Z",
+            type: "STUDENT",
+          },
+          {
+            clientId: 102,
+            userId: 43,
+            date: "2026-05-08",
+            mealKind: "LUNCH",
+            checkedAt: "2026-05-08T10:30:00.000Z",
+            type: "STUDENT",
+          },
+        ],
+      }),
+    );
+    const body = await res.json();
+
+    expect(mocks.userFindUnique).not.toHaveBeenCalled();
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+    expect(body.acceptedCount).toBe(0);
+    expect(body.duplicatesCount).toBe(0);
+    expect(body.rejectedCount).toBe(2);
+    expect(body.syncedClientIds).toEqual([]);
+    expect(body.rejected).toEqual([
+      expect.objectContaining({ clientId: 101, reason: "INVALID_PAYLOAD" }),
+      expect.objectContaining({ clientId: 102, reason: "INVALID_PAYLOAD" }),
+    ]);
+  });
+
   it("classifies non-P2002 prisma errors as SERVER_ERROR rejected items so the client retries them", async () => {
     const { POST } = await import("@/app/api/sync/upload/route");
     mocks.userFindUnique.mockResolvedValue({ id: 42 });
@@ -208,5 +277,14 @@ describe("/api/sync/upload — local-mode sync preserves IDB-saved check-ins", (
     expect(body.rejectedCount).toBe(0);
     expect(body.syncedClientIds).toEqual([]);
     expect(mocks.userFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("keeps the admin local sync client from dropping mealKind and rejected rows", () => {
+    const source = readFileSync("src/app/admin/page.tsx", "utf8");
+
+    expect(source).toContain("clientId: ci.id!");
+    expect(source).toContain("mealKind: ci.mealKind");
+    expect(source).toContain("upData.syncedClientIds");
+    expect(source).not.toContain("const ids = unsynced.map((ci) => ci.id!)");
   });
 });
