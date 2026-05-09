@@ -1151,6 +1151,88 @@ export default function AdminPage() {
                     </Button>
                   </div>
 
+                  {/* Meal Time Windows */}
+                  <div className="p-4 border rounded-xl mt-3">
+                    <p className="font-medium">식사 시간 윈도우</p>
+                    <p className="text-sm text-muted-foreground">
+                      QR 체크인이 가능한 시간대입니다. 시간 외 스캔은 거부됩니다.
+                    </p>
+
+                    {windowsLoadFailed && (
+                      <p className="text-sm text-red-600 dark:text-red-400 mt-3">
+                        설정을 불러올 수 없습니다. 새로고침 해주세요.
+                      </p>
+                    )}
+
+                    {windowsForm && (
+                      <>
+                        <div className="mt-3 space-y-2">
+                          {(["breakfast", "dinner"] as const).map((meal) => (
+                            <div
+                              key={meal}
+                              className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3"
+                            >
+                              <span className="font-medium text-sm whitespace-nowrap w-12">
+                                {meal === "breakfast" ? "조식" : "석식"}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <Label htmlFor={`${meal}-start`} className="text-sm whitespace-nowrap">
+                                  시작
+                                </Label>
+                                <Input
+                                  id={`${meal}-start`}
+                                  type="time"
+                                  value={windowsForm[meal].start}
+                                  onChange={(e) =>
+                                    handleWindowsChange(meal, "start", e.target.value)
+                                  }
+                                  disabled={sysLoading}
+                                  className="w-32"
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Label htmlFor={`${meal}-end`} className="text-sm whitespace-nowrap">
+                                  종료
+                                </Label>
+                                <Input
+                                  id={`${meal}-end`}
+                                  type="time"
+                                  value={windowsForm[meal].end}
+                                  onChange={(e) =>
+                                    handleWindowsChange(meal, "end", e.target.value)
+                                  }
+                                  disabled={sysLoading}
+                                  className="w-32"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {windowsError && (
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-3">
+                            ⚠ {windowsError}
+                          </p>
+                        )}
+
+                        <div className="flex justify-end mt-3">
+                          <Button
+                            size="sm"
+                            onClick={handleSaveWindows}
+                            disabled={
+                              sysLoading ||
+                              !sysWindows ||
+                              !!windowsError ||
+                              JSON.stringify(windowsForm) === JSON.stringify(sysWindows)
+                            }
+                          >
+                            저장
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
                   {sysMode === "local" && (
                     <p className="text-sm text-amber-600 dark:text-amber-400 mt-3">
                       태블릿에서 동기화를 실행해야 설정이 반영됩니다.
