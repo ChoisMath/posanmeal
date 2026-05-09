@@ -28,6 +28,7 @@ import {
   type MealKind,
   type MealWindows,
 } from "@/lib/meal-kind-local";
+import { postCheckInWithRetry } from "@/lib/checkin-client";
 
 interface CheckInResult {
   success: boolean;
@@ -361,12 +362,7 @@ export default function CheckPage() {
     processingRef.current = true;
 
     try {
-      const res = await fetch("/api/checkin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: data }),
-      });
-      const json = await res.json();
+      const json = await postCheckInWithRetry(data);
       setResult(json);
 
       if (json.success) playChime();
