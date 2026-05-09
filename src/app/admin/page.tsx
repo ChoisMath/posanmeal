@@ -1357,7 +1357,7 @@ export default function AdminPage() {
       </div>
 
       <Dialog open={localDataDialogOpen} onOpenChange={handleCloseLocalData}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>로컬 저장 데이터 (서버 미전송)</DialogTitle>
           </DialogHeader>
