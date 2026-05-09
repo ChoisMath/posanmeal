@@ -30,6 +30,11 @@ interface LocalCheckInsTableProps {
 }
 
 export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckInsTableProps) {
+  const missingUserCount = useMemo(
+    () => rows.filter((r) => r.userLabel.startsWith("id:")).length,
+    [rows],
+  );
+
   if (errorMessage) {
     return <p className="text-sm text-red-600 dark:text-red-400">{errorMessage}</p>;
   }
@@ -39,10 +44,6 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
   if (rows.length === 0) {
     return <p className="text-sm text-muted-foreground">동기화되지 않은 데이터가 없습니다</p>;
   }
-  const missingUserCount = useMemo(
-    () => rows.filter((r) => r.userLabel.startsWith("id:")).length,
-    [rows],
-  );
 
   return (
     <>
