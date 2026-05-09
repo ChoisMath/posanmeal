@@ -164,6 +164,7 @@ prisma/
 | `ThemeToggle` | `src/components/ThemeToggle.tsx` | 다크/라이트 토글 |
 | `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 |
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
+| `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
 
 ## §8 주요 lib 파일
 
@@ -183,6 +184,7 @@ prisma/
 | `src/lib/meal-kind.ts` | 서버 헬퍼: `MealKind`/`MealWindows`/`resolveMealKind`(시각→조식/석식/null)/`isStudentEligibleToday` |
 | `src/lib/meal-kind-local.ts` | 클라이언트 헬퍼 (오프라인 모드 태블릿용 mealKind 결정) |
 | `src/lib/meal-windows-validation.ts` | 클라이언트 검증 + 서버 에러 한국어 매핑 (관리자 설정 UI 전용) |
+| `src/lib/local-checkins-export.ts` | 로컬 미동기 체크인 → .xlsx Blob (관리자 설정 모달 전용, exceljs dynamic import) |
 | `src/lib/checkin-client.ts` | `/check` 페이지의 `/api/checkin` POST 재시도 클라이언트 (네트워크/5xx 3회) |
 | `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, breakfastDates)` (관리자 표·엑셀 헤더 생성용 — 조식 운영일에만 BREAKFAST 컬럼 삽입) |
 | `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
