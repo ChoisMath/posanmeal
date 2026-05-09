@@ -1,3 +1,5 @@
+"use client";
+
 import { useMemo } from "react";
 import type { LocalUser } from "@/lib/local-db";
 import { formatDateTimeSecondsKST } from "@/lib/timezone";
