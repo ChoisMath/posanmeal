@@ -406,7 +406,6 @@ export default function AdminPage() {
       const res = await fetch("/api/sync/download");
       if (!res.ok) {
         setSyncStatus("다운로드 실패. 서버 상태를 확인하세요.");
-        setIsSyncing(false);
         return;
       }
       const data = await res.json();
@@ -430,9 +429,10 @@ export default function AdminPage() {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("Admin sync error:", err);
       setSyncStatus(`동기화 오류: ${msg}`);
+    } finally {
+      await refreshUnsyncedBadge();
+      setIsSyncing(false);
     }
-    await refreshUnsyncedBadge();
-    setIsSyncing(false);
   }
 
   async function fetchUsers() {
