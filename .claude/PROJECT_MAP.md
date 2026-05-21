@@ -166,6 +166,7 @@ prisma/
 | `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 |
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
 | `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
+| `EditableCell` | `src/components/EditableCell.tsx` | 관리자 표 inline 편집 셀 — `EditableTextCell` / `EditableSelectCell` named export, `SaveResult` 타입; blur·Enter 저장, Escape 취소, committingRef 이중 fire 방지, role="button"+tabIndex 접근성 |
 
 ## §8 주요 lib 파일
 
@@ -244,6 +245,7 @@ prisma/
 - **조식 컬럼 노출 조건**: 관리자 석식확인·당일현황 모두 `MealRegistrationDate` 중 status=APPROVED + application.type=BREAKFAST 인 날짜에만 BREAKFAST 컬럼/카드 부제 표시. `MealApplicationDate` (공고 허용일) 가 아닌 점 주의
 - **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트
 - **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
+- **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)
 
 ## §13 Project-Map Maintenance
 
