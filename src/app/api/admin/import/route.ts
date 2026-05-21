@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canWriteAdmin } from "@/lib/permissions";
+import { normalizeGender } from "@/lib/gender";
 
 function extractSpreadsheetId(url: string): string | null {
   const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
@@ -123,36 +124,57 @@ export async function POST(request: Request) {
         if (validRows.length === 0) {
           errors.push("학생 시트에서 유효한 데이터를 찾을 수 없습니다. email과 name 열을 확인하세요.");
         } else {
-          // 데이터 유효성 사전 검사
           const rowErrors: string[] = [];
+          const parsed: Array<{
+            email: string; name: string; grade: number; classNum: number; number: number;
+            gender: "MALE" | "FEMALE";
+          }> = [];
+
           for (let i = 0; i < validRows.length; i++) {
-            const [email, grade, classNum, number] = validRows[i];
-            const rowNum = i + 2; // 헤더 + 0-index 보정
+            const [email, grade, classNum, number, name, genderRaw] = validRows[i];
+            const rowNum = i + 2;
+
             if (isNaN(parseInt(grade)) || isNaN(parseInt(classNum)) || isNaN(parseInt(number))) {
               rowErrors.push(`${rowNum}행: ${email} — 학년/반/번호가 숫자가 아닙니다`);
+              continue;
             }
+
+            const g = normalizeGender(genderRaw);
+            if (g === "INVALID") {
+              rowErrors.push(`${rowNum}행: ${email} — 성별 값을 인식할 수 없습니다 (남/여)`);
+              continue;
+            }
+            if (g === null) {
+              rowErrors.push(`${rowNum}행: ${email} — 성별이 비어 있습니다 (학생 필수)`);
+              continue;
+            }
+
+            parsed.push({
+              email, name,
+              grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number),
+              gender: g,
+            });
           }
 
           if (rowErrors.length > 0) {
             errors.push("학생 데이터 오류:\n" + rowErrors.slice(0, 5).join("\n") +
               (rowErrors.length > 5 ? `\n...외 ${rowErrors.length - 5}건` : ""));
           } else {
-            // 배치 병렬 upsert (트랜잭션 타임아웃 회피)
             const upsertedUsers: { id: number }[] = [];
-            for (const batch of chunk(validRows, BATCH_SIZE)) {
+            for (const batch of chunk(parsed, BATCH_SIZE)) {
               const results = await Promise.all(
-                batch.map(([email, grade, classNum, number, name]) =>
+                batch.map((p) =>
                   prisma.user.upsert({
-                    where: { email },
-                    update: { name, grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
-                    create: { email, name, role: "STUDENT", grade: parseInt(grade), classNum: parseInt(classNum), number: parseInt(number) },
+                    where: { email: p.email },
+                    update: { name: p.name, grade: p.grade, classNum: p.classNum, number: p.number, gender: p.gender },
+                    create: { email: p.email, name: p.name, role: "STUDENT", grade: p.grade, classNum: p.classNum, number: p.number, gender: p.gender },
                   })
                 )
               );
               upsertedUsers.push(...results);
             }
 
-            studentCount = validRows.length;
+            studentCount = parsed.length;
           }
         }
       }
