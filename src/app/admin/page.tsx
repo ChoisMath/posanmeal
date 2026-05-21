@@ -23,6 +23,7 @@ import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
 import { genderLabel } from "@/lib/gender";
 import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
+import { EditableTextCell, EditableSelectCell, type SaveResult } from "@/components/EditableCell";
 import {
   validateMealWindows,
   mapServerError,
@@ -571,6 +572,87 @@ export default function AdminPage() {
     setEditDialogOpen(false);
     setEditUser(null);
     fetchUsers();
+  }
+
+  type EditableUserField =
+    | "name" | "email"
+    | "grade" | "classNum" | "number"
+    | "subject" | "homeroom" | "position"
+    | "gender";
+
+  async function saveUserField(
+    id: number,
+    field: EditableUserField,
+    next: string,
+  ): Promise<SaveResult> {
+    const body: Record<string, unknown> = { id };
+    let normalizedNext: unknown = next;
+
+    if (field === "grade" || field === "classNum" || field === "number") {
+      const n = parseInt(next);
+      if (isNaN(n) || n < 1) {
+        const label = field === "grade" ? "학년" : field === "classNum" ? "반" : "번호";
+        return { ok: false, message: `${label}은(는) 1 이상 정수여야 합니다.` };
+      }
+      body[field] = n;
+      normalizedNext = n;
+    } else if (field === "gender") {
+      const g = next === "" ? null : next;
+      body.gender = g;
+      normalizedNext = g;
+    } else {
+      body[field] = next;
+    }
+
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      return { ok: false, message: "네트워크 오류입니다." };
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, message: data?.reason ?? "수정에 실패했습니다." };
+    }
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? ({ ...u, [field]: normalizedNext } as User) : u)),
+    );
+    return { ok: true };
+  }
+
+  async function saveAdminLevel(
+    id: number,
+    next: "NONE" | "SUBADMIN" | "ADMIN",
+  ): Promise<SaveResult> {
+    const target = users.find((u) => u.id === id);
+    if (!target) return { ok: false, message: "사용자를 찾을 수 없습니다." };
+    if (target.adminLevel === next) return { ok: true };
+
+    const labelMap = { NONE: "일반", SUBADMIN: "서브관리자", ADMIN: "관리자" } as const;
+    if (!confirm(`${target.name} 의 권한을 ${labelMap[next]}(으)로 변경할까요?`)) {
+      return { ok: false, message: "" };
+    }
+
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/users", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, adminLevel: next }),
+      });
+    } catch {
+      return { ok: false, message: "네트워크 오류입니다." };
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { ok: false, message: data?.reason ?? "권한 변경에 실패했습니다." };
+    }
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, adminLevel: next } : u)));
+    return { ok: true };
   }
 
   async function handleDeleteUser(id: number) {
