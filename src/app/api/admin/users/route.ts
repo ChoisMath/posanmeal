@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { canWriteAdmin } from "@/lib/permissions";
+import { canWriteAdmin, canReadAdmin } from "@/lib/permissions";
 
 export async function GET(request: Request) {
+  const session = await auth();
+  if (!canReadAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const { searchParams } = new URL(request.url);
   const role = searchParams.get("role") as "STUDENT" | "TEACHER" | null;
   const where = role ? { role } : {};
@@ -28,6 +32,13 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
+
+  if (body.role !== "STUDENT" && body.role !== "TEACHER") {
+    return NextResponse.json(
+      { error: "Bad Request", reason: "유효하지 않은 역할 값입니다." },
+      { status: 400 }
+    );
+  }
 
   // gender 값 형식 검증
   if (
