@@ -29,6 +29,11 @@ enum MealKind {
   DINNER
 }
 
+enum Gender {
+  MALE
+  FEMALE
+}
+
 enum AdminLevel {
   NONE
   SUBADMIN
@@ -54,6 +59,7 @@ model User {
   homeroom  String?
   position  String?
   photoUrl  String?
+  gender    Gender?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   adminLevel AdminLevel @default(NONE)
