@@ -48,21 +48,21 @@ model Admin {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String
-  role      Role
-  grade     Int?
-  classNum  Int?
-  number    Int?
-  subject   String?
-  homeroom  String?
-  position  String?
-  photoUrl  String?
-  gender    Gender?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         Int        @id @default(autoincrement())
+  email      String     @unique
+  name       String
+  role       Role
+  grade      Int?
+  classNum   Int?
+  number     Int?
+  subject    String?
+  homeroom   String?
+  position   String?
+  photoUrl   String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
   adminLevel AdminLevel @default(NONE)
+  gender     Gender?
 
   checkIns      CheckIn[]
   registrations MealRegistration[]
@@ -72,20 +72,20 @@ model User {
 }
 
 model MealApplication {
-  id          Int       @id @default(autoincrement())
+  id          Int     @id @default(autoincrement())
   title       String
   description String?
-  type        String    // "DINNER" | "BREAKFAST" | "OTHER"
+  type        String // "DINNER" | "BREAKFAST" | "OTHER"
 
-  applyStart  DateTime  @db.Date
-  applyEnd    DateTime  @db.Date
+  applyStart DateTime @db.Date
+  applyEnd   DateTime @db.Date
 
-  mealStart   DateTime? @db.Date
-  mealEnd     DateTime? @db.Date
+  mealStart DateTime? @db.Date
+  mealEnd   DateTime? @db.Date
 
-  status      String    @default("OPEN") // "OPEN" | "CLOSED"
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  status    String   @default("OPEN") // "OPEN" | "CLOSED"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   registrations MealRegistration[]
   allowedDates  MealApplicationDate[]
@@ -113,11 +113,11 @@ model MealRegistration {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   cancelledAt   DateTime?
-  cancelledBy   String?   // "STUDENT" | "ADMIN"
-  addedBy       String?   // null = 학생 본인, "ADMIN" = 관리자 추가
+  cancelledBy   String? // "STUDENT" | "ADMIN"
+  addedBy       String? // null = 학생 본인, "ADMIN" = 관리자 추가
 
-  application   MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   MealApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   selectedDates MealRegistrationDate[]
 
   @@unique([applicationId, userId])
