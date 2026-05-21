@@ -138,3 +138,119 @@ export function EditableTextCell({
     </div>
   );
 }
+
+interface EditableSelectCellProps extends CommonProps {
+  options: Array<{ value: string; label: string }>;
+  emptyLabel?: string;
+}
+
+export function EditableSelectCell({
+  value,
+  onSave,
+  ariaLabel,
+  className,
+  disabled,
+  options,
+  emptyLabel,
+}: EditableSelectCellProps) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const selectRef = useRef<HTMLSelectElement | null>(null);
+  const committingRef = useRef(false);
+
+  useEffect(() => {
+    if (editing && selectRef.current) {
+      selectRef.current.focus();
+      selectRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [editing]);
+
+  function enter() {
+    if (disabled) return;
+    setEditing(true);
+  }
+
+  async function commitWith(next: string) {
+    if (committingRef.current) return;
+    if (next === value) {
+      setEditing(false);
+      return;
+    }
+    committingRef.current = true;
+    setSaving(true);
+    try {
+      const r = await onSave(next);
+      if (r.ok) {
+        setEditing(false);
+      } else if (r.message) {
+        toast.error(r.message);
+      }
+    } catch {
+      toast.error("저장 중 오류가 발생했습니다.");
+    } finally {
+      setSaving(false);
+      committingRef.current = false;
+    }
+  }
+
+  function cancel() {
+    setEditing(false);
+  }
+
+  const displayLabel =
+    options.find((o) => o.value === value)?.label ?? (value === "" ? emptyLabel ?? "—" : value);
+
+  if (editing) {
+    return (
+      <div className={className}>
+        <select
+          ref={selectRef}
+          value={value}
+          onChange={(e) => commitWith(e.target.value)}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          disabled={saving}
+          aria-label={ariaLabel}
+          className="w-full px-1 py-0.5 rounded ring-1 ring-primary bg-background outline-none whitespace-nowrap text-sm disabled:opacity-60"
+        >
+          {emptyLabel != null && <option value="">{emptyLabel}</option>}
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={className}
+      onClick={enter}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          enter();
+        }
+      }}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-label={ariaLabel}
+      aria-disabled={disabled}
+    >
+      <span
+        className={`block px-1 py-0.5 rounded min-h-7 whitespace-nowrap text-sm ${
+          disabled ? "text-muted-foreground" : "cursor-pointer hover:bg-muted/40"
+        } ${value === "" ? "text-muted-foreground" : ""}`}
+      >
+        {displayLabel}
+      </span>
+    </div>
+  );
+}
