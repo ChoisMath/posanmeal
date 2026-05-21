@@ -160,9 +160,8 @@ export async function POST(request: Request) {
             errors.push("학생 데이터 오류:\n" + rowErrors.slice(0, 5).join("\n") +
               (rowErrors.length > 5 ? `\n...외 ${rowErrors.length - 5}건` : ""));
           } else {
-            const upsertedUsers: { id: number }[] = [];
             for (const batch of chunk(parsed, BATCH_SIZE)) {
-              const results = await Promise.all(
+              await Promise.all(
                 batch.map((p) =>
                   prisma.user.upsert({
                     where: { email: p.email },
@@ -171,7 +170,6 @@ export async function POST(request: Request) {
                   })
                 )
               );
-              upsertedUsers.push(...results);
             }
 
             studentCount = parsed.length;
