@@ -33,7 +33,7 @@ export async function GET(
     const registrations = await prisma.mealRegistration.findMany({
       where: { applicationId: appId, status: "APPROVED" },
       include: {
-        user: { select: { id: true, name: true, grade: true, classNum: true, number: true } },
+        user: { select: { id: true, name: true, grade: true, classNum: true, number: true, gender: true } },
       },
     });
 
@@ -117,6 +117,78 @@ export async function GET(
       r.getCell(3).value = reg.user.number;
       r.getCell(4).value = reg.user.name;
       r.getCell(5).value = reg.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+    }
+
+    // 통계 시트
+    const stats = workbook.addWorksheet("통계");
+    stats.mergeCells(1, 1, 1, 4);
+    const statsTitle = stats.getCell(1, 1);
+    statsTitle.value = `${application.title} 학년·성별 신청자 수`;
+    statsTitle.font = { bold: true, size: 14 };
+    statsTitle.alignment = { horizontal: "center" };
+
+    const statsHeader = stats.getRow(3);
+    ["학년", "남", "여", "합계"].forEach((h, i) => {
+      const cell = statsHeader.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true };
+      cell.alignment = { horizontal: "center" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFD580" } };
+    });
+    [10, 8, 8, 10].forEach((w, i) => { stats.getColumn(i + 1).width = w; });
+
+    type GradeKey = 1 | 2 | 3;
+    const counts: Record<GradeKey, { MALE: number; FEMALE: number; NONE: number }> = {
+      1: { MALE: 0, FEMALE: 0, NONE: 0 },
+      2: { MALE: 0, FEMALE: 0, NONE: 0 },
+      3: { MALE: 0, FEMALE: 0, NONE: 0 },
+    };
+    let other = 0;
+    for (const reg of registrations) {
+      const g = reg.user.grade;
+      if (g !== 1 && g !== 2 && g !== 3) { other++; continue; }
+      const key: "MALE" | "FEMALE" | "NONE" = reg.user.gender ?? "NONE";
+      counts[g as GradeKey][key]++;
+    }
+
+    let r = 4;
+    let totalMale = 0, totalFemale = 0, totalNone = 0;
+    for (const grade of [1, 2, 3] as GradeKey[]) {
+      const row = stats.getRow(r++);
+      row.getCell(1).value = `${grade}학년`;
+      row.getCell(2).value = counts[grade].MALE;
+      row.getCell(3).value = counts[grade].FEMALE;
+      row.getCell(4).value = counts[grade].MALE + counts[grade].FEMALE + counts[grade].NONE;
+      [2, 3, 4].forEach((c) => { row.getCell(c).alignment = { horizontal: "center" }; });
+      totalMale += counts[grade].MALE;
+      totalFemale += counts[grade].FEMALE;
+      totalNone += counts[grade].NONE;
+    }
+    const totalRow = stats.getRow(r++);
+    totalRow.getCell(1).value = "전체";
+    totalRow.getCell(2).value = totalMale;
+    totalRow.getCell(3).value = totalFemale;
+    totalRow.getCell(4).value = totalMale + totalFemale + totalNone;
+    [1, 2, 3, 4].forEach((c) => {
+      const cell = totalRow.getCell(c);
+      cell.font = { bold: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE9B3" } };
+      if (c >= 2) cell.alignment = { horizontal: "center" };
+    });
+
+    if (totalNone > 0) {
+      const noteRow = stats.getRow(r + 1);
+      stats.mergeCells(noteRow.number, 1, noteRow.number, 4);
+      const note = noteRow.getCell(1);
+      note.value = `* 성별 미입력 학생 ${totalNone}명은 합계에 포함되며 남/여 어느 쪽에도 집계되지 않습니다.`;
+      note.font = { italic: true, color: { argb: "FF888888" } };
+    }
+    if (other > 0) {
+      const noteRow2 = stats.getRow(r + 2);
+      stats.mergeCells(noteRow2.number, 1, noteRow2.number, 4);
+      const note2 = noteRow2.getCell(1);
+      note2.value = `* 학년 미지정 ${other}명은 통계에서 제외되었습니다.`;
+      note2.font = { italic: true, color: { argb: "FF888888" } };
     }
 
     const buffer = await workbook.xlsx.writeBuffer();
