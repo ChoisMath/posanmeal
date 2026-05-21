@@ -14,6 +14,7 @@ export async function GET(request: Request) {
       grade: true, classNum: true, number: true,
       subject: true, homeroom: true, position: true,
       adminLevel: true,
+      gender: true,
     },
     orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }, { name: "asc" }],
   });
@@ -27,11 +28,34 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
+
+  // gender 값 형식 검증
+  if (
+    body.gender !== undefined &&
+    body.gender !== null &&
+    body.gender !== "MALE" &&
+    body.gender !== "FEMALE"
+  ) {
+    return NextResponse.json(
+      { error: "Bad Request", reason: "유효하지 않은 성별 값입니다." },
+      { status: 400 }
+    );
+  }
+
+  // 학생은 성별 필수
+  if (body.role === "STUDENT" && body.gender !== "MALE" && body.gender !== "FEMALE") {
+    return NextResponse.json(
+      { error: "Bad Request", reason: "학생은 성별을 선택해야 합니다." },
+      { status: 400 }
+    );
+  }
+
   const user = await prisma.user.create({
     data: {
       email: body.email, name: body.name, role: body.role,
       grade: body.grade || null, classNum: body.classNum || null, number: body.number || null,
       subject: body.subject || null, homeroom: body.homeroom || null, position: body.position || null,
+      gender: body.gender ?? null,
     },
   });
 
@@ -88,6 +112,33 @@ export async function PUT(request: Request) {
     }
   }
 
+  // gender 값 형식 검증 (undefined = 변경 안 함)
+  if (
+    body.gender !== undefined &&
+    body.gender !== null &&
+    body.gender !== "MALE" &&
+    body.gender !== "FEMALE"
+  ) {
+    return NextResponse.json(
+      { error: "Bad Request", reason: "유효하지 않은 성별 값입니다." },
+      { status: 400 }
+    );
+  }
+
+  // 학생은 gender를 null로 되돌릴 수 없음
+  if (body.gender === null) {
+    const t = await prisma.user.findUnique({
+      where: { id: body.id },
+      select: { role: true },
+    });
+    if (t?.role === "STUDENT") {
+      return NextResponse.json(
+        { error: "Bad Request", reason: "학생의 성별은 비울 수 없습니다." },
+        { status: 400 }
+      );
+    }
+  }
+
   const user = await prisma.user.update({
     where: { id: body.id },
     data: {
@@ -95,6 +146,7 @@ export async function PUT(request: Request) {
       grade: body.grade, classNum: body.classNum, number: body.number,
       subject: body.subject, homeroom: body.homeroom, position: body.position,
       ...(body.adminLevel !== undefined ? { adminLevel: body.adminLevel } : {}),
+      ...(body.gender !== undefined ? { gender: body.gender } : {}),
     },
   });
   return NextResponse.json({ user });
