@@ -184,6 +184,9 @@ export function EditableSelectCell({
         setEditing(false);
       } else if (r.message) {
         toast.error(r.message);
+      } else {
+        // Cancelled with no message — close to reset the controlled select to value prop
+        setEditing(false);
       }
     } catch {
       toast.error("저장 중 오류가 발생했습니다.");
