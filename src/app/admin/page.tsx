@@ -21,7 +21,6 @@ import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
-import { genderLabel } from "@/lib/gender";
 import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import { EditableTextCell, EditableSelectCell, type SaveResult } from "@/components/EditableCell";
 import {
