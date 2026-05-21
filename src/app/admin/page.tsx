@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
+import { genderLabel } from "@/lib/gender";
 import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import {
   validateMealWindows,
@@ -33,6 +34,7 @@ interface User {
   grade?: number; classNum?: number; number?: number;
   subject?: string; homeroom?: string; position?: string;
   adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
+  gender?: "MALE" | "FEMALE" | null;
 }
 
 interface MealAppItem {
@@ -85,6 +87,7 @@ const emptyForm = {
   role: "STUDENT" as "STUDENT" | "TEACHER",
   email: "", name: "", grade: "", classNum: "", number: "",
   subject: "", homeroom: "", position: "",
+  gender: "" as "" | "MALE" | "FEMALE",
 };
 
 const emptyAppForm = {
@@ -99,7 +102,7 @@ const emptyAppForm = {
 };
 
 const sheetImportGuides = [
-  { label: "학생", columns: ["email", "grade", "classNum", "number", "name"] },
+  { label: "학생", columns: ["email", "grade", "classNum", "number", "name", "gender"] },
   { label: "교사", columns: ["email", "subject", "homeroom", "position", "name"] },
 ] as const;
 
@@ -501,6 +504,11 @@ export default function AdminPage() {
   }
 
   async function handleAddUser() {
+    if (addForm.role === "STUDENT" && addForm.gender !== "MALE" && addForm.gender !== "FEMALE") {
+      toast.error("학생은 성별을 선택해야 합니다.");
+      return;
+    }
+
     const body: Record<string, unknown> = { role: addForm.role, email: addForm.email, name: addForm.name };
     if (addForm.role === "STUDENT") {
       body.grade = parseInt(addForm.grade); body.classNum = parseInt(addForm.classNum);
@@ -508,6 +516,8 @@ export default function AdminPage() {
     } else {
       body.subject = addForm.subject; body.homeroom = addForm.homeroom; body.position = addForm.position;
     }
+    body.gender = addForm.gender === "" ? null : addForm.gender;
+
     await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     setAddDialogOpen(false);
     setAddForm({ ...emptyForm });
@@ -526,12 +536,18 @@ export default function AdminPage() {
       subject: user.subject || "",
       homeroom: user.homeroom || "",
       position: user.position || "",
+      gender: user.gender ?? "",
     });
     setEditDialogOpen(true);
   }
 
   async function handleEditUser() {
     if (!editUser) return;
+    if (editUser.role === "STUDENT" && editForm.gender !== "MALE" && editForm.gender !== "FEMALE") {
+      toast.error("학생은 성별을 선택해야 합니다.");
+      return;
+    }
+
     const body: Record<string, unknown> = { id: editUser.id, name: editForm.name, email: editForm.email };
     if (editUser.role === "STUDENT") {
       body.grade = parseInt(editForm.grade); body.classNum = parseInt(editForm.classNum);
@@ -539,6 +555,8 @@ export default function AdminPage() {
     } else {
       body.subject = editForm.subject; body.homeroom = editForm.homeroom; body.position = editForm.position;
     }
+    body.gender = editForm.gender === "" ? null : editForm.gender;
+
     await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
     setEditDialogOpen(false);
@@ -884,6 +902,9 @@ export default function AdminPage() {
                         <th className="p-2 text-left bg-muted">이름</th>
                         <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
                         <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "이메일" : "직책"}</th>
+                        {userFilter === "STUDENT" && (
+                          <th className="p-2 text-left bg-muted whitespace-nowrap">성별</th>
+                        )}
                         <th className="p-2 text-left bg-muted whitespace-nowrap">권한</th>
                         <th className="p-2 text-center w-24 bg-muted">관리</th>
                       </tr>
@@ -894,6 +915,15 @@ export default function AdminPage() {
                           <td className="p-2">{u.name}</td>
                           <td className="p-2">{u.role === "STUDENT" ? `${u.grade}-${u.classNum}-${u.number}` : `${u.subject || "-"} / ${u.homeroom || "비담임"}`}</td>
                           <td className="p-2">{u.role === "STUDENT" ? u.email : u.position || "-"}</td>
+                          {userFilter === "STUDENT" && (
+                            <td className="p-2 whitespace-nowrap">
+                              {u.gender ? (
+                                <span>{genderLabel(u.gender)}</span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          )}
                           <td className="p-2 whitespace-nowrap">
                             {u.role === "STUDENT" ? (
                               <span className="text-muted-foreground">—</span>
@@ -1411,6 +1441,12 @@ export default function AdminPage() {
                   </div>
                 ))}
               </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                <code>gender</code> 열은 학생만 필수입니다. &quot;남&quot; 또는 &quot;여&quot;로 입력하세요. (M/F·male/female 도 허용)
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                ⚠️ 기존 시트를 사용 중이라면 가장 오른쪽에 <code>gender</code> 열을 추가하고 학생별 값을 채운 뒤 가져오기 해주세요.
+              </p>
             </div>
             <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} className="rounded-xl" /></div>
             <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} className="rounded-xl" /></div>
@@ -1441,6 +1477,31 @@ export default function AdminPage() {
                   <div><Label>반</Label><Input type="number" value={addForm.classNum} onChange={(e) => setAddForm({ ...addForm, classNum: e.target.value })} /></div>
                   <div><Label>번호</Label><Input type="number" value={addForm.number} onChange={(e) => setAddForm({ ...addForm, number: e.target.value })} /></div>
                 </div>
+                <div>
+                  <Label>성별 *</Label>
+                  <div className="flex gap-4 mt-1">
+                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="add-gender"
+                        value="MALE"
+                        checked={addForm.gender === "MALE"}
+                        onChange={() => setAddForm({ ...addForm, gender: "MALE" })}
+                      />
+                      <span>남</span>
+                    </label>
+                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="add-gender"
+                        value="FEMALE"
+                        checked={addForm.gender === "FEMALE"}
+                        onChange={() => setAddForm({ ...addForm, gender: "FEMALE" })}
+                      />
+                      <span>여</span>
+                    </label>
+                  </div>
+                </div>
               </>
             )}
             {addForm.role === "TEACHER" && (
@@ -1448,6 +1509,38 @@ export default function AdminPage() {
                 <div><Label>교과명</Label><Input value={addForm.subject} onChange={(e) => setAddForm({ ...addForm, subject: e.target.value })} /></div>
                 <div><Label>담임 (예: 2-6)</Label><Input value={addForm.homeroom} onChange={(e) => setAddForm({ ...addForm, homeroom: e.target.value })} /></div>
                 <div><Label>직책</Label><Input value={addForm.position} onChange={(e) => setAddForm({ ...addForm, position: e.target.value })} /></div>
+                <div>
+                  <Label>성별 (선택)</Label>
+                  <div className="flex items-center gap-4 mt-1">
+                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="add-gender"
+                        value="MALE"
+                        checked={addForm.gender === "MALE"}
+                        onChange={() => setAddForm({ ...addForm, gender: "MALE" })}
+                      />
+                      <span>남</span>
+                    </label>
+                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="add-gender"
+                        value="FEMALE"
+                        checked={addForm.gender === "FEMALE"}
+                        onChange={() => setAddForm({ ...addForm, gender: "FEMALE" })}
+                      />
+                      <span>여</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline"
+                      onClick={() => setAddForm({ ...addForm, gender: "" })}
+                    >
+                      선택 해제
+                    </button>
+                  </div>
+                </div>
               </>
             )}
             <Button onClick={handleAddUser} className="w-full">추가</Button>
@@ -1470,6 +1563,31 @@ export default function AdminPage() {
                     <div><Label>반</Label><Input type="number" value={editForm.classNum} onChange={(e) => setEditForm({ ...editForm, classNum: e.target.value })} /></div>
                     <div><Label>번호</Label><Input type="number" value={editForm.number} onChange={(e) => setEditForm({ ...editForm, number: e.target.value })} /></div>
                   </div>
+                  <div>
+                    <Label>성별 *</Label>
+                    <div className="flex gap-4 mt-1">
+                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="edit-gender"
+                          value="MALE"
+                          checked={editForm.gender === "MALE"}
+                          onChange={() => setEditForm({ ...editForm, gender: "MALE" })}
+                        />
+                        <span>남</span>
+                      </label>
+                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="edit-gender"
+                          value="FEMALE"
+                          checked={editForm.gender === "FEMALE"}
+                          onChange={() => setEditForm({ ...editForm, gender: "FEMALE" })}
+                        />
+                        <span>여</span>
+                      </label>
+                    </div>
+                  </div>
                 </>
               )}
               {editUser.role === "TEACHER" && (
@@ -1477,6 +1595,38 @@ export default function AdminPage() {
                   <div><Label>교과명</Label><Input value={editForm.subject} onChange={(e) => setEditForm({ ...editForm, subject: e.target.value })} /></div>
                   <div><Label>담임 (예: 2-6)</Label><Input value={editForm.homeroom} onChange={(e) => setEditForm({ ...editForm, homeroom: e.target.value })} /></div>
                   <div><Label>직책</Label><Input value={editForm.position} onChange={(e) => setEditForm({ ...editForm, position: e.target.value })} /></div>
+                  <div>
+                    <Label>성별 (선택)</Label>
+                    <div className="flex items-center gap-4 mt-1">
+                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="edit-gender"
+                          value="MALE"
+                          checked={editForm.gender === "MALE"}
+                          onChange={() => setEditForm({ ...editForm, gender: "MALE" })}
+                        />
+                        <span>남</span>
+                      </label>
+                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="edit-gender"
+                          value="FEMALE"
+                          checked={editForm.gender === "FEMALE"}
+                          onChange={() => setEditForm({ ...editForm, gender: "FEMALE" })}
+                        />
+                        <span>여</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground underline"
+                        onClick={() => setEditForm({ ...editForm, gender: "" })}
+                      >
+                        선택 해제
+                      </button>
+                    </div>
+                  </div>
                 </>
               )}
               <Button onClick={handleEditUser} className="w-full">저장</Button>
