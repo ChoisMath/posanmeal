@@ -176,15 +176,16 @@ export async function GET(
       if (c >= 2) cell.alignment = { horizontal: "center" };
     });
 
+    let noteR = r + 1;
     if (totalNone > 0) {
-      const noteRow = stats.getRow(r + 1);
+      const noteRow = stats.getRow(noteR++);
       stats.mergeCells(noteRow.number, 1, noteRow.number, 4);
       const note = noteRow.getCell(1);
       note.value = `* 성별 미입력 학생 ${totalNone}명은 합계에 포함되며 남/여 어느 쪽에도 집계되지 않습니다.`;
       note.font = { italic: true, color: { argb: "FF888888" } };
     }
     if (other > 0) {
-      const noteRow2 = stats.getRow(r + 2);
+      const noteRow2 = stats.getRow(noteR++);
       stats.mergeCells(noteRow2.number, 1, noteRow2.number, 4);
       const note2 = noteRow2.getCell(1);
       note2.value = `* 학년 미지정 ${other}명은 통계에서 제외되었습니다.`;
