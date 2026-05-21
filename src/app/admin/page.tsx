@@ -518,7 +518,12 @@ export default function AdminPage() {
     }
     body.gender = addForm.gender === "" ? null : addForm.gender;
 
-    await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const res = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data?.reason ?? "사용자 추가에 실패했습니다.");
+      return;
+    }
     setAddDialogOpen(false);
     setAddForm({ ...emptyForm });
     fetchUsers();
@@ -557,8 +562,12 @@ export default function AdminPage() {
     }
     body.gender = editForm.gender === "" ? null : editForm.gender;
 
-    await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-
+    const res = await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data?.reason ?? "사용자 수정에 실패했습니다.");
+      return;
+    }
     setEditDialogOpen(false);
     setEditUser(null);
     fetchUsers();
@@ -1459,11 +1468,11 @@ export default function AdminPage() {
 
       {/* Add User Dialog */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader><DialogTitle>사용자 추가</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>역할</Label>
-              <Select value={addForm.role} onValueChange={(v) => setAddForm({ ...addForm, role: v as "STUDENT" | "TEACHER" })}>
+              <Select value={addForm.role} onValueChange={(v) => setAddForm({ ...addForm, role: v as "STUDENT" | "TEACHER", gender: "" })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="STUDENT">학생</SelectItem><SelectItem value="TEACHER">교사</SelectItem></SelectContent>
               </Select>
@@ -1480,7 +1489,7 @@ export default function AdminPage() {
                 <div>
                   <Label>성별 *</Label>
                   <div className="flex gap-4 mt-1">
-                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                    <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                       <input
                         type="radio"
                         name="add-gender"
@@ -1490,7 +1499,7 @@ export default function AdminPage() {
                       />
                       <span>남</span>
                     </label>
-                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                    <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                       <input
                         type="radio"
                         name="add-gender"
@@ -1512,7 +1521,7 @@ export default function AdminPage() {
                 <div>
                   <Label>성별 (선택)</Label>
                   <div className="flex items-center gap-4 mt-1">
-                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                    <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                       <input
                         type="radio"
                         name="add-gender"
@@ -1522,7 +1531,7 @@ export default function AdminPage() {
                       />
                       <span>남</span>
                     </label>
-                    <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                    <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                       <input
                         type="radio"
                         name="add-gender"
@@ -1550,7 +1559,7 @@ export default function AdminPage() {
 
       {/* Edit User Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader><DialogTitle>사용자 편집</DialogTitle></DialogHeader>
           {editUser && (
             <div className="space-y-3">
@@ -1566,7 +1575,7 @@ export default function AdminPage() {
                   <div>
                     <Label>성별 *</Label>
                     <div className="flex gap-4 mt-1">
-                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                         <input
                           type="radio"
                           name="edit-gender"
@@ -1576,7 +1585,7 @@ export default function AdminPage() {
                         />
                         <span>남</span>
                       </label>
-                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                         <input
                           type="radio"
                           name="edit-gender"
@@ -1598,7 +1607,7 @@ export default function AdminPage() {
                   <div>
                     <Label>성별 (선택)</Label>
                     <div className="flex items-center gap-4 mt-1">
-                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                         <input
                           type="radio"
                           name="edit-gender"
@@ -1608,7 +1617,7 @@ export default function AdminPage() {
                         />
                         <span>남</span>
                       </label>
-                      <label className="flex items-center gap-2 min-h-11 cursor-pointer">
+                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
                         <input
                           type="radio"
                           name="edit-gender"
