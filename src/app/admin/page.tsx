@@ -118,11 +118,6 @@ export default function AdminPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addForm, setAddForm] = useState({ ...emptyForm });
 
-  // Edit dialog
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editUser, setEditUser] = useState<User | null>(null);
-  const [editForm, setEditForm] = useState({ ...emptyForm });
-
   // Sheet import dialog
   const [sheetDialogOpen, setSheetDialogOpen] = useState(false);
   const [studentSheetUrl, setStudentSheetUrl] = useState("");
@@ -530,50 +525,6 @@ export default function AdminPage() {
     fetchUsers();
   }
 
-  function openEditDialog(user: User) {
-    setEditUser(user);
-    setEditForm({
-      role: user.role as "STUDENT" | "TEACHER",
-      email: user.email,
-      name: user.name,
-      grade: user.grade?.toString() || "",
-      classNum: user.classNum?.toString() || "",
-      number: user.number?.toString() || "",
-      subject: user.subject || "",
-      homeroom: user.homeroom || "",
-      position: user.position || "",
-      gender: user.gender ?? "",
-    });
-    setEditDialogOpen(true);
-  }
-
-  async function handleEditUser() {
-    if (!editUser) return;
-    if (editUser.role === "STUDENT" && editForm.gender !== "MALE" && editForm.gender !== "FEMALE") {
-      toast.error("학생은 성별을 선택해야 합니다.");
-      return;
-    }
-
-    const body: Record<string, unknown> = { id: editUser.id, name: editForm.name, email: editForm.email };
-    if (editUser.role === "STUDENT") {
-      body.grade = parseInt(editForm.grade); body.classNum = parseInt(editForm.classNum);
-      body.number = parseInt(editForm.number);
-    } else {
-      body.subject = editForm.subject; body.homeroom = editForm.homeroom; body.position = editForm.position;
-    }
-    body.gender = editForm.gender === "" ? null : editForm.gender;
-
-    const res = await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      toast.error(data?.reason ?? "사용자 수정에 실패했습니다.");
-      return;
-    }
-    setEditDialogOpen(false);
-    setEditUser(null);
-    fetchUsers();
-  }
-
   type EditableUserField =
     | "name" | "email"
     | "grade" | "classNum" | "number"
@@ -661,45 +612,6 @@ export default function AdminPage() {
   async function handleDeleteUser(id: number) {
     if (!confirm("정말 삭제하시겠습니까?")) return;
     await fetch(`/api/admin/users?id=${id}`, { method: "DELETE" });
-    fetchUsers();
-  }
-
-  const labelOfAdminLevel = (lvl: "NONE" | "SUBADMIN" | "ADMIN") =>
-    lvl === "ADMIN" ? "관리자" : lvl === "SUBADMIN" ? "서브관리자" : "일반";
-
-  async function handleAdminLevelChange(
-    user: User,
-    newLevel: "NONE" | "SUBADMIN" | "ADMIN"
-  ) {
-    if (newLevel === user.adminLevel) return;
-    const ok = window.confirm(
-      `"${user.name}"의 권한을 "${labelOfAdminLevel(newLevel)}"(으)로 변경하시겠습니까?`
-    );
-    if (!ok) return;
-
-    const res = await fetch("/api/admin/users", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        grade: user.grade ?? null,
-        classNum: user.classNum ?? null,
-        number: user.number ?? null,
-        subject: user.subject ?? null,
-        homeroom: user.homeroom ?? null,
-        position: user.position ?? null,
-        adminLevel: newLevel,
-      }),
-    });
-
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      toast.error(data?.reason ?? "권한 변경에 실패했습니다.");
-      return;
-    }
-    toast.success("권한 변경 완료. 대상자가 다음 로그인 시 적용됩니다.");
     fetchUsers();
   }
 
@@ -1786,93 +1698,6 @@ export default function AdminPage() {
             )}
             <Button onClick={handleAddUser} className="w-full">추가</Button>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit User Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto">
-          <DialogHeader><DialogTitle>사용자 편집</DialogTitle></DialogHeader>
-          {editUser && (
-            <div className="space-y-3">
-              <div><Label>이메일</Label><Input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} /></div>
-              <div><Label>이름</Label><Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} /></div>
-              {editUser.role === "STUDENT" && (
-                <>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div><Label>학년</Label><Input type="number" value={editForm.grade} onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })} /></div>
-                    <div><Label>반</Label><Input type="number" value={editForm.classNum} onChange={(e) => setEditForm({ ...editForm, classNum: e.target.value })} /></div>
-                    <div><Label>번호</Label><Input type="number" value={editForm.number} onChange={(e) => setEditForm({ ...editForm, number: e.target.value })} /></div>
-                  </div>
-                  <div>
-                    <Label>성별 *</Label>
-                    <div className="flex gap-4 mt-1">
-                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="edit-gender"
-                          value="MALE"
-                          checked={editForm.gender === "MALE"}
-                          onChange={() => setEditForm({ ...editForm, gender: "MALE" })}
-                        />
-                        <span>남</span>
-                      </label>
-                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="edit-gender"
-                          value="FEMALE"
-                          checked={editForm.gender === "FEMALE"}
-                          onChange={() => setEditForm({ ...editForm, gender: "FEMALE" })}
-                        />
-                        <span>여</span>
-                      </label>
-                    </div>
-                  </div>
-                </>
-              )}
-              {editUser.role === "TEACHER" && (
-                <>
-                  <div><Label>교과명</Label><Input value={editForm.subject} onChange={(e) => setEditForm({ ...editForm, subject: e.target.value })} /></div>
-                  <div><Label>담임 (예: 2-6)</Label><Input value={editForm.homeroom} onChange={(e) => setEditForm({ ...editForm, homeroom: e.target.value })} /></div>
-                  <div><Label>직책</Label><Input value={editForm.position} onChange={(e) => setEditForm({ ...editForm, position: e.target.value })} /></div>
-                  <div>
-                    <Label>성별 (선택)</Label>
-                    <div className="flex items-center gap-4 mt-1">
-                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="edit-gender"
-                          value="MALE"
-                          checked={editForm.gender === "MALE"}
-                          onChange={() => setEditForm({ ...editForm, gender: "MALE" })}
-                        />
-                        <span>남</span>
-                      </label>
-                      <label className="flex items-center gap-2 min-h-11 min-w-11 px-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="edit-gender"
-                          value="FEMALE"
-                          checked={editForm.gender === "FEMALE"}
-                          onChange={() => setEditForm({ ...editForm, gender: "FEMALE" })}
-                        />
-                        <span>여</span>
-                      </label>
-                      <button
-                        type="button"
-                        className="text-xs text-muted-foreground underline"
-                        onClick={() => setEditForm({ ...editForm, gender: "" })}
-                      >
-                        선택 해제
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-              <Button onClick={handleEditUser} className="w-full">저장</Button>
-            </div>
-          )}
         </DialogContent>
       </Dialog>
 
