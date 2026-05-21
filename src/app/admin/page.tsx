@@ -835,7 +835,7 @@ export default function AdminPage() {
   }, [dashboard]);
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-warm-subtle">
+    <div className="h-dvh flex flex-col overflow-hidden bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between shrink-0">
         <BrandMark variant="header" label="PosanMeal Admin" />
         <div className="flex items-center gap-2">
@@ -900,7 +900,7 @@ export default function AdminPage() {
                     </div>
                   )}
                 </div>
-                <div className="border rounded-lg overflow-auto max-h-[70vh]">
+                <div className="border rounded-lg overflow-auto max-h-[70dvh]">
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead className="sticky top-0 z-20">
                       <tr>
@@ -993,7 +993,7 @@ export default function AdminPage() {
                                   value={u.email}
                                   ariaLabel={`${u.name} 이메일`}
                                   disabled={!adminPerm.canWrite}
-                                  className="max-w-[16rem] overflow-hidden text-ellipsis"
+                                  className="max-w-[16rem] overflow-hidden text-ellipsis whitespace-nowrap"
                                   validate={(v) => {
                                     const t = v.trim();
                                     if (t === "" || !t.includes("@")) return "이메일 형식이 올바르지 않습니다.";
@@ -1040,7 +1040,7 @@ export default function AdminPage() {
                                   value={u.email}
                                   ariaLabel={`${u.name} 이메일`}
                                   disabled={!adminPerm.canWrite}
-                                  className="max-w-[16rem] overflow-hidden text-ellipsis"
+                                  className="max-w-[16rem] overflow-hidden text-ellipsis whitespace-nowrap"
                                   validate={(v) => {
                                     const t = v.trim();
                                     if (t === "" || !t.includes("@")) return "이메일 형식이 올바르지 않습니다.";
@@ -1278,7 +1278,7 @@ export default function AdminPage() {
                         </div>
                       ))}
                     </div>
-                    <div className="border rounded-lg overflow-auto max-h-[50vh]">
+                    <div className="border rounded-lg overflow-auto max-h-[50dvh]">
                       <table className="w-full text-sm whitespace-nowrap">
                         <thead className="sticky top-0 z-20">
                           <tr>

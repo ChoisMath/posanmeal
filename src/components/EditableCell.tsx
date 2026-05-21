@@ -129,7 +129,7 @@ export function EditableTextCell({
       aria-disabled={disabled}
     >
       <span
-        className={`block px-1 py-0.5 rounded min-h-7 whitespace-nowrap text-sm ${
+        className={`block px-1 py-1.5 rounded min-h-11 whitespace-nowrap text-sm ${
           disabled ? "text-muted-foreground" : "cursor-pointer hover:bg-muted/40"
         } ${value === "" && placeholder ? "text-muted-foreground italic" : ""}`}
       >
@@ -252,7 +252,7 @@ export function EditableSelectCell({
       aria-disabled={disabled}
     >
       <span
-        className={`block px-1 py-0.5 rounded min-h-7 whitespace-nowrap text-sm ${
+        className={`block px-1 py-1.5 rounded min-h-11 whitespace-nowrap text-sm ${
           disabled ? "text-muted-foreground" : "cursor-pointer hover:bg-muted/40"
         } ${value === "" ? "text-muted-foreground" : ""}`}
       >
