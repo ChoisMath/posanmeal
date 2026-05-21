@@ -207,7 +207,9 @@ export function EditableSelectCell({
           ref={selectRef}
           value={value}
           onChange={(e) => commitWith(e.target.value)}
-          onBlur={() => setEditing(false)}
+          onBlur={() => {
+            if (!committingRef.current) setEditing(false);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.preventDefault();
@@ -218,7 +220,9 @@ export function EditableSelectCell({
           aria-label={ariaLabel}
           className="w-full px-1 py-0.5 rounded ring-1 ring-primary bg-background outline-none whitespace-nowrap text-sm disabled:opacity-60"
         >
-          {emptyLabel != null && <option value="">{emptyLabel}</option>}
+          {(emptyLabel != null || value === "") && (
+            <option value="">{emptyLabel ?? "—"}</option>
+          )}
           {options.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
