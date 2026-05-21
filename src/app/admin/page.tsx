@@ -993,56 +993,203 @@ export default function AdminPage() {
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead className="sticky top-0 z-20">
                       <tr>
-                        <th className="p-2 text-left bg-muted">이름</th>
-                        <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "학년-반-번호" : "교과/담임"}</th>
-                        <th className="p-2 text-left bg-muted">{userFilter === "STUDENT" ? "이메일" : "직책"}</th>
-                        {userFilter === "STUDENT" && (
-                          <th className="p-2 text-left bg-muted whitespace-nowrap">성별</th>
+                        <th className="p-2 text-left bg-muted whitespace-nowrap">이름</th>
+                        {userFilter === "STUDENT" ? (
+                          <>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap w-12">학년</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap w-12">반</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap w-12">번호</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">이메일</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap w-14">성별</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">교과명</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">담임</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">이메일</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">직책</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap w-14">성별</th>
+                            <th className="p-2 text-left bg-muted whitespace-nowrap">권한</th>
+                          </>
                         )}
-                        <th className="p-2 text-left bg-muted whitespace-nowrap">권한</th>
-                        <th className="p-2 text-center w-24 bg-muted">관리</th>
+                        <th className="p-2 text-center w-24 bg-muted whitespace-nowrap">관리</th>
                       </tr>
                     </thead>
                     <tbody>
                       {users.map((u) => (
                         <tr key={u.id} className="border-t">
-                          <td className="p-2">{u.name}</td>
-                          <td className="p-2">{u.role === "STUDENT" ? `${u.grade}-${u.classNum}-${u.number}` : `${u.subject || "-"} / ${u.homeroom || "비담임"}`}</td>
-                          <td className="p-2">{u.role === "STUDENT" ? u.email : u.position || "-"}</td>
-                          {userFilter === "STUDENT" && (
-                            <td className="p-2 whitespace-nowrap">
-                              {u.gender ? (
-                                <span>{genderLabel(u.gender)}</span>
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </td>
-                          )}
-                          <td className="p-2 whitespace-nowrap">
-                            {u.role === "STUDENT" ? (
-                              <span className="text-muted-foreground">—</span>
-                            ) : (
-                              <select
-                                value={u.adminLevel}
-                                disabled={
-                                  !adminPerm.canWrite ||
-                                  (adminPerm.dbUserId === u.id && u.adminLevel === "ADMIN")
-                                }
-                                onChange={(e) => handleAdminLevelChange(u, e.target.value as "NONE" | "SUBADMIN" | "ADMIN")}
-                                className="rounded-md border px-2 py-1 text-sm bg-background disabled:opacity-60"
-                              >
-                                <option value="NONE">일반</option>
-                                <option value="SUBADMIN">서브관리자</option>
-                                <option value="ADMIN">관리자</option>
-                              </select>
-                            )}
+                          <td className="p-1 align-middle">
+                            <EditableTextCell
+                              value={u.name}
+                              ariaLabel={`${u.name} 이름`}
+                              disabled={!adminPerm.canWrite}
+                              validate={(v) => (v.trim() === "" ? "이름은 비울 수 없습니다." : null)}
+                              onSave={(next) => saveUserField(u.id, "name", next)}
+                            />
                           </td>
-                          <td className="p-2 text-center">
+                          {u.role === "STUDENT" ? (
+                            <>
+                              <td className="p-1 align-middle w-12">
+                                <EditableTextCell
+                                  value={u.grade?.toString() ?? ""}
+                                  inputType="number"
+                                  ariaLabel={`${u.name} 학년`}
+                                  disabled={!adminPerm.canWrite}
+                                  validate={(v) => {
+                                    const trimmed = v.trim();
+                                    const n = parseInt(trimmed, 10);
+                                    return isNaN(n) || n < 1 || !/^\d+$/.test(trimmed)
+                                      ? "학년은 1 이상 정수여야 합니다."
+                                      : null;
+                                  }}
+                                  onSave={(next) => saveUserField(u.id, "grade", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle w-12">
+                                <EditableTextCell
+                                  value={u.classNum?.toString() ?? ""}
+                                  inputType="number"
+                                  ariaLabel={`${u.name} 반`}
+                                  disabled={!adminPerm.canWrite}
+                                  validate={(v) => {
+                                    const trimmed = v.trim();
+                                    const n = parseInt(trimmed, 10);
+                                    return isNaN(n) || n < 1 || !/^\d+$/.test(trimmed)
+                                      ? "반은 1 이상 정수여야 합니다."
+                                      : null;
+                                  }}
+                                  onSave={(next) => saveUserField(u.id, "classNum", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle w-12">
+                                <EditableTextCell
+                                  value={u.number?.toString() ?? ""}
+                                  inputType="number"
+                                  ariaLabel={`${u.name} 번호`}
+                                  disabled={!adminPerm.canWrite}
+                                  validate={(v) => {
+                                    const trimmed = v.trim();
+                                    const n = parseInt(trimmed, 10);
+                                    return isNaN(n) || n < 1 || !/^\d+$/.test(trimmed)
+                                      ? "번호는 1 이상 정수여야 합니다."
+                                      : null;
+                                  }}
+                                  onSave={(next) => saveUserField(u.id, "number", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle">
+                                <EditableTextCell
+                                  value={u.email}
+                                  ariaLabel={`${u.name} 이메일`}
+                                  disabled={!adminPerm.canWrite}
+                                  className="max-w-[16rem] overflow-hidden text-ellipsis"
+                                  validate={(v) => {
+                                    const t = v.trim();
+                                    if (t === "" || !t.includes("@")) return "이메일 형식이 올바르지 않습니다.";
+                                    return null;
+                                  }}
+                                  onSave={(next) => saveUserField(u.id, "email", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle w-14">
+                                <EditableSelectCell
+                                  value={u.gender ?? ""}
+                                  ariaLabel={`${u.name} 성별`}
+                                  disabled={!adminPerm.canWrite}
+                                  options={[
+                                    { value: "MALE", label: "남" },
+                                    { value: "FEMALE", label: "여" },
+                                  ]}
+                                  onSave={(next) => saveUserField(u.id, "gender", next)}
+                                />
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="p-1 align-middle">
+                                <EditableTextCell
+                                  value={u.subject ?? ""}
+                                  ariaLabel={`${u.name} 교과명`}
+                                  disabled={!adminPerm.canWrite}
+                                  validate={(v) => (v.trim() === "" ? "교과명은 비울 수 없습니다." : null)}
+                                  onSave={(next) => saveUserField(u.id, "subject", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle">
+                                <EditableTextCell
+                                  value={u.homeroom ?? ""}
+                                  ariaLabel={`${u.name} 담임`}
+                                  disabled={!adminPerm.canWrite}
+                                  placeholder="비담임"
+                                  onSave={(next) => saveUserField(u.id, "homeroom", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle">
+                                <EditableTextCell
+                                  value={u.email}
+                                  ariaLabel={`${u.name} 이메일`}
+                                  disabled={!adminPerm.canWrite}
+                                  className="max-w-[16rem] overflow-hidden text-ellipsis"
+                                  validate={(v) => {
+                                    const t = v.trim();
+                                    if (t === "" || !t.includes("@")) return "이메일 형식이 올바르지 않습니다.";
+                                    return null;
+                                  }}
+                                  onSave={(next) => saveUserField(u.id, "email", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle">
+                                <EditableTextCell
+                                  value={u.position ?? ""}
+                                  ariaLabel={`${u.name} 직책`}
+                                  disabled={!adminPerm.canWrite}
+                                  validate={(v) => (v.trim() === "" ? "직책은 비울 수 없습니다." : null)}
+                                  onSave={(next) => saveUserField(u.id, "position", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle w-14">
+                                <EditableSelectCell
+                                  value={u.gender ?? ""}
+                                  ariaLabel={`${u.name} 성별`}
+                                  disabled={!adminPerm.canWrite}
+                                  emptyLabel="—"
+                                  options={[
+                                    { value: "MALE", label: "남" },
+                                    { value: "FEMALE", label: "여" },
+                                  ]}
+                                  onSave={(next) => saveUserField(u.id, "gender", next)}
+                                />
+                              </td>
+                              <td className="p-1 align-middle">
+                                <EditableSelectCell
+                                  value={u.adminLevel}
+                                  ariaLabel={`${u.name} 권한`}
+                                  disabled={
+                                    !adminPerm.canWrite ||
+                                    (adminPerm.dbUserId === u.id && u.adminLevel === "ADMIN")
+                                  }
+                                  options={[
+                                    { value: "NONE", label: "일반" },
+                                    { value: "SUBADMIN", label: "서브관리자" },
+                                    { value: "ADMIN", label: "관리자" },
+                                  ]}
+                                  onSave={(next) =>
+                                    saveAdminLevel(u.id, next as "NONE" | "SUBADMIN" | "ADMIN")
+                                  }
+                                />
+                              </td>
+                            </>
+                          )}
+                          <td className="p-2 text-center align-middle">
                             {adminPerm.canWrite && (
-                              <div className="flex justify-center gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(u)}><Pencil className="h-4 w-4" /></Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteUser(u.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDeleteUser(u.id)}
+                                aria-label={`${u.name} 삭제`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
                             )}
                           </td>
                         </tr>
