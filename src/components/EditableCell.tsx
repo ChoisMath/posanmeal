@@ -33,6 +33,7 @@ export function EditableTextCell({
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const committingRef = useRef(false);
 
   useEffect(() => {
     if (!editing) setDraft(value);
@@ -53,6 +54,7 @@ export function EditableTextCell({
   }
 
   async function commit() {
+    if (committingRef.current) return;
     if (draft === value) {
       setEditing(false);
       return;
@@ -62,13 +64,20 @@ export function EditableTextCell({
       toast.error(err);
       return;
     }
+    committingRef.current = true;
     setSaving(true);
-    const r = await onSave(draft);
-    setSaving(false);
-    if (r.ok) {
-      setEditing(false);
-    } else if (r.message) {
-      toast.error(r.message);
+    try {
+      const r = await onSave(draft);
+      if (r.ok) {
+        setEditing(false);
+      } else if (r.message) {
+        toast.error(r.message);
+      }
+    } catch {
+      toast.error("저장 중 오류가 발생했습니다.");
+    } finally {
+      setSaving(false);
+      committingRef.current = false;
     }
   }
 
