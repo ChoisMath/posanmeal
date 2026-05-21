@@ -589,9 +589,10 @@ export default function AdminPage() {
     let normalizedNext: unknown = next;
 
     if (field === "grade" || field === "classNum" || field === "number") {
-      const n = parseInt(next);
-      if (isNaN(n) || n < 1) {
-        const label = field === "grade" ? "학년" : field === "classNum" ? "반" : "번호";
+      const trimmed = next.trim();
+      const n = parseInt(trimmed, 10);
+      const label = field === "grade" ? "학년" : field === "classNum" ? "반" : "번호";
+      if (isNaN(n) || n < 1 || !/^\d+$/.test(trimmed)) {
         return { ok: false, message: `${label}은(는) 1 이상 정수여야 합니다.` };
       }
       body[field] = n;
@@ -619,7 +620,9 @@ export default function AdminPage() {
       return { ok: false, message: data?.reason ?? "수정에 실패했습니다." };
     }
     setUsers((prev) =>
-      prev.map((u) => (u.id === id ? ({ ...u, [field]: normalizedNext } as User) : u)),
+      prev.map((u) =>
+        u.id === id ? { ...u, [field]: normalizedNext as User[typeof field] } : u,
+      ),
     );
     return { ok: true };
   }
