@@ -104,8 +104,8 @@ prisma/
 
 | API | 메서드 | 인증 | 설명 |
 |-----|--------|------|------|
-| `/api/admin/users` | CRUD | 관리자 | 사용자 관리 |
-| `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 사용자 가져오기 |
+| `/api/admin/users` | CRUD | 관리자 | 사용자 관리 (GET은 `canReadAdmin` 가드, 응답에 `gender` 포함; POST/PUT은 학생 gender 필수 + role/gender 형식 검증) |
+| `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 사용자 가져오기 (학생 시트 6번째 열 `gender` 필수 파싱·검증, create/update upsert에 반영) |
 | `/api/admin/checkins` | GET | 관리자 | 월별 체크인 + `mealColumns`(승인된 BREAKFAST 신청일에만 조 컬럼 삽입) (category: teacher/1/2/3) |
 | `/api/admin/checkins/toggle` | POST | 관리자 | 체크인 수동 토글 (body.mealKind 필수, 학생: on/off, 교사: cycle WORK→PERSONAL→삭제) |
 | `/api/admin/dashboard` | GET | 관리자 | 당일 현황 + `hasBreakfast`/`breakfastStudentCount`/`dinnerStudentCount` |
@@ -115,7 +115,7 @@ prisma/
 | `/api/admin/applications/[id]/close` | POST | 관리자 | 신청 공고 강제 마감 |
 | `/api/admin/applications/[id]/registrations` | GET/POST | 관리자 | 공고별 신청자 목록 조회 / 관리자 직접 추가 |
 | `/api/admin/applications/[id]/registrations/[regId]` | PATCH | 관리자 | 신청 상태 변경 (APPROVED/CANCELLED) |
-| `/api/admin/applications/[id]/export` | GET | 관리자 | 신청 공고 신청명단 / 일괄신청 양식 엑셀 다운로드 |
+| `/api/admin/applications/[id]/export` | GET | 관리자 | 신청 공고 신청명단 / 일괄신청 양식 엑셀 다운로드 (신청명단 모드: 기본으로 "통계" 시트 추가; `?template=true` 양식 모드는 영향 없음) |
 | `/api/admin/applications/[id]/import` | POST | 관리자 | 엑셀 양식으로 일괄 신청 등록 |
 
 ### 시스템 / 동기화
@@ -132,7 +132,7 @@ prisma/
 | 모델 | 주요 필드 | 관계 | 비고 |
 |------|----------|------|------|
 | `Admin` | id, username, passwordHash | — | 현재 미사용, 환경변수 방식 대체 |
-| `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) |
+| `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, gender?(MALE/FEMALE), adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) — gender는 학생 필수(API 검증) / 교사 옵셔널, 컬럼은 nullable |
 | `MealApplication` | id, title, description?, type(DINNER/BREAKFAST/OTHER), applyStart/End(@db.Date), mealStart/End?(@db.Date), status(OPEN/CLOSED) | registrations | @@index([status]), @@index([applyStart,applyEnd]) |
 | `MealRegistration` | id, applicationId, userId, signature(Text), status(APPROVED/CANCELLED), cancelledAt?, cancelledBy?, addedBy? | application, user | @@unique([applicationId,userId]) — 취소 후 재신청 시 row 재활성화 |
 | `CheckIn` | id, userId, date(@db.Date), **mealKind(BREAKFAST/DINNER, NOT NULL)**, checkedAt, type(STUDENT/WORK/PERSONAL), source?(QR/ADMIN_MANUAL/LOCAL_SYNC) | user | @@unique([userId,date,mealKind]), @@index([date,mealKind]) |
@@ -144,6 +144,7 @@ prisma/
 - `CheckInSource`: QR, ADMIN_MANUAL, LOCAL_SYNC
 - `AdminLevel`: NONE, SUBADMIN, ADMIN
 - `MealKind`: BREAKFAST, DINNER
+- `Gender`: MALE, FEMALE
 
 > `MealPeriod` 는 제거됨. 신청 기간은 `MealApplication.applyStart/End` 로 관리.
 
@@ -188,6 +189,7 @@ prisma/
 | `src/lib/checkin-client.ts` | `/check` 페이지의 `/api/checkin` POST 재시도 클라이언트 (네트워크/5xx 3회) |
 | `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, breakfastDates)` (관리자 표·엑셀 헤더 생성용 — 조식 운영일에만 BREAKFAST 컬럼 삽입) |
 | `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
+| `src/lib/gender.ts` | `normalizeGender` / `genderLabel` / `GENDER_LABEL` — 시트 임포트 입력 정규화 + UI 표시용 라벨, 서버·클라이언트 공용 (테스트 `__tests__/gender.test.ts`) |
 
 ## §9 인증 / 미들웨어
 
@@ -241,6 +243,7 @@ prisma/
 - **mealKind 시간 분기**: `lib/meal-kind.ts:resolveMealKind(now, windows)` 가 KST 시각으로 BREAKFAST/DINNER/null 결정. QR 토큰 발급 시점에 mealKind를 페이로드에 박고 (3분 만료), 체크인은 `payload.mealKind ?? resolveMealKind(...)` 로 토큰 우선
 - **조식 컬럼 노출 조건**: 관리자 석식확인·당일현황 모두 `MealRegistrationDate` 중 status=APPROVED + application.type=BREAKFAST 인 날짜에만 BREAKFAST 컬럼/카드 부제 표시. `MealApplicationDate` (공고 허용일) 가 아닌 점 주의
 - **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트
+- **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
 
 ## §13 Project-Map Maintenance
 
