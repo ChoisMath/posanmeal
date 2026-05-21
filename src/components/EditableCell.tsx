@@ -62,6 +62,8 @@ export function EditableTextCell({
     const err = validate?.(draft);
     if (err) {
       toast.error(err);
+      // If blur triggered the commit, refocus so the user can correct or press Escape
+      setTimeout(() => inputRef.current?.focus(), 0);
       return;
     }
     committingRef.current = true;

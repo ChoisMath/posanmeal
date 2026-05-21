@@ -1022,7 +1022,7 @@ export default function AdminPage() {
                                   value={u.subject ?? ""}
                                   ariaLabel={`${u.name} 교과명`}
                                   disabled={!adminPerm.canWrite}
-                                  validate={(v) => (v.trim() === "" ? "교과명은 비울 수 없습니다." : null)}
+                                  placeholder="교과명 없음"
                                   onSave={(next) => saveUserField(u.id, "subject", next)}
                                 />
                               </td>
@@ -1054,7 +1054,7 @@ export default function AdminPage() {
                                   value={u.position ?? ""}
                                   ariaLabel={`${u.name} 직책`}
                                   disabled={!adminPerm.canWrite}
-                                  validate={(v) => (v.trim() === "" ? "직책은 비울 수 없습니다." : null)}
+                                  placeholder="직책 없음"
                                   onSave={(next) => saveUserField(u.id, "position", next)}
                                 />
                               </td>
