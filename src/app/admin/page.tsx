@@ -1009,7 +1009,7 @@ export default function AdminPage() {
                             </div>
                           )}
                           <p className="text-xs text-muted-foreground whitespace-nowrap">
-                            신청 {app.registrationCount}명 · 취소 {app.cancelledCount}명 · 개설일 {totalOpenDateCount}일
+                            신청 {app.registrationCount}명 · 취소 {app.cancelledCount}명 · 식수일 합계 {totalOpenDateCount}일
                           </p>
                           <div className="flex flex-wrap gap-2 pt-1">
                             <Link href={`/admin/applications/${app.id}/stats`}>
