@@ -66,7 +66,7 @@ export async function resyncRegistrations(tx: PrismaTx, applicationId: number) {
   const meals = await tx.mealApplicationMeal.findMany({ where: { applicationId } });
   const openDates = await tx.mealApplicationMealDate.findMany({ where: { applicationId } });
   const regs = await tx.mealRegistration.findMany({
-    where: { applicationId },
+    where: { applicationId, status: "APPROVED" },
     include: { user: { select: { grade: true } }, meals: true },
   });
 
