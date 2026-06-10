@@ -70,10 +70,12 @@ function isoToKstDateTime(iso: string): DateTimeState {
     hour12: false,
   }).formatToParts(date);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  // Select 옵션이 5분 단위이므로 비 5분 단위 데이터는 내림 처리
+  const roundedMinute = Math.floor(parseInt(get("minute"), 10) / 5) * 5;
   return {
     date: `${get("year")}-${get("month")}-${get("day")}`,
     hour: get("hour").padStart(2, "0"),
-    minute: get("minute").padStart(2, "0"),
+    minute: String(roundedMinute).padStart(2, "0"),
   };
 }
 
@@ -216,6 +218,10 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
 
   async function handleSave() {
     // 클라 검증
+    if (!applyStart.date || !applyEnd.date) {
+      toast.error("신청 기간 날짜를 입력해주세요.");
+      return;
+    }
     const startIso = `${applyStart.date}T${applyStart.hour}:${applyStart.minute}:00+09:00`;
     const endIso = `${applyEnd.date}T${applyEnd.hour}:${applyEnd.minute}:00+09:00`;
 
