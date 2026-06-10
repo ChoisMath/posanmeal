@@ -12,18 +12,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, Pencil, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, Users, Search, ChevronLeft, ChevronRight, AlertTriangle, Database } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, ChevronLeft, ChevronRight, AlertTriangle, Database, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
-import { DateMultiPicker } from "@/components/DateMultiPicker";
-import { BreakfastMatrixTable } from "@/components/BreakfastMatrixTable";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
 import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import { EditableTextCell, EditableSelectCell, type SaveResult } from "@/components/EditableCell";
-import { MEAL_LABEL } from "@/lib/meal-plan";
+import { MEAL_LABEL, METHOD_LABEL } from "@/lib/meal-plan";
+import { MEAL_THEME } from "@/components/meal/meal-ui";
 import {
   validateMealWindows,
   mapServerError,
@@ -51,7 +50,6 @@ interface MealAppItem {
   title: string;
   description: string | null;
   status: string;
-  // 신규 식사별 구조
   startYear: number | null;
   startMonth: number | null;
   monthCount: number | null;
@@ -60,26 +58,6 @@ interface MealAppItem {
   meals: MealAppMealItem[];
   registrationCount: number;
   cancelledCount: number;
-  // 구 필드 (하위 호환 — 새 API는 반환하지 않음, undefined 처리 필요)
-  type?: string;
-  applyStart?: string;
-  applyEnd?: string;
-  mealStart?: string | null;
-  mealEnd?: string | null;
-  allowedDates?: Array<{ date: string }>;
-  allowedDatesCount?: number;
-  dailyCounts?: Record<string, number>;
-}
-
-interface RegistrationItem {
-  id: number;
-  userId: number;
-  status: string;
-  createdAt: string;
-  addedBy: string | null;
-  cancelledBy: string | null;
-  user: { id: number; name: string; grade: number; classNum: number; number: number };
-  selectedDates?: Array<{ date: string }>;
 }
 
 interface DashboardRecord {
@@ -109,17 +87,6 @@ const emptyForm = {
   gender: "" as "" | "MALE" | "FEMALE",
 };
 
-const emptyAppForm = {
-  title: "",
-  description: "",
-  type: "DINNER",
-  applyStart: "",
-  applyEnd: "",
-  mealStart: "",
-  mealEnd: "",
-  allowedDates: [] as string[],
-};
-
 const sheetImportGuides = [
   { label: "학생", columns: ["email", "grade", "classNum", "number", "name", "gender"] },
   { label: "교사", columns: ["email", "subject", "homeroom", "position", "name"] },
@@ -145,22 +112,6 @@ export default function AdminPage() {
 
   // Applications (신청관리)
   const [apps, setApps] = useState<MealAppItem[]>([]);
-  const [appDialogOpen, setAppDialogOpen] = useState(false);
-  const [editingApp, setEditingApp] = useState<MealAppItem | null>(null);
-  const [regDialogOpen, setRegDialogOpen] = useState(false);
-  const [selectedAppForReg, setSelectedAppForReg] = useState<MealAppItem | null>(null);
-  const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
-  const [showCancelled, setShowCancelled] = useState(false);
-  const [addStudentDialogOpen, setAddStudentDialogOpen] = useState(false);
-  const [regGradeFilter, setRegGradeFilter] = useState<number | null>(null);
-  const [studentSearch, setStudentSearch] = useState("");
-  const [appForm, setAppForm] = useState(emptyAppForm);
-
-  // Excel import/export dialog
-  const [excelDialogOpen, setExcelDialogOpen] = useState(false);
-  const [excelApp, setExcelApp] = useState<MealAppItem | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<{ added: number; updated?: number; skippedExisting?: number; skippedNotFound: number; skippedInvalid?: number } | null>(null);
 
   // System settings
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
@@ -247,7 +198,7 @@ export default function AdminPage() {
   }
 
   function handleWindowsChange(
-    meal: "breakfast" | "dinner",
+    meal: "breakfast" | "lunch" | "dinner",
     edge: "start" | "end",
     value: string,
   ) {
@@ -664,173 +615,12 @@ export default function AdminPage() {
     if (res.ok) { const data = await res.json(); setApps(data.applications); }
   }
 
-  async function fetchRegistrations(appId: number) {
-    const res = await fetch(`/api/admin/applications/${appId}/registrations`);
-    if (res.ok) { const data = await res.json(); setRegistrations(data.registrations); }
-  }
-
-  function buildAppPayload() {
-    const base = {
-      title: appForm.title,
-      description: appForm.description,
-      type: appForm.type,
-    };
-    if (appForm.type === "BREAKFAST") {
-      return {
-        ...base,
-        applyStart: appForm.applyStart,
-        applyEnd: appForm.applyEnd,
-        allowedDates: appForm.allowedDates,
-      };
-    }
-    if (appForm.type === "DINNER") {
-      return {
-        ...base,
-        applyStart: appForm.applyStart,
-        applyEnd: appForm.applyEnd,
-        mealStart: appForm.mealStart,
-        mealEnd: appForm.mealEnd,
-      };
-    }
-    return { ...base, applyStart: appForm.applyStart, applyEnd: appForm.applyEnd };
-  }
-
-  async function handleCreateApp() {
-    const res = await fetch("/api/admin/applications", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildAppPayload()),
-    });
-    if (res.ok) { toast.success("공고가 생성되었습니다."); setAppDialogOpen(false); setAppForm(emptyAppForm); fetchApps(); }
-    else { const d = await res.json(); toast.error(d.error || "생성 실패"); }
-  }
-
-  async function handleUpdateApp() {
-    if (!editingApp) return;
-    const res = await fetch(`/api/admin/applications/${editingApp.id}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildAppPayload()),
-    });
-    if (res.ok) { toast.success("공고가 수정되었습니다."); setAppDialogOpen(false); setEditingApp(null); setAppForm(emptyAppForm); fetchApps(); }
-    else { const d = await res.json(); toast.error(d.error || "수정 실패"); }
-  }
-
   async function handleDeleteApp(app: MealAppItem) {
     if (!confirm(`"${app.title}" 공고를 삭제하시겠습니까? 모든 신청 데이터가 삭제됩니다.`)) return;
     const res = await fetch(`/api/admin/applications/${app.id}`, { method: "DELETE" });
     if (res.ok) { toast.success("공고가 삭제되었습니다."); fetchApps(); }
     else { const d = await res.json(); toast.error(d.error || "삭제 실패"); }
   }
-
-  async function handleCancelReg(regId: number) {
-    if (!selectedAppForReg) return;
-    const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${regId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "CANCELLED" }),
-    });
-    if (res.ok) { toast.success("신청이 취소되었습니다."); fetchRegistrations(selectedAppForReg.id); fetchApps(); }
-    else { toast.error("취소 실패"); }
-  }
-
-  async function handleRestoreReg(regId: number) {
-    if (!selectedAppForReg) return;
-    const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${regId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "APPROVED" }),
-    });
-    if (res.ok) { toast.success("신청이 복원되었습니다."); fetchRegistrations(selectedAppForReg.id); fetchApps(); }
-    else { toast.error("복원 실패"); }
-  }
-
-  async function handleAdminAddStudent(userId: number) {
-    if (!selectedAppForReg) return;
-    const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
-    });
-    if (res.ok) { toast.success("학생이 추가되었습니다."); setAddStudentDialogOpen(false); fetchRegistrations(selectedAppForReg.id); fetchApps(); }
-    else { const d = await res.json(); toast.error(d.error || "추가 실패"); }
-  }
-
-  function openExcelDialog(app: MealAppItem) {
-    setExcelApp(app);
-    setUploadResult(null);
-    setExcelDialogOpen(true);
-  }
-
-  async function handleDownloadExcel(appId: number, title: string, template: boolean) {
-    const url = template
-      ? `/api/admin/applications/${appId}/export?template=true`
-      : `/api/admin/applications/${appId}/export`;
-    const res = await fetch(url);
-    if (!res.ok) { toast.error("다운로드 실패"); return; }
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = blobUrl;
-    a.download = template ? `${title}_양식.xlsx` : `${title}_신청명단.xlsx`;
-    a.click(); URL.revokeObjectURL(blobUrl);
-  }
-
-  async function handleUploadExcel(appId: number, file: File) {
-    setUploading(true);
-    setUploadResult(null);
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch(`/api/admin/applications/${appId}/import`, {
-        method: "POST",
-        body: formData,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUploadResult(data);
-        toast.success(`${data.added}명 등록 완료`);
-        fetchApps();
-        if (selectedAppForReg && selectedAppForReg.id === appId) {
-          fetchRegistrations(appId);
-        }
-      } else {
-        const data = await res.json();
-        toast.error(data.error || "업로드 실패");
-      }
-    } catch {
-      toast.error("네트워크 오류가 발생했습니다.");
-    }
-    setUploading(false);
-  }
-
-  const visibleRegs = useMemo(() => {
-    return registrations
-      .filter((r) => showCancelled || r.status !== "CANCELLED")
-      .filter((r) => regGradeFilter === null || r.user.grade === regGradeFilter)
-      .sort((a, b) => {
-        if (a.user.grade !== b.user.grade) return a.user.grade - b.user.grade;
-        if (a.user.classNum !== b.user.classNum) return a.user.classNum - b.user.classNum;
-        return a.user.number - b.user.number;
-      });
-  }, [registrations, showCancelled, regGradeFilter]);
-
-  const approvedCount = useMemo(
-    () => visibleRegs.filter((r) => r.status !== "CANCELLED").length,
-    [visibleRegs],
-  );
-
-  // Filtered students for add-student dialog
-  const filteredStudentsForAdd = useMemo(() => {
-    if (!addStudentDialogOpen) return [];
-    const registeredIds = new Set(registrations.map((r) => r.userId));
-    return users
-      .filter((u) => u.role === "STUDENT" && !registeredIds.has(u.id))
-      .filter((u) => {
-        if (!studentSearch) return true;
-        const s = studentSearch.toLowerCase();
-        return u.name.toLowerCase().includes(s) || `${u.grade}-${u.classNum}-${u.number}`.includes(s);
-      })
-      .sort((a, b) => {
-        if ((a.grade || 0) !== (b.grade || 0)) return (a.grade || 0) - (b.grade || 0);
-        if ((a.classNum || 0) !== (b.classNum || 0)) return (a.classNum || 0) - (b.classNum || 0);
-        return (a.number || 0) - (b.number || 0);
-      });
-  }, [addStudentDialogOpen, users, registrations, studentSearch]);
 
   const {
     grade1Count, grade2Count, grade3Count,
@@ -1141,81 +931,109 @@ export default function AdminPage() {
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-auto">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold">석식 신청 공고</h3>
-                  <Button size="sm" onClick={() => { setEditingApp(null); setAppForm(emptyAppForm); setAppDialogOpen(true); }}>
-                    <Plus className="h-4 w-4 mr-1" /> 공고
-                  </Button>
+                  <h3 className="font-semibold">신청 공고</h3>
+                  <Link href="/admin/applications/new">
+                    <Button size="sm" className="min-h-11 whitespace-nowrap">
+                      <Plus className="h-4 w-4 mr-1" /> 새 공고 작성
+                    </Button>
+                  </Link>
                 </div>
                 {apps.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8">등록된 공고가 없습니다.</p>
                 ) : (
                   <div className="space-y-3">
-                    {apps.map((app) => (
-                      <div key={app.id} className="border rounded-xl p-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                              <Badge variant="outline" className="text-xs">
-                                {app.type === "DINNER" ? "석식" : app.type === "BREAKFAST" ? "조식" : "기타"}
-                              </Badge>
-                              {(() => {
-                                const today = new Date().toISOString().slice(0, 10);
-                                const applyEnd = (app.applyEndAt ?? app.applyEnd ?? "")?.slice(0, 10);
-                                const applyStart = (app.applyStartAt ?? app.applyStart ?? "")?.slice(0, 10);
-                                if (applyStart && today >= applyStart && today <= applyEnd) {
-                                  return <Badge variant="default" className="text-xs">신청중</Badge>;
-                                } else if (app.status === "OPEN") {
-                                  return <Badge className="text-xs bg-green-600 hover:bg-green-700">급식중</Badge>;
-                                } else {
-                                  return <Badge variant="secondary" className="text-xs">마감</Badge>;
-                                }
-                              })()}
-                              <span className="font-medium">{app.title}</span>
-                            </div>
-                            {(app.applyStartAt ?? app.applyStart) && (
-                              <p className="text-xs text-muted-foreground whitespace-nowrap">
-                                신청: {new Date(app.applyStartAt ?? app.applyStart!).toLocaleDateString("ko-KR")} ~ {new Date(app.applyEndAt ?? app.applyEnd!).toLocaleDateString("ko-KR")}
-                              </p>
-                            )}
-                            <p className="text-xs text-muted-foreground mt-1">
-                              신청 {app.registrationCount}명 (취소 {app.cancelledCount}명)
-                            </p>
+                    {apps.map((app) => {
+                      const nowKst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+                      const applyStart = app.applyStartAt ? new Date(app.applyStartAt) : null;
+                      const applyEnd = app.applyEndAt ? new Date(app.applyEndAt) : null;
+
+                      let statusBadge: React.ReactNode;
+                      if (app.status === "CLOSED") {
+                        statusBadge = <Badge className="text-xs bg-red-500 hover:bg-red-600 whitespace-nowrap">마감</Badge>;
+                      } else if (applyStart && applyEnd && nowKst >= applyStart && nowKst <= applyEnd) {
+                        statusBadge = <Badge className="text-xs bg-green-600 hover:bg-green-700 whitespace-nowrap">신청중</Badge>;
+                      } else if (applyStart && nowKst < applyStart) {
+                        statusBadge = <Badge variant="secondary" className="text-xs whitespace-nowrap">대기</Badge>;
+                      } else {
+                        statusBadge = <Badge className="text-xs bg-orange-500 hover:bg-orange-600 whitespace-nowrap">기간종료</Badge>;
+                      }
+
+                      const totalOpenDateCount = app.meals.reduce((s, m) => s + m.openDateCount, 0);
+
+                      return (
+                        <div key={app.id} className="card-elevated rounded-2xl border-0 p-4 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {statusBadge}
+                            <span className="font-semibold">{app.title}</span>
                           </div>
-                          <div className="flex gap-1 shrink-0">
-                            <Button variant="ghost" size="icon" className="h-8 w-8" title="명단" onClick={() => {
-                              setSelectedAppForReg(app);
-                              fetchRegistrations(app.id);
-                              setRegGradeFilter(null);
-                              setRegDialogOpen(true);
-                            }}>
-                              <Users className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" title="Excel" onClick={() => openExcelDialog(app)}>
-                              <Download className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" title="수정" onClick={() => {
-                              setEditingApp(app);
-                              setAppForm({
-                                title: app.title,
-                                description: app.description || "",
-                                type: app.type ?? "DINNER",
-                                applyStart: (app.applyStartAt ?? app.applyStart ?? "").slice(0, 10),
-                                applyEnd: (app.applyEndAt ?? app.applyEnd ?? "").slice(0, 10),
-                                mealStart: app.mealStart ? app.mealStart.slice(0, 10) : "",
-                                mealEnd: app.mealEnd ? app.mealEnd.slice(0, 10) : "",
-                                allowedDates: (app.allowedDates ?? []).map((d) => d.date.slice(0, 10)),
-                              });
-                              setAppDialogOpen(true);
-                            }}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" title="삭제" onClick={() => handleDeleteApp(app)}>
-                              <Trash2 className="h-4 w-4 text-destructive" />
+                          {(applyStart || applyEnd) && (
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">
+                              {applyStart ? formatDateTimeKST(applyStart) : "—"} ~ {applyEnd ? formatDateTimeKST(applyEnd) : "—"}
+                            </p>
+                          )}
+                          {app.meals.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {app.meals.map((m) => {
+                                const kind = m.mealKind as "BREAKFAST" | "LUNCH" | "DINNER";
+                                if (m.method === "NONE") {
+                                  return (
+                                    <span key={kind} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground whitespace-nowrap">
+                                      {MEAL_LABEL[kind]} 신청불가
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span
+                                    key={kind}
+                                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${MEAL_THEME[kind].side} ${MEAL_THEME[kind].text}`}
+                                  >
+                                    {MEAL_LABEL[kind]} {m.price.toLocaleString()}원·{METHOD_LABEL[m.method as keyof typeof METHOD_LABEL] ?? m.method}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <p className="text-xs text-muted-foreground whitespace-nowrap">
+                            신청 {app.registrationCount}명 · 취소 {app.cancelledCount}명 · 개설일 {totalOpenDateCount}일
+                          </p>
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <Link href={`/admin/applications/${app.id}/stats`}>
+                              <Button variant="outline" size="sm" className="min-h-9 whitespace-nowrap">
+                                <ExternalLink className="h-3.5 w-3.5 mr-1" /> 통계·명단
+                              </Button>
+                            </Link>
+                            <Link href={`/admin/applications/${app.id}/edit`}>
+                              <Button variant="outline" size="sm" className="min-h-9 whitespace-nowrap">
+                                수정
+                              </Button>
+                            </Link>
+                            {app.status === "OPEN" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="min-h-9 whitespace-nowrap"
+                                onClick={async () => {
+                                  if (!confirm(`"${app.title}" 공고를 마감하시겠습니까?`)) return;
+                                  const res = await fetch(`/api/admin/applications/${app.id}/close`, { method: "POST" });
+                                  if (res.ok) { toast.success("공고가 마감되었습니다."); fetchApps(); }
+                                  else { const d = await res.json(); toast.error(d.error || "마감 실패"); }
+                                }}
+                              >
+                                마감
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="min-h-9 whitespace-nowrap text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteApp(app)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" /> 삭제
                             </Button>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -1478,13 +1296,13 @@ export default function AdminPage() {
                     {windowsForm && (
                       <>
                         <div className="mt-3 space-y-2">
-                          {(["breakfast", "dinner"] as const).map((meal) => (
+                          {(["breakfast", "lunch", "dinner"] as const).map((meal) => (
                             <div
                               key={meal}
                               className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3"
                             >
                               <span className="font-medium text-sm whitespace-nowrap w-12">
-                                {meal === "breakfast" ? "조식" : "석식"}
+                                {meal === "breakfast" ? "조식" : meal === "lunch" ? "중식" : "석식"}
                               </span>
                               <div className="flex items-center gap-2">
                                 <Label htmlFor={`${meal}-start`} className="text-sm whitespace-nowrap">
@@ -1720,258 +1538,6 @@ export default function AdminPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Application Create/Edit Dialog */}
-      <Dialog open={appDialogOpen} onOpenChange={(open) => { setAppDialogOpen(open); if (!open) { setEditingApp(null); setAppForm(emptyAppForm); } }}>
-        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editingApp ? "공고 수정" : "새 공고"}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>유형</Label>
-              <div className="flex gap-2 mt-1">
-                {[{ value: "DINNER", label: "석식" }, { value: "BREAKFAST", label: "조식" }, { value: "OTHER", label: "기타" }].map(({ value, label }) => (
-                  <Button key={value} variant={appForm.type === value ? "default" : "outline"} size="sm" onClick={() => setAppForm({ ...appForm, type: value })}>{label}</Button>
-                ))}
-              </div>
-            </div>
-            <div><Label>제목</Label><Input value={appForm.title} onChange={(e) => setAppForm({ ...appForm, title: e.target.value })} className="rounded-xl" placeholder="예: 4월 석식 신청" /></div>
-            <div><Label>설명 (선택)</Label><textarea className="flex w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" rows={2} value={appForm.description} onChange={(e) => setAppForm({ ...appForm, description: e.target.value })} placeholder="공고 설명..." /></div>
-            <div className="grid grid-cols-2 gap-2">
-                <div><Label>신청 시작일</Label><Input type="date" value={appForm.applyStart} onChange={(e) => setAppForm({ ...appForm, applyStart: e.target.value })} className="rounded-xl" /></div>
-                <div><Label>신청 마감일</Label><Input type="date" value={appForm.applyEnd} onChange={(e) => setAppForm({ ...appForm, applyEnd: e.target.value })} className="rounded-xl" /></div>
-            </div>
-            {appForm.type === "DINNER" && (
-              <div className="grid grid-cols-2 gap-2">
-                <div><Label>급식 시작일</Label><Input type="date" value={appForm.mealStart} onChange={(e) => setAppForm({ ...appForm, mealStart: e.target.value })} className="rounded-xl" /></div>
-                <div><Label>급식 종료일</Label><Input type="date" value={appForm.mealEnd} onChange={(e) => setAppForm({ ...appForm, mealEnd: e.target.value })} className="rounded-xl" /></div>
-              </div>
-            )}
-            {appForm.type === "OTHER" && (
-              <p className="text-xs text-muted-foreground">명단 수합용 공고입니다.</p>
-            )}
-            {appForm.type === "BREAKFAST" && (
-              <div>
-                <Label>운영 날짜</Label>
-                <DateMultiPicker
-                  value={new Set(appForm.allowedDates)}
-                  onChange={(dates) => setAppForm({ ...appForm, allowedDates: Array.from(dates).sort() })}
-                />
-              </div>
-            )}
-            <Button onClick={editingApp ? handleUpdateApp : handleCreateApp} className="w-full">{editingApp ? "수정" : "생성"}</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Registration List Dialog */}
-      <Dialog
-        open={regDialogOpen}
-        onOpenChange={(open) => {
-          setRegDialogOpen(open);
-          if (!open) {
-            setSelectedAppForReg(null);
-            setRegistrations([]);
-            setRegGradeFilter(null);
-            setShowCancelled(false);
-          }
-        }}
-      >
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between gap-2 flex-wrap">
-              <span>{selectedAppForReg?.title} — 명단 ({approvedCount}명)</span>
-              <div className="flex gap-1">
-                <Button size="sm" variant="outline" onClick={() => { setStudentSearch(""); setAddStudentDialogOpen(true); fetchUsers(); }}>
-                  <Plus className="h-4 w-4 mr-1" /> 학생 추가
-                </Button>
-                {selectedAppForReg && (
-                  <Button size="sm" variant="outline" onClick={() => openExcelDialog(selectedAppForReg)}>
-                    <Download className="h-4 w-4 mr-1" /> Excel
-                  </Button>
-                )}
-              </div>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex gap-2 mb-3 items-center flex-wrap">
-            {[{ value: null, label: "전체" }, { value: 1, label: "1학년" }, { value: 2, label: "2학년" }, { value: 3, label: "3학년" }].map(({ value, label }) => (
-              <Button
-                key={label}
-                variant={regGradeFilter === value ? "default" : "outline"}
-                size="sm"
-                onClick={() => setRegGradeFilter(value)}
-                className="whitespace-nowrap"
-              >
-                {label}
-              </Button>
-            ))}
-            <Button
-              variant={showCancelled ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowCancelled((v) => !v)}
-              className="ml-auto whitespace-nowrap"
-            >
-              취소자 보기
-            </Button>
-          </div>
-          {selectedAppForReg?.type === "BREAKFAST" && (
-            <div className="mb-3">
-              <BreakfastMatrixTable
-                allowedDates={(selectedAppForReg.allowedDates ?? []).map((d) => d.date.slice(0, 10) as string)}
-                students={visibleRegs.map((r) => r.user)}
-                registrations={visibleRegs}
-                showCancelled={showCancelled}
-                onCellClick={async (registrationId, date, selected) => {
-                  const res = await fetch(`/api/admin/applications/${selectedAppForReg.id}/registrations/${registrationId}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(selected ? { removeDates: [date] } : { addDates: [date] }),
-                  });
-                  if (res.ok) fetchRegistrations(selectedAppForReg.id);
-                  else toast.error("날짜 변경에 실패했습니다.");
-                }}
-              />
-            </div>
-          )}
-          <div className="flex-1 min-h-0 overflow-auto">
-            <table className="w-full text-sm whitespace-nowrap">
-              <thead className="sticky top-0 z-20">
-                <tr>
-                  <th className="p-2 text-left bg-muted whitespace-nowrap">연번</th>
-                  <th className="p-2 text-left bg-muted whitespace-nowrap">학년</th>
-                  <th className="p-2 text-left bg-muted whitespace-nowrap">반</th>
-                  <th className="p-2 text-left bg-muted whitespace-nowrap">번호</th>
-                  <th className="p-2 text-left bg-muted whitespace-nowrap">이름</th>
-                  <th className="p-2 text-left bg-muted whitespace-nowrap">신청일</th>
-                  <th className="p-2 text-center bg-muted whitespace-nowrap">상태</th>
-                  <th className="p-2 text-center bg-muted whitespace-nowrap">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  let seq = 0;
-                  return visibleRegs.map((r) => {
-                    const n = r.status !== "CANCELLED" ? ++seq : null;
-                    return (
-                      <tr key={r.id} className="border-t">
-                        <td className="p-2 whitespace-nowrap">{n ?? "—"}</td>
-                        <td className="p-2 whitespace-nowrap">{r.user.grade}</td>
-                        <td className="p-2 whitespace-nowrap">{r.user.classNum}</td>
-                        <td className="p-2 whitespace-nowrap">{r.user.number}</td>
-                        <td className="p-2 whitespace-nowrap">{r.user.name}</td>
-                        <td className="p-2 whitespace-nowrap">{new Date(r.createdAt).toLocaleDateString("ko-KR")}</td>
-                        <td className="p-2 text-center whitespace-nowrap">
-                          <Badge variant={r.status === "CANCELLED" ? "secondary" : "default"} className="text-xs">
-                            {r.status === "CANCELLED" ? "취소" : r.addedBy === "ADMIN" ? "관리자추가" : "승인"}
-                          </Badge>
-                        </td>
-                        <td className="p-2 text-center whitespace-nowrap">
-                          {r.status === "CANCELLED" ? (
-                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleRestoreReg(r.id)}>복원</Button>
-                          ) : (
-                            <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive" onClick={() => handleCancelReg(r.id)}>취소</Button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  });
-                })()}
-              </tbody>
-            </table>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Student Dialog */}
-      <Dialog open={addStudentDialogOpen} onOpenChange={setAddStudentDialogOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>학생 추가</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="이름 또는 학번으로 검색..."
-                value={studentSearch}
-                onChange={(e) => setStudentSearch(e.target.value)}
-                className="pl-9 rounded-xl"
-              />
-            </div>
-            <div className="max-h-64 overflow-y-auto border rounded-lg">
-              {filteredStudentsForAdd.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">검색 결과가 없습니다.</p>
-              ) : (
-                filteredStudentsForAdd.map((u) => (
-                  <button
-                    key={u.id}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted border-b last:border-b-0 flex justify-between items-center"
-                    onClick={() => handleAdminAddStudent(u.id)}
-                  >
-                    <span>{u.grade}-{u.classNum}-{u.number} {u.name}</span>
-                    <Plus className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Excel Import/Export Dialog */}
-      <Dialog open={excelDialogOpen} onOpenChange={(open) => { setExcelDialogOpen(open); if (!open) { setExcelApp(null); setUploadResult(null); } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>{excelApp?.title} — Excel</DialogTitle>
-          </DialogHeader>
-          {excelApp && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold">다운로드</h4>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleDownloadExcel(excelApp.id, excelApp.title, false)}>
-                    <Download className="h-4 w-4 mr-1" /> 신청명단
-                  </Button>
-                  <Button variant="outline" size="sm" className="flex-1" onClick={() => handleDownloadExcel(excelApp.id, excelApp.title, true)}>
-                    <FileSpreadsheet className="h-4 w-4 mr-1" /> 양식 다운로드
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">양식: 전체 학생 목록 + 신청 여부(O) 포함</p>
-              </div>
-
-              <div className="border-t pt-4 space-y-2">
-                <h4 className="text-sm font-semibold">일괄 업로드</h4>
-                <p className="text-xs text-muted-foreground">양식의 조식/중식/석식 열에 O 표시된 학생을 일괄 등록·갱신합니다.</p>
-                <Input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  disabled={uploading}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (file) await handleUploadExcel(excelApp.id, file);
-                    e.target.value = "";
-                  }}
-                />
-                {uploading && <p className="text-sm text-amber-600">업로드 중...</p>}
-                {uploadResult && (
-                  <div className="text-sm space-y-0.5 p-3 bg-muted rounded-lg">
-                    <p className="font-medium">업로드 결과</p>
-                    <p>신규 등록: <span className="font-bold text-green-600">{uploadResult.added}명</span></p>
-                    {(uploadResult.updated ?? 0) > 0 && (
-                      <p>갱신: <span className="text-muted-foreground">{uploadResult.updated}명</span></p>
-                    )}
-                    {(uploadResult.skippedExisting ?? 0) > 0 && (
-                      <p>기존 신청자 (제외): <span className="text-muted-foreground">{uploadResult.skippedExisting}명</span></p>
-                    )}
-                    {uploadResult.skippedNotFound > 0 && (
-                      <p>미등록 학생 (제외): <span className="text-red-500">{uploadResult.skippedNotFound}명</span></p>
-                    )}
-                    {(uploadResult.skippedInvalid ?? 0) > 0 && (
-                      <p>처리 불가 (제외): <span className="text-red-500">{uploadResult.skippedInvalid}명</span></p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
