@@ -12,13 +12,23 @@ import {
   METHOD_LABEL,
   monthsOf,
   monthKeyOf,
-  expandWeekdays,
+  weekdayOf,
   calcMealFee,
   studentNumberOf,
   type MealKind,
   type MealApplyMethod,
 } from "@/lib/meal-plan";
 import { useUser } from "@/hooks/useUser";
+
+// 서버(resolveRegistrationSelections)와 동일하게 월별 요일 선택을 날짜로 전개
+function expandWeekdaysPerMonth(
+  openDates: string[],
+  weekdays: Record<string, Set<number>>,
+): string[] {
+  return openDates
+    .filter((d) => weekdays[monthKeyOf(d)]?.has(weekdayOf(d)) ?? false)
+    .sort();
+}
 
 interface ApplicationMeal {
   mealKind: MealKind;
@@ -311,10 +321,7 @@ export function StudentApplicationView({
     } else if (meal.method === "DATE") {
       dayCount = st.dates.size;
     } else if (meal.method === "WEEKDAY") {
-      const allWds: number[] = [];
-      for (const wds of Object.values(st.weekdays)) allWds.push(...wds);
-      const expanded = expandWeekdays(meal.openDates, allWds);
-      dayCount = expanded.length;
+      dayCount = expandWeekdaysPerMonth(meal.openDates, st.weekdays).length;
     }
     totalFee += calcMealFee(meal.price, dayCount, st.exempt);
   }
@@ -401,9 +408,7 @@ export function StudentApplicationView({
           dayCount = st.dates.size;
           derivedSelectedDates = st.dates;
         } else if (meal.method === "WEEKDAY") {
-          const allWds: number[] = [];
-          for (const wds of Object.values(st.weekdays)) allWds.push(...wds);
-          const expanded = expandWeekdays(meal.openDates, allWds);
+          const expanded = expandWeekdaysPerMonth(meal.openDates, st.weekdays);
           dayCount = expanded.length;
           derivedSelectedDates = new Set(expanded);
         }

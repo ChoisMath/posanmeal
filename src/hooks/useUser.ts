@@ -13,19 +13,7 @@ interface UserProfile {
   homeroom: string | null;
   position: string | null;
   photoUrl: string | null;
-  registrations?: Array<{
-    id: number;
-    createdAt: string;
-    selectedDates?: Array<{ date: string }>;
-    application: {
-      id: number;
-      title: string;
-      type: string;
-      mealStart: string | null;
-      mealEnd: string | null;
-      allowedDates?: Array<{ date: string }>;
-    };
-  }>;
+  todayMeals?: Array<"BREAKFAST" | "LUNCH" | "DINNER">;
 }
 
 export function useUser() {

@@ -1,6 +1,9 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { todayKST } from "@/lib/timezone";
+import { dateKeyToUtcDate } from "@/lib/date-range";
+import { MEAL_KINDS } from "@/lib/meal-plan";
 
 export async function GET() {
   const session = await auth();
@@ -8,36 +11,35 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.dbUserId },
-    select: {
-      id: true, email: true, name: true, role: true,
-      grade: true, classNum: true, number: true,
-      subject: true, homeroom: true, position: true,
-      photoUrl: true,
-      registrations: {
-        where: { status: "APPROVED" },
-        select: {
-          id: true,
-          createdAt: true,
-          application: {
-            select: {
-              id: true,
-              title: true,
-              type: true,
-              mealStart: true,
-              mealEnd: true,
-              allowedDates: { orderBy: { date: "asc" } },
-            },
-          },
-          selectedDates: { orderBy: { date: "asc" } },
-        },
-        orderBy: { createdAt: "desc" as const },
+  const [user, todayRows] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: session.user.dbUserId },
+      select: {
+        id: true, email: true, name: true, role: true,
+        grade: true, classNum: true, number: true,
+        subject: true, homeroom: true, position: true,
+        photoUrl: true,
       },
-    },
-  });
+    }),
+    prisma.mealRegistrationMealDate.findMany({
+      where: {
+        date: dateKeyToUtcDate(todayKST()),
+        registration: { userId: session.user.dbUserId, status: "APPROVED" },
+      },
+      select: { mealKind: true },
+      distinct: ["mealKind"],
+    }),
+  ]);
 
-  return NextResponse.json({ user });
+  if (!user) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const todayMeals = MEAL_KINDS.filter((kind) =>
+    todayRows.some((r) => r.mealKind === kind),
+  );
+
+  return NextResponse.json({ user: { ...user, todayMeals } });
 }
 
 export async function PUT(request: Request) {

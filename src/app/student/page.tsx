@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,17 +35,9 @@ export default function StudentPage() {
 
   if (!user) return <PageLoadingSkeleton />;
 
-  const today = new Date().toISOString().slice(0, 10);
-
-  // QR 탭: APPLIED 신청이 있는 공고 중 오늘이 급식 기간인 것 (기존 로직 유지)
-  const activeRegistrations = (user.registrations || []).filter((r) => {
-    if (r.application.type === "BREAKFAST") {
-      return (r.selectedDates ?? []).some((date) => date.date.slice(0, 10) === today);
-    }
-    if (!r.application.mealStart || !r.application.mealEnd) return false;
-    return today >= r.application.mealStart.slice(0, 10) && today <= r.application.mealEnd.slice(0, 10);
-  });
-  const hasActiveMeal = activeRegistrations.length > 0;
+  // QR 탭: 오늘 식사 자격(승인된 신청의 확정 날짜)이 있는 식사 목록
+  const todayMeals = user.todayMeals ?? [];
+  const hasActiveMeal = todayMeals.length > 0;
 
   const hasApplicationTab = applications.length > 0;
   const pendingCount = applications.filter((a) => a.myStatus !== "APPLIED").length;
@@ -54,10 +47,11 @@ export default function StudentPage() {
     setMyHistoryOpen(true);
     try {
       const res = await fetch("/api/applications/my");
-      if (res.ok) {
-        const json = await res.json();
-        setMyRegistrations(json.registrations ?? []);
-      }
+      if (!res.ok) throw new Error("failed");
+      const json = await res.json();
+      setMyRegistrations(json.registrations ?? []);
+    } catch {
+      toast.error("신청 내역을 불러오지 못했습니다.");
     } finally {
       setMyLoading(false);
     }
@@ -218,17 +212,13 @@ export default function StudentPage() {
                       {user.grade}학년 {user.classNum}반 {user.number}번{" "}
                       {user.name}
                     </p>
-                    {activeRegistrations.map((r) => (
-                      <p key={r.id} className="text-xs text-muted-foreground whitespace-nowrap">
-                        {r.application.type === "BREAKFAST"
-                          ? `${r.application.title}: 오늘 조식`
-                          : `${r.application.title}: ${new Date(r.application.mealStart!).toLocaleDateString("ko-KR")} ~ ${new Date(r.application.mealEnd!).toLocaleDateString("ko-KR")}`}
-                      </p>
-                    ))}
+                    <p className="text-xs text-muted-foreground whitespace-nowrap">
+                      오늘 식사: {todayMeals.map((k) => MEAL_LABEL[k]).join(" · ")}
+                    </p>
                   </>
                 ) : (
                   <p className="text-muted-foreground py-8">
-                    현재 석식 신청 기간이 아닙니다.
+                    오늘 신청된 식사가 없습니다.
                   </p>
                 )}
               </CardContent>
