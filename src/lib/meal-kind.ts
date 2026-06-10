@@ -1,4 +1,4 @@
-export type MealKind = "BREAKFAST" | "DINNER";
+export type MealKind = "BREAKFAST" | "LUNCH" | "DINNER";
 
 export interface MealWindow {
   start: string;
@@ -7,11 +7,13 @@ export interface MealWindow {
 
 export interface MealWindows {
   breakfast: MealWindow;
+  lunch: MealWindow;
   dinner: MealWindow;
 }
 
 export const DEFAULT_MEAL_WINDOWS: MealWindows = {
   breakfast: { start: "04:00", end: "10:00" },
+  lunch: { start: "10:30", end: "14:00" },
   dinner: { start: "15:00", end: "21:00" },
 };
 
@@ -26,6 +28,7 @@ export function resolveMealKind(now: Date, windows: MealWindows): MealKind | nul
     minutes >= toMinutes(window.start) && minutes < toMinutes(window.end);
 
   if (inWindow(windows.breakfast)) return "BREAKFAST";
+  if (inWindow(windows.lunch)) return "LUNCH";
   if (inWindow(windows.dinner)) return "DINNER";
   return null;
 }
@@ -36,6 +39,8 @@ export async function isStudentEligibleToday(
   todayDate: Date,
 ): Promise<boolean> {
   const { prisma } = await import("@/lib/prisma");
+
+  if (mealKind === "LUNCH") return false;
 
   if (mealKind === "DINNER") {
     const registration = await prisma.mealRegistration.findFirst({

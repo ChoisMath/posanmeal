@@ -11,7 +11,7 @@ export interface LocalCheckInRow {
   userLabel: string;
   name: string;
   date: string;
-  mealKind: "BREAKFAST" | "DINNER";
+  mealKind: "BREAKFAST" | "LUNCH" | "DINNER";
   type: "STUDENT" | "WORK" | "PERSONAL";
   checkedAt: string;
 }

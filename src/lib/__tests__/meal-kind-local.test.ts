@@ -3,6 +3,7 @@ import { resolveMealKindLocal, type MealWindows } from "@/lib/meal-kind-local";
 
 const windows: MealWindows = {
   breakfast: { start: "04:00", end: "10:00" },
+  lunch: { start: "10:30", end: "14:00" },
   dinner: { start: "15:00", end: "21:00" },
 };
 
@@ -16,6 +17,13 @@ describe("resolveMealKindLocal", () => {
   it("uses the same window rules on the client", () => {
     expect(resolveMealKindLocal(at(7), windows)).toBe("BREAKFAST");
     expect(resolveMealKindLocal(at(18), windows)).toBe("DINNER");
-    expect(resolveMealKindLocal(at(12), windows)).toBeNull();
+  });
+
+  it("returns LUNCH inside the lunch window", () => {
+    expect(resolveMealKindLocal(at(12), windows)).toBe("LUNCH");
+  });
+
+  it("returns null in the gap between lunch and dinner", () => {
+    expect(resolveMealKindLocal(at(14, 30), windows)).toBeNull();
   });
 });

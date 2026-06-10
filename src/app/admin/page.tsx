@@ -174,6 +174,10 @@ export default function AdminPage() {
             start: data.mealWindows.breakfast.start,
             end: data.mealWindows.breakfast.end,
           },
+          lunch: {
+            start: data.mealWindows.lunch?.start ?? "10:30",
+            end: data.mealWindows.lunch?.end ?? "14:00",
+          },
           dinner: {
             start: data.mealWindows.dinner.start,
             end: data.mealWindows.dinner.end,
@@ -231,6 +235,7 @@ export default function AdminPage() {
     if (!windowsForm) return;
     const next: MealWindowsForm = {
       breakfast: { ...windowsForm.breakfast },
+      lunch: { ...windowsForm.lunch },
       dinner: { ...windowsForm.dinner },
     };
     next[meal][edge] = value;

@@ -268,7 +268,7 @@ async function exportDaily(dateParam: string) {
     number: number | null;
     name: string;
     subject: string | null;
-    mealKind: "BREAKFAST" | "DINNER";
+    mealKind: "BREAKFAST" | "LUNCH" | "DINNER";
     checkedAt: Date;
     source: "QR" | "ADMIN_MANUAL" | "LOCAL_SYNC" | null;
   };

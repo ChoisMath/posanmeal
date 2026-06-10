@@ -3,6 +3,7 @@ import { resolveMealKind, type MealWindows } from "@/lib/meal-kind";
 
 const windows: MealWindows = {
   breakfast: { start: "04:00", end: "10:00" },
+  lunch: { start: "10:30", end: "14:00" },
   dinner: { start: "15:00", end: "21:00" },
 };
 
@@ -29,8 +30,15 @@ describe("resolveMealKind", () => {
   });
 
   it("returns null outside meal windows", () => {
-    expect(resolveMealKind(at("12:30"), windows)).toBeNull();
     expect(resolveMealKind(at("21:00"), windows)).toBeNull();
     expect(resolveMealKind(at("23:30"), windows)).toBeNull();
+  });
+
+  it("returns LUNCH inside the lunch window", () => {
+    expect(resolveMealKind(new Date("2026-06-11T12:00:00+09:00"), windows)).toBe("LUNCH");
+  });
+
+  it("returns null in the gap between lunch and dinner", () => {
+    expect(resolveMealKind(new Date("2026-06-11T14:30:00+09:00"), windows)).toBeNull();
   });
 });

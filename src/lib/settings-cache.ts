@@ -24,6 +24,10 @@ export async function getCachedSettings() {
         start: map.breakfast_window_start || DEFAULT_MEAL_WINDOWS.breakfast.start,
         end: map.breakfast_window_end || DEFAULT_MEAL_WINDOWS.breakfast.end,
       },
+      lunch: {
+        start: map.lunch_window_start || DEFAULT_MEAL_WINDOWS.lunch.start,
+        end: map.lunch_window_end || DEFAULT_MEAL_WINDOWS.lunch.end,
+      },
       dinner: {
         start: map.dinner_window_start || DEFAULT_MEAL_WINDOWS.dinner.start,
         end: map.dinner_window_end || DEFAULT_MEAL_WINDOWS.dinner.end,

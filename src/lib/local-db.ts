@@ -14,7 +14,7 @@ export interface LocalCheckIn {
   id?: number; // auto-increment
   userId: number;
   date: string; // "YYYY-MM-DD"
-  mealKind: "BREAKFAST" | "DINNER";
+  mealKind: "BREAKFAST" | "LUNCH" | "DINNER";
   checkedAt: string; // ISO string
   type: "STUDENT" | "WORK" | "PERSONAL";
   synced: number; // 0 = not synced, 1 = synced (IndexedDB keys don't support booleans)
@@ -23,7 +23,7 @@ export interface LocalCheckIn {
 export interface LocalEligibleEntry {
   userId: number;
   date: string;
-  mealKind: "BREAKFAST" | "DINNER";
+  mealKind: "BREAKFAST" | "LUNCH" | "DINNER";
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -153,7 +153,7 @@ export async function replaceAllUsers(users: LocalUser[]): Promise<void> {
 export async function isEligible(
   userId: number,
   date: string,
-  mealKind: "BREAKFAST" | "DINNER",
+  mealKind: "BREAKFAST" | "LUNCH" | "DINNER",
 ): Promise<boolean> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -188,7 +188,7 @@ export async function replaceAllEligibleEntries(entries: LocalEligibleEntry[]): 
 export async function getCheckIn(
   userId: number,
   date: string,
-  mealKind: "BREAKFAST" | "DINNER",
+  mealKind: "BREAKFAST" | "LUNCH" | "DINNER",
 ): Promise<LocalCheckIn | undefined> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

@@ -83,6 +83,10 @@ export async function GET() {
         start: settingsMap.breakfast_window_start || "04:00",
         end: settingsMap.breakfast_window_end || "10:00",
       },
+      lunch: {
+        start: settingsMap.lunch_window_start || "10:30",
+        end: settingsMap.lunch_window_end || "14:00",
+      },
       dinner: {
         start: settingsMap.dinner_window_start || "15:00",
         end: settingsMap.dinner_window_end || "21:00",
