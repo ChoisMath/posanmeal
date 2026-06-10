@@ -703,7 +703,7 @@ export default function AdminPage() {
             {!adminPerm.isSubadmin && (
               <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청관리</TabsTrigger>
             )}
-            <TabsTrigger value="meals" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">석식 확인</TabsTrigger>
+            <TabsTrigger value="meals" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">급식 확인</TabsTrigger>
             <TabsTrigger value="dashboard" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">당일 현황</TabsTrigger>
             {!adminPerm.isSubadmin && (
               <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
