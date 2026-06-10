@@ -8,6 +8,10 @@ import type { MealKind } from "@/lib/meal-plan";
 const MEAL_KINDS_ORDER: MealKind[] = ["BREAKFAST", "LUNCH", "DINNER"];
 
 function isOMarked(raw: unknown): boolean {
+  // 혼합 서식 셀은 exceljs가 richText 객체로 반환한다
+  if (raw != null && typeof raw === "object" && "richText" in raw) {
+    raw = (raw as { richText: { text: string }[] }).richText.map((r) => r.text).join("");
+  }
   const v = String(raw ?? "").trim();
   return v === "O" || v === "o" || v === "ㅇ";
 }
