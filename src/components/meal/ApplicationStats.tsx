@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { Fragment, useState, useRef } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { toast } from "sonner";
@@ -186,6 +186,11 @@ function AddDialog({ applicationId, appMeals, existingUserIds, onAdded }: AddDia
     }
     if (selectedMealKinds.size === 0) {
       toast.error("신청할 식사를 선택해주세요.");
+      return;
+    }
+    // DATE/WEEKDAY 식사는 개설일 데이터가 있어야 전체 적용 payload를 만들 수 있다
+    if (!appDetail?.application) {
+      toast.error("개설일 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.");
       return;
     }
 
@@ -844,10 +849,10 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                         const theme = MEAL_THEME[m.mealKind];
                         if (m.exemptionSelectable) {
                           return (
-                            <>
-                              <th key={`${m.mealKind}-exempt`} className={`px-3 py-1 text-center text-xs whitespace-nowrap ${theme.text}`}>면제</th>
-                              <th key={`${m.mealKind}-days`} className={`px-3 py-1 text-center text-xs whitespace-nowrap ${theme.text}`}>일수</th>
-                            </>
+                            <Fragment key={m.mealKind}>
+                              <th className={`px-3 py-1 text-center text-xs whitespace-nowrap ${theme.text}`}>면제</th>
+                              <th className={`px-3 py-1 text-center text-xs whitespace-nowrap ${theme.text}`}>일수</th>
+                            </Fragment>
                           );
                         }
                         return <th key={`${m.mealKind}-days`} className={`px-3 py-1 text-center text-xs whitespace-nowrap ${theme.text}`}>일수</th>;
@@ -868,10 +873,10 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                           const theme = MEAL_THEME[ms.kind];
                           if (ms.exemptionSelectable) {
                             return (
-                              <>
-                                <td key={`${ms.kind}-exempt`} className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.exemptCount}</td>
-                                <td key={`${ms.kind}-days`} className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.dayTotal}일</td>
-                              </>
+                              <Fragment key={ms.kind}>
+                                <td className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.exemptCount}</td>
+                                <td className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.dayTotal}일</td>
+                              </Fragment>
                             );
                           }
                           return (
@@ -894,10 +899,10 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                           const theme = MEAL_THEME[ms.kind];
                           if (ms.exemptionSelectable) {
                             return (
-                              <>
-                                <td key={`${ms.kind}-exempt`} className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.exemptCount}</td>
-                                <td key={`${ms.kind}-days`} className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.dayTotal}일</td>
-                              </>
+                              <Fragment key={ms.kind}>
+                                <td className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.exemptCount}</td>
+                                <td className={`px-3 py-1.5 text-center whitespace-nowrap tabular-nums text-xs ${theme.cell}`}>{ms.dayTotal}일</td>
+                              </Fragment>
                             );
                           }
                           return (
