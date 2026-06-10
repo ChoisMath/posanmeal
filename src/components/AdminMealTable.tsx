@@ -134,13 +134,19 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
             </th>
             {mealColumns.map((column) => {
               const weekend = isWeekend(column.day);
+              const mealHeaderClass =
+                column.mealKind === "BREAKFAST"
+                  ? "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                  : column.mealKind === "LUNCH"
+                    ? "bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300"
+                    : "bg-muted text-muted-foreground";
               return (
                 <th
                   key={column.key}
                   className={`px-1 py-2 text-center font-medium border-b min-w-[28px] ${
                     weekend
                       ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
-                      : "bg-muted text-muted-foreground"
+                      : mealHeaderClass
                   }`}
                   style={colHoverStyle(column.day)}
                   onMouseEnter={() => setHoveredDay(column.day)}
@@ -148,7 +154,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   title={column.label}
                 >
                   <span>{column.day}</span>
-                  <span className="block text-[10px] leading-none text-muted-foreground">{column.shortLabel}</span>
+                  <span className="block text-[10px] leading-none opacity-70">{column.shortLabel}</span>
                 </th>
               );
             })}
@@ -202,7 +208,11 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                             ? checkIn.type === "WORK"
                               ? "bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold"
                               : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
-                            : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
+                            : column.mealKind === "BREAKFAST"
+                              ? "bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 font-bold"
+                              : column.mealKind === "LUNCH"
+                                ? "bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 font-bold"
+                                : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                           : weekend
                             ? "bg-red-50/50 dark:bg-red-950/30"
                             : ""

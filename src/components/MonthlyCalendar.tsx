@@ -10,7 +10,7 @@ interface CheckInRecord {
   date: string;
   checkedAt: string;
   type: string;
-  mealKind?: "BREAKFAST" | "DINNER" | null;
+  mealKind?: "BREAKFAST" | "LUNCH" | "DINNER" | null;
 }
 
 interface MonthlyCalendarProps {
@@ -37,13 +37,14 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
 
-  interface DaySlot { breakfast?: CheckInRecord; dinner?: CheckInRecord }
+  interface DaySlot { breakfast?: CheckInRecord; lunch?: CheckInRecord; dinner?: CheckInRecord }
   const checkInMap = useMemo(() => {
     const map = new Map<string, DaySlot>();
     checkIns.forEach((c) => {
       const key = c.date.slice(0, 10);
       const slot = map.get(key) ?? {};
       if (c.mealKind === "BREAKFAST") slot.breakfast = c;
+      else if (c.mealKind === "LUNCH") slot.lunch = c;
       else slot.dinner = c;
       map.set(key, slot);
     });
@@ -88,8 +89,9 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
           const day = i + 1;
           const slot = getDaySlot(day);
           const dinner = slot?.dinner;
+          const lunch = slot?.lunch;
           const breakfast = slot?.breakfast;
-          const primary = dinner ?? breakfast;
+          const primary = dinner ?? lunch ?? breakfast;
           const cellBg = !primary
             ? ""
             : primary.type === "WORK"
@@ -101,6 +103,11 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
               {breakfast && (
                 <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
                   {showType ? "조식 " : ""}{formatTime(breakfast.checkedAt)}
+                </div>
+              )}
+              {lunch && (
+                <div className="text-[10px] font-medium text-orange-600 dark:text-orange-400">
+                  {showType ? "중식 " : ""}{formatTime(lunch.checkedAt)}
                 </div>
               )}
               {dinner && (
