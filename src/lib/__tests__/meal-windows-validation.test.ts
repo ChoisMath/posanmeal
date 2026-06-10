@@ -17,12 +17,12 @@ describe("validateMealWindows", () => {
     expect(validateMealWindows(valid)).toBeNull();
   });
 
-  it("returns null when breakfast end is exactly equal to dinner start (adjacent allowed)", () => {
+  it("returns null when windows are exactly adjacent (no gap between them)", () => {
     expect(
       validateMealWindows({
         breakfast: { start: "04:00", end: "10:00" },
-        lunch: { start: "10:30", end: "14:00" },
-        dinner: { start: "10:00", end: "21:00" },
+        lunch: { start: "10:00", end: "14:00" },
+        dinner: { start: "14:00", end: "21:00" },
       }),
     ).toBeNull();
   });
@@ -74,7 +74,7 @@ describe("validateMealWindows", () => {
         lunch: { start: "10:30", end: "14:00" },
         dinner: { start: "15:00", end: "21:00" },
       }),
-    ).toBe("조식과 석식 시간대가 겹칠 수 없습니다");
+    ).toBe("식사 시간대가 서로 겹칠 수 없습니다");
   });
 
   it("rejects overlapping windows (dinner spills into breakfast)", () => {
@@ -84,7 +84,22 @@ describe("validateMealWindows", () => {
         lunch: { start: "10:30", end: "14:00" },
         dinner: { start: "07:00", end: "21:00" },
       }),
-    ).toBe("조식과 석식 시간대가 겹칠 수 없습니다");
+    ).toBe("식사 시간대가 서로 겹칠 수 없습니다");
+  });
+
+  it("중식 형식 오류", () => {
+    expect(validateMealWindows({ ...valid, lunch: { start: "10시", end: "14:00" } }))
+      .toBe("시간을 HH:MM 형식으로 입력해주세요");
+  });
+
+  it("조식과 중식 겹침", () => {
+    expect(validateMealWindows({ ...valid, breakfast: { start: "04:00", end: "11:00" }, lunch: { start: "10:30", end: "14:00" } }))
+      .toBe("식사 시간대가 서로 겹칠 수 없습니다");
+  });
+
+  it("중식과 석식 겹침", () => {
+    expect(validateMealWindows({ ...valid, lunch: { start: "10:30", end: "15:30" } }))
+      .toBe("식사 시간대가 서로 겹칠 수 없습니다");
   });
 });
 
@@ -103,7 +118,7 @@ describe("mapServerError", () => {
 
   it("maps the overlap message", () => {
     expect(mapServerError("Meal windows must not overlap")).toBe(
-      "조식과 석식 시간대가 겹칠 수 없습니다",
+      "식사 시간대가 서로 겹칠 수 없습니다",
     );
   });
 
