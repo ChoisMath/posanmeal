@@ -2,6 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canWriteAdmin } from "@/lib/permissions";
+import { resolveRegistrationSelections, writeRegistration } from "@/lib/meal-plan-server";
+import type { MealKind } from "@/lib/meal-plan";
+
+const MEAL_KINDS_ORDER: MealKind[] = ["BREAKFAST", "LUNCH", "DINNER"];
+
+function isOMarked(raw: unknown): boolean {
+  const v = String(raw ?? "").trim();
+  return v === "O" || v === "o" || v === "ㅇ";
+}
 
 export async function POST(
   request: Request,
@@ -39,77 +48,105 @@ export async function POST(
     return NextResponse.json({ error: "시트를 찾을 수 없습니다." }, { status: 400 });
   }
 
-  // 기존 등록된 학생 ID Set + 전체 학생 목록 병렬 조회
-  const [existingRegs, allStudents] = await Promise.all([
-    prisma.mealRegistration.findMany({
-      where: { applicationId, status: "APPROVED" },
-      select: { userId: true },
-    }),
+  // 공고 식사 설정 + 전체 학생 목록 병렬 조회
+  const [appMealsConfig, allStudents] = await Promise.all([
+    prisma.mealApplicationMeal.findMany({ where: { applicationId } }),
     prisma.user.findMany({
       where: { role: "STUDENT" },
       select: { id: true, grade: true, classNum: true, number: true, name: true },
     }),
   ]);
-  const existingUserIds = new Set(existingRegs.map((r) => r.userId));
+
+  // method가 NONE이 아닌 식사 종류 집합
+  const availableKinds = new Set<MealKind>(
+    appMealsConfig
+      .filter((m) => m.method !== "NONE")
+      .map((m) => m.mealKind as MealKind),
+  );
 
   // 학년-반-번호 → userId 맵
-  const studentMap = new Map<string, number>();
+  const studentMap = new Map<string, { id: number; grade: number }>();
   for (const s of allStudents) {
     if (s.grade != null && s.classNum != null && s.number != null) {
-      studentMap.set(`${s.grade}-${s.classNum}-${s.number}`, s.id);
+      studentMap.set(`${s.grade}-${s.classNum}-${s.number}`, { id: s.id, grade: s.grade });
     }
   }
 
-  // Excel 파싱: 4행부터, 신청 컬럼(E)이 "O"인 행만 처리
-  const toRegister: number[] = [];
-  let skippedExisting = 0;
+  // Excel 파싱: 3행부터
+  // 1행: 헤더, 2행: 안내문, 3행~: 학생 데이터
+  // A=학년 B=반 C=번호 D=이름 E=조식 F=중식 G=석식
+
+  type RowEntry = {
+    userId: number;
+    grade: number;
+    markedKinds: MealKind[];
+  };
+
+  const toProcess: RowEntry[] = [];
   let skippedNotFound = 0;
 
   sheet.eachRow((row, rowNumber) => {
-    if (rowNumber < 4) return; // 1: 제목, 2: 빈줄, 3: 헤더
+    if (rowNumber < 3) return;
 
     const grade = row.getCell(1).value;
     const classNum = row.getCell(2).value;
     const number = row.getCell(3).value;
-    const applyMark = String(row.getCell(5).value || "").trim().toUpperCase();
 
-    if (applyMark !== "O") return;
+    // 열 E(5)=조식, F(6)=중식, G(7)=석식
+    const markedKinds = MEAL_KINDS_ORDER.filter((kind, ki) => {
+      if (!availableKinds.has(kind)) return false;
+      return isOMarked(row.getCell(5 + ki).value);
+    });
+
+    // 하나도 O 없으면 건너뜀 (기존 신청 변경 안 함)
+    if (markedKinds.length === 0) return;
 
     const key = `${grade}-${classNum}-${number}`;
-    const userId = studentMap.get(key);
-
-    if (!userId) {
+    const found = studentMap.get(key);
+    if (!found) {
       skippedNotFound++;
       return;
     }
 
-    if (existingUserIds.has(userId)) {
-      skippedExisting++;
-      return;
-    }
-
-    toRegister.push(userId);
+    toProcess.push({ userId: found.id, grade: found.grade, markedKinds });
   });
 
-  // 일괄 등록
   let added = 0;
-  if (toRegister.length > 0) {
-    const result = await prisma.mealRegistration.createMany({
-      data: toRegister.map((userId) => ({
-        applicationId,
-        userId,
-        signature: "",
-        addedBy: "ADMIN",
-      })),
-      skipDuplicates: true,
-    });
-    added = result.count;
+  let updated = 0;
+  let skippedInvalid = 0;
+
+  for (const entry of toProcess) {
+    const meals = entry.markedKinds.map((kind) => ({
+      mealKind: kind,
+      applied: true as const,
+      exempt: false as const,
+    }));
+
+    const resolved = await resolveRegistrationSelections(applicationId, entry.grade, meals);
+    if (!resolved.ok) {
+      skippedInvalid++;
+      continue;
+    }
+
+    try {
+      const result = await prisma.$transaction((tx) =>
+        writeRegistration(tx, applicationId, entry.userId, "(관리자 일괄등록)", resolved.resolved, "ADMIN"),
+      );
+      if (result.created) {
+        added++;
+      } else {
+        updated++;
+      }
+    } catch {
+      skippedInvalid++;
+    }
   }
 
   return NextResponse.json({
     added,
-    skippedExisting,
+    updated,
     skippedNotFound,
-    total: toRegister.length + skippedExisting + skippedNotFound,
+    skippedInvalid,
+    total: toProcess.length + skippedNotFound,
   });
 }

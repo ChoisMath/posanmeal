@@ -34,60 +34,94 @@ export async function GET(
 
     const ExcelJS = (await import("exceljs")).default;
 
-    // ── Template mode (Task 14: 건드리지 말 것) ──
+    // ── Template mode: 일괄신청 양식 (조식/중식/석식 3열) ──
     if (isTemplate) {
-      const registrations = await prisma.mealRegistration.findMany({
-        where: { applicationId: appId, status: "APPROVED" },
-        include: {
-          user: { select: { id: true, name: true, grade: true, classNum: true, number: true, gender: true } },
-        },
-      });
-      registrations.sort((a, b) =>
-        (a.user.grade ?? 0) - (b.user.grade ?? 0) ||
-        (a.user.classNum ?? 0) - (b.user.classNum ?? 0) ||
-        (a.user.number ?? 0) - (b.user.number ?? 0)
-      );
+      const MEAL_KINDS_ORDER: MealKind[] = ["BREAKFAST", "LUNCH", "DINNER"];
+      const MEAL_LABEL_KO: Record<MealKind, string> = {
+        BREAKFAST: "조식",
+        LUNCH: "중식",
+        DINNER: "석식",
+      };
 
-      const allStudents = await prisma.user.findMany({
-        where: { role: "STUDENT" },
-        select: { id: true, name: true, grade: true, classNum: true, number: true },
-        orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }],
+      // 공고 식사 설정 + 학생 목록 + 기존 APPROVED 신청 병렬 조회
+      const [appMealsConfig, allStudents, approvedRegs] = await Promise.all([
+        prisma.mealApplicationMeal.findMany({ where: { applicationId: appId } }),
+        prisma.user.findMany({
+          where: { role: "STUDENT" },
+          select: { id: true, name: true, grade: true, classNum: true, number: true },
+          orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }],
+        }),
+        prisma.mealRegistration.findMany({
+          where: { applicationId: appId, status: "APPROVED" },
+          include: { meals: { select: { mealKind: true, applied: true } } },
+        }),
+      ]);
+
+      // userId → 신청된 mealKind Set
+      const approvedMealsByUser = new Map<number, Set<MealKind>>();
+      for (const reg of approvedRegs) {
+        const kinds = new Set<MealKind>();
+        for (const m of reg.meals) {
+          if (m.applied) kinds.add(m.mealKind as MealKind);
+        }
+        approvedMealsByUser.set(reg.userId, kinds);
+      }
+
+      // 열 헤더: NONE이거나 미설정인 식사는 "(신청불가)" 표기
+      const mealMethodMap = new Map<MealKind, string>();
+      for (const m of appMealsConfig) {
+        mealMethodMap.set(m.mealKind as MealKind, m.method);
+      }
+      const mealHeaders = MEAL_KINDS_ORDER.map((kind) => {
+        const method = mealMethodMap.get(kind);
+        return method && method !== "NONE"
+          ? MEAL_LABEL_KO[kind]
+          : `${MEAL_LABEL_KO[kind]}(신청불가)`;
       });
 
-      const registeredIds = new Set(registrations.map((r) => r.user.id));
       const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet("신청양식");
-      sheet.mergeCells(1, 1, 1, 5);
-      const titleCell = sheet.getCell(1, 1);
-      titleCell.value = `${application.title} — 일괄 신청 양식`;
-      titleCell.font = { bold: true, size: 14 };
-      titleCell.alignment = { horizontal: "center" };
+      const sheet = workbook.addWorksheet("일괄신청양식");
 
-      const headerRow = sheet.getRow(3);
-      ["학년", "반", "번호", "이름", "신청"].forEach((h, i) => {
+      // 1행: 헤더
+      const headerRow = sheet.getRow(1);
+      ["학년", "반", "번호", "이름", ...mealHeaders].forEach((h, i) => {
         const cell = headerRow.getCell(i + 1);
         cell.value = h;
         cell.font = { bold: true };
         cell.alignment = { horizontal: "center" };
       });
-      [6, 6, 6, 12, 8].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
 
-      let row = 4;
+      // 2행: 안내문 (A2:G2 병합)
+      sheet.mergeCells(2, 1, 2, 7);
+      const guideCell = sheet.getCell(2, 1);
+      guideCell.value = "신청할 식사에 O 표시 (해당 학년 개설일 전체 신청 처리)";
+      guideCell.alignment = { horizontal: "center" };
+      guideCell.font = { italic: true, color: { argb: "FF888888" } };
+
+      // 열 너비
+      [6, 6, 6, 14, 8, 8, 8].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
+
+      // 3행~: 학생 목록
+      let rowIdx = 3;
       for (const s of allStudents) {
-        const r = sheet.getRow(row++);
+        const r = sheet.getRow(rowIdx++);
         r.getCell(1).value = s.grade;
         r.getCell(2).value = s.classNum;
         r.getCell(3).value = s.number;
         r.getCell(4).value = s.name;
-        r.getCell(5).value = registeredIds.has(s.id) ? "O" : "";
-        r.getCell(5).alignment = { horizontal: "center" };
+        const approvedKinds = approvedMealsByUser.get(s.id);
+        MEAL_KINDS_ORDER.forEach((kind, ki) => {
+          const cell = r.getCell(5 + ki);
+          cell.value = approvedKinds?.has(kind) ? "O" : "";
+          cell.alignment = { horizontal: "center" };
+        });
       }
 
       const buffer = await workbook.xlsx.writeBuffer();
       return new NextResponse(Buffer.from(buffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="${encodeURIComponent(application.title)}_form.xlsx"`,
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(application.title)}_일괄신청양식.xlsx"`,
         },
       });
     }

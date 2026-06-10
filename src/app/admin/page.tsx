@@ -158,7 +158,7 @@ export default function AdminPage() {
   const [excelDialogOpen, setExcelDialogOpen] = useState(false);
   const [excelApp, setExcelApp] = useState<MealAppItem | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<{ added: number; skippedExisting: number; skippedNotFound: number } | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ added: number; updated?: number; skippedExisting?: number; skippedNotFound: number; skippedInvalid?: number } | null>(null);
 
   // System settings
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
@@ -1935,7 +1935,7 @@ export default function AdminPage() {
 
               <div className="border-t pt-4 space-y-2">
                 <h4 className="text-sm font-semibold">일괄 업로드</h4>
-                <p className="text-xs text-muted-foreground">양식의 &quot;신청&quot; 열에 O 표시된 학생을 일괄 등록합니다. 기존 신청자는 자동 제외됩니다.</p>
+                <p className="text-xs text-muted-foreground">양식의 조식/중식/석식 열에 O 표시된 학생을 일괄 등록·갱신합니다.</p>
                 <Input
                   type="file"
                   accept=".xlsx,.xls"
@@ -1951,9 +1951,17 @@ export default function AdminPage() {
                   <div className="text-sm space-y-0.5 p-3 bg-muted rounded-lg">
                     <p className="font-medium">업로드 결과</p>
                     <p>신규 등록: <span className="font-bold text-green-600">{uploadResult.added}명</span></p>
-                    <p>기존 신청자 (제외): <span className="text-muted-foreground">{uploadResult.skippedExisting}명</span></p>
+                    {(uploadResult.updated ?? 0) > 0 && (
+                      <p>갱신: <span className="text-muted-foreground">{uploadResult.updated}명</span></p>
+                    )}
+                    {(uploadResult.skippedExisting ?? 0) > 0 && (
+                      <p>기존 신청자 (제외): <span className="text-muted-foreground">{uploadResult.skippedExisting}명</span></p>
+                    )}
                     {uploadResult.skippedNotFound > 0 && (
                       <p>미등록 학생 (제외): <span className="text-red-500">{uploadResult.skippedNotFound}명</span></p>
+                    )}
+                    {(uploadResult.skippedInvalid ?? 0) > 0 && (
+                      <p>처리 불가 (제외): <span className="text-red-500">{uploadResult.skippedInvalid}명</span></p>
                     )}
                   </div>
                 )}
