@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { expandWeekdays, monthsOf, calcMealFee, buildAppTitle, monthKeyOf } from "@/lib/meal-plan";
+import {
+  expandWeekdays,
+  monthsOf,
+  calcMealFee,
+  buildAppTitle,
+  monthKeyOf,
+  studentNumberOf,
+} from "@/lib/meal-plan";
 
 describe("monthsOf", () => {
   it("2026-11부터 3개월", () => {
@@ -51,5 +58,11 @@ describe("buildAppTitle", () => {
 describe("monthKeyOf", () => {
   it("날짜 키에서 년-월 추출", () => {
     expect(monthKeyOf("2026-07-21")).toBe("2026-07");
+  });
+});
+
+describe("studentNumberOf", () => {
+  it("1학년 2반 4번 → 10204", () => {
+    expect(studentNumberOf(1, 2, 4)).toBe(10204);
   });
 });
