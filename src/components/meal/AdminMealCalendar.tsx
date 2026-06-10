@@ -91,7 +91,7 @@ export default function AdminMealCalendar({
 
   return (
     <div className={`overflow-x-auto rounded-xl ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
-      <table className="border-collapse text-sm">
+      <table className="border-collapse text-sm mx-auto">
         <thead>
           {/* 캡션 행 */}
           <tr>
@@ -122,7 +122,7 @@ export default function AdminMealCalendar({
                 <th
                   key={wd}
                   colSpan={3}
-                  className={`px-1 py-1 text-center whitespace-nowrap border border-border/30 ${theme.head}`}
+                  className={`px-1 py-1 text-center whitespace-nowrap border border-border/80 ${theme.head}`}
                 >
                   <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer min-h-11 justify-center">
                     <input
@@ -149,7 +149,7 @@ export default function AdminMealCalendar({
                 return (
                   <th
                     key={`${wd}-${grade}`}
-                    className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/30 ${theme.head}`}
+                    className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/80 ${theme.head}`}
                   >
                     <button
                       type="button"
@@ -177,7 +177,7 @@ export default function AdminMealCalendar({
                   <td
                     key={di}
                     colSpan={3}
-                    className={`px-1 py-0.5 text-center whitespace-nowrap border border-border/30 text-xs font-medium
+                    className={`px-1 py-0.5 text-center whitespace-nowrap border border-border/80 text-xs font-medium
                       ${day ? theme.cell : "bg-muted/20"}
                       ${di === 0 ? "text-red-500" : di === 6 ? "text-blue-500" : ""}
                     `}
@@ -195,7 +195,7 @@ export default function AdminMealCalendar({
                       return (
                         <td
                           key={`${di}-${grade}`}
-                          className="border border-border/30 bg-muted/20"
+                          className="border border-border/80 bg-muted/20"
                         />
                       );
                     }
@@ -203,7 +203,7 @@ export default function AdminMealCalendar({
                     return (
                       <td
                         key={`${di}-${grade}`}
-                        className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/30 ${theme.cell}`}
+                        className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/80 ${theme.cell}`}
                       >
                         <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer min-h-11 min-w-7 justify-center">
                           <input
