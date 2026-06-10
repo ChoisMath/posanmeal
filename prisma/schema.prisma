@@ -88,11 +88,43 @@ model MealApplication {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  applyStartAt DateTime?
+  applyEndAt   DateTime?
+  startYear    Int?
+  startMonth   Int?
+  monthCount   Int?
+
   registrations MealRegistration[]
   allowedDates  MealApplicationDate[]
+  meals         MealApplicationMeal[]
+  mealDates     MealApplicationMealDate[]
 
   @@index([status])
   @@index([applyStart, applyEnd])
+}
+
+model MealApplicationMeal {
+  applicationId       Int
+  mealKind            MealKind
+  price               Int      @default(0)
+  exemptionSelectable Boolean  @default(false)
+  method              String   @default("NONE") // "NONE" | "YN" | "WEEKDAY" | "DATE"
+
+  application MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([applicationId, mealKind])
+}
+
+model MealApplicationMealDate {
+  applicationId Int
+  mealKind      MealKind
+  grade         Int
+  date          DateTime @db.Date
+
+  application MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@id([applicationId, mealKind, grade, date])
+  @@index([date, mealKind])
 }
 
 model MealApplicationDate {
@@ -117,13 +149,38 @@ model MealRegistration {
   cancelledBy   String? // "STUDENT" | "ADMIN"
   addedBy       String? // null = 학생 본인, "ADMIN" = 관리자 추가
 
-  application   MealApplication        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   MealApplication          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user          User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   selectedDates MealRegistrationDate[]
+  meals         MealRegistrationMeal[]
+  mealDates     MealRegistrationMealDate[]
 
   @@unique([applicationId, userId])
   @@index([userId])
   @@index([applicationId, status])
+}
+
+model MealRegistrationMeal {
+  registrationId  Int
+  mealKind        MealKind
+  applied         Boolean  @default(false)
+  exempt          Boolean  @default(false)
+  weekdaysByMonth String? // JSON: {"2026-07":[1,3,5]} (0=일 ~ 6=토)
+
+  registration MealRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@id([registrationId, mealKind])
+}
+
+model MealRegistrationMealDate {
+  registrationId Int
+  mealKind       MealKind
+  date           DateTime @db.Date
+
+  registration MealRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@id([registrationId, mealKind, date])
+  @@index([date, mealKind])
 }
 
 model MealRegistrationDate {
