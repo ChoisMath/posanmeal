@@ -243,24 +243,20 @@ function buildSheet1(
   // ── Summary row ──
   const lastDataRow = DATA_START + input.rows.length - 1;
   const summaryRow = DATA_START + input.rows.length;
-  const safeRange = (from: number, to: number) =>
-    input.rows.length === 0 ? `${colLetter(from)}${DATA_START}:${colLetter(from)}${DATA_START}` : `${colLetter(from)}${DATA_START}:${colLetter(from)}${lastDataRow}`;
+  const summaryTo = Math.max(DATA_START, lastDataRow);
 
   ws.getCell(summaryRow, 4).value = "합계";
   ws.getCell(summaryRow, 4).font = { bold: true };
-  ws.getCell(summaryRow, 5).value = { formula: `COUNTA(E${DATA_START}:E${Math.max(DATA_START, lastDataRow)})` };
+  ws.getCell(summaryRow, 5).value = { formula: `COUNTA(E${DATA_START}:E${summaryTo})` };
 
   for (let c = 6; c <= totalCols; c++) {
     const letter = colLetter(c);
-    const from = Math.max(DATA_START, DATA_START);
-    const to = Math.max(DATA_START, lastDataRow);
-    // Use COUNTA for date cells, SUM for numeric fixed cols
+    // 날짜 셀은 COUNTA, 고정 수치 열은 SUM
     if (c >= FIXED_COLS + 1) {
-      ws.getCell(summaryRow, c).value = { formula: `COUNTA(${letter}${DATA_START}:${letter}${to})` };
+      ws.getCell(summaryRow, c).value = { formula: `COUNTA(${letter}${DATA_START}:${letter}${summaryTo})` };
     } else {
-      ws.getCell(summaryRow, c).value = { formula: `SUM(${letter}${DATA_START}:${letter}${to})` };
+      ws.getCell(summaryRow, c).value = { formula: `SUM(${letter}${DATA_START}:${letter}${summaryTo})` };
     }
-    void safeRange; void from;
   }
 
   // Column widths
@@ -311,7 +307,14 @@ function buildSheet2(
     ws.getCell(rowNum, 1).value = kindLabels[kind];
     styleHeader(ws.getCell(rowNum, 1));
 
-    const kindDates = input.openDates[kind] ?? [];
+    // "첫주 기준": 공고 첫 달의 개설일만 대상
+    const firstMonth = input.months[0];
+    const firstMonthKey = firstMonth
+      ? `${firstMonth.year}-${String(firstMonth.month).padStart(2, "0")}`
+      : null;
+    const kindDates = (input.openDates[kind] ?? []).filter(
+      (d) => firstMonthKey === null || d.startsWith(firstMonthKey),
+    );
 
     for (let wd = 0; wd <= 6; wd++) {
       // First open date of this weekday
