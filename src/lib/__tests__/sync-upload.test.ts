@@ -176,7 +176,7 @@ describe("/api/sync/upload — local-mode sync preserves IDB-saved check-ins", (
             clientId: 102,
             userId: 43,
             date: "2026-05-08",
-            mealKind: "LUNCH",
+            mealKind: "INVALID_KIND",
             checkedAt: "2026-05-08T10:30:00.000Z",
             type: "STUDENT",
           },
@@ -195,6 +195,37 @@ describe("/api/sync/upload — local-mode sync preserves IDB-saved check-ins", (
       expect.objectContaining({ clientId: 101, reason: "INVALID_PAYLOAD" }),
       expect.objectContaining({ clientId: 102, reason: "INVALID_PAYLOAD" }),
     ]);
+  });
+
+  it("accepts a LUNCH check-in as a valid mealKind", async () => {
+    const { POST } = await import("@/app/api/sync/upload/route");
+    mocks.userFindUnique.mockResolvedValue({ id: 42 });
+    mocks.checkInCreate.mockResolvedValue({ id: 10 });
+
+    const res = await POST(
+      buildRequest({
+        checkins: [
+          {
+            clientId: 20,
+            userId: 42,
+            date: "2026-06-11",
+            mealKind: "LUNCH",
+            checkedAt: "2026-06-11T12:00:00.000Z",
+            type: "STUDENT",
+          },
+        ],
+      }),
+    );
+    const body = await res.json();
+
+    expect(mocks.checkInCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mealKind: "LUNCH", source: "LOCAL_SYNC" }),
+      }),
+    );
+    expect(body.acceptedCount).toBe(1);
+    expect(body.rejectedCount).toBe(0);
+    expect(body.syncedClientIds).toEqual([20]);
   });
 
   it("classifies non-P2002 prisma errors as SERVER_ERROR rejected items so the client retries them", async () => {

@@ -10,19 +10,19 @@ interface UploadCheckIn {
   date: string;
   checkedAt: string;
   type: "STUDENT" | "WORK" | "PERSONAL";
-  mealKind?: "BREAKFAST" | "DINNER";
+  mealKind?: "BREAKFAST" | "LUNCH" | "DINNER";
 }
 
 interface RejectedItem {
   clientId: number | null;
   userId: number;
   date: string;
-  mealKind: "BREAKFAST" | "DINNER" | null;
+  mealKind: "BREAKFAST" | "LUNCH" | "DINNER" | null;
   reason: "USER_NOT_FOUND" | "SERVER_ERROR" | "INVALID_PAYLOAD";
 }
 
-function isMealKind(value: unknown): value is "BREAKFAST" | "DINNER" {
-  return value === "BREAKFAST" || value === "DINNER";
+function isMealKind(value: unknown): value is "BREAKFAST" | "LUNCH" | "DINNER" {
+  return value === "BREAKFAST" || value === "LUNCH" || value === "DINNER";
 }
 
 function isCheckInType(value: unknown): value is "STUDENT" | "WORK" | "PERSONAL" {

@@ -35,10 +35,10 @@ describe("resolveMealKind", () => {
   });
 
   it("returns LUNCH inside the lunch window", () => {
-    expect(resolveMealKind(new Date("2026-06-11T12:00:00+09:00"), windows)).toBe("LUNCH");
+    expect(resolveMealKind(at("12:00"), windows)).toBe("LUNCH");
   });
 
   it("returns null in the gap between lunch and dinner", () => {
-    expect(resolveMealKind(new Date("2026-06-11T14:30:00+09:00"), windows)).toBeNull();
+    expect(resolveMealKind(at("14:30"), windows)).toBeNull();
   });
 });
