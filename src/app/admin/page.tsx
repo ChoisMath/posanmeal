@@ -114,12 +114,13 @@ export default function AdminPage() {
   const [apps, setApps] = useState<MealAppItem[]>([]);
 
   // 진입 시 ?tab= 쿼리 반영 (공고 저장 후 /admin?tab=applications 복귀 등)
-  const [initialTab] = useState(() => {
-    if (typeof window === "undefined") return "users";
+  // SSR과 첫 클라이언트 렌더를 "users"로 일치시키고 마운트 후 전환 (hydration mismatch 방지)
+  const [activeTab, setActiveTab] = useState("users");
+  useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
     const valid = ["users", "applications", "meals", "dashboard", "settings"];
-    return t && valid.includes(t) ? t : "users";
-  });
+    if (t && valid.includes(t)) setActiveTab(t);
+  }, []);
 
   // System settings
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
@@ -687,9 +688,10 @@ export default function AdminPage() {
       </header>
       <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-1.5 sm:p-3 md:p-4 flex flex-col overflow-hidden page-enter">
         <Tabs
-          defaultValue={initialTab}
+          value={activeTab}
           className="flex flex-col flex-1 min-h-0"
           onValueChange={(v) => {
+            setActiveTab(v);
             if (v === "dashboard") fetchDashboard(dashboardDate);
             if (v === "applications") fetchApps();
           }}
