@@ -39,35 +39,13 @@ export async function isStudentEligibleToday(
   todayDate: Date,
 ): Promise<boolean> {
   const { prisma } = await import("@/lib/prisma");
-
-  if (mealKind === "LUNCH") return false;
-
-  if (mealKind === "DINNER") {
-    const registration = await prisma.mealRegistration.findFirst({
-      where: {
-        userId,
-        status: "APPROVED",
-        application: {
-          type: "DINNER",
-          mealStart: { not: null, lte: todayDate },
-          mealEnd: { not: null, gte: todayDate },
-        },
-      },
-      select: { id: true },
-    });
-    return Boolean(registration);
-  }
-
-  const registrationDate = await prisma.mealRegistrationDate.findFirst({
+  const row = await prisma.mealRegistrationMealDate.findFirst({
     where: {
+      mealKind,
       date: todayDate,
-      registration: {
-        userId,
-        status: "APPROVED",
-        application: { type: "BREAKFAST" },
-      },
+      registration: { userId, status: "APPROVED" },
     },
     select: { registrationId: true },
   });
-  return Boolean(registrationDate);
+  return row !== null;
 }

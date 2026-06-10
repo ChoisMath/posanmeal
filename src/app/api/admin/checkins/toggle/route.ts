@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     typeof date !== "string" ||
     !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
     (action !== "cycle" && action !== "toggle") ||
-    (mealKind !== "BREAKFAST" && mealKind !== "DINNER")
+    (mealKind !== "BREAKFAST" && mealKind !== "LUNCH" && mealKind !== "DINNER")
   ) {
     return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
   }

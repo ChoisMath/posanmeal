@@ -15,32 +15,18 @@ export async function GET() {
   const through = new Date(today);
   through.setDate(through.getDate() + 13);
 
-  const [settings, users, eligibleRegs, eligibleBreakfastDates] = await Promise.all([
+  const [settings, users, mealDateEntries] = await Promise.all([
     prisma.systemSetting.findMany(),
     prisma.user.findMany({
       select: { id: true, name: true, role: true, grade: true, classNum: true, number: true },
     }),
-    prisma.mealRegistration.findMany({
-      where: {
-        status: "APPROVED",
-        application: {
-          type: "DINNER",
-          mealStart: { not: null, lte: today },
-          mealEnd: { not: null, gte: today },
-        },
-      },
-      select: { userId: true },
-      distinct: ["userId"],
-    }),
-    prisma.mealRegistrationDate.findMany({
+    prisma.mealRegistrationMealDate.findMany({
       where: {
         date: { gte: today, lte: through },
-        registration: {
-          status: "APPROVED",
-          application: { type: "BREAKFAST" },
-        },
+        registration: { status: "APPROVED" },
       },
       select: {
+        mealKind: true,
         date: true,
         registration: { select: { userId: true } },
       },
@@ -52,18 +38,18 @@ export async function GET() {
     settingsMap[s.key] = s.value;
   }
 
-  const eligibleEntries: Array<{ userId: number; date: string; mealKind: MealKind }> = [
-    ...eligibleRegs.map((r) => ({
-      userId: r.userId,
-      date: todayKST(),
-      mealKind: "DINNER" as const,
-    })),
-    ...eligibleBreakfastDates.map((r) => ({
+  const eligibleEntries: Array<{ userId: number; date: string; mealKind: MealKind }> =
+    mealDateEntries.map((r) => ({
       userId: r.registration.userId,
       date: r.date.toISOString().slice(0, 10),
-      mealKind: "BREAKFAST" as const,
-    })),
-  ];
+      mealKind: r.mealKind,
+    }));
+
+  // Legacy field: today's DINNER entries, for older tablet clients that relied on eligibleUserIds
+  const todayStr = todayKST();
+  const eligibleUserIds = mealDateEntries
+    .filter((r) => r.mealKind === "DINNER" && r.date.toISOString().slice(0, 10) === todayStr)
+    .map((r) => r.registration.userId);
 
   return NextResponse.json({
     operationMode: settingsMap.operationMode || "online",
@@ -76,7 +62,7 @@ export async function GET() {
       classNum: u.classNum,
       number: u.number,
     })),
-    eligibleUserIds: eligibleRegs.map((r) => r.userId),
+    eligibleUserIds,
     eligibleEntries,
     mealWindows: {
       breakfast: {
