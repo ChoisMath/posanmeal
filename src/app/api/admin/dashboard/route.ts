@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   }
 
-  const [counts, records, breakfastApproved] = await Promise.all([
+  const [counts, records, breakfastApproved, lunchApproved] = await Promise.all([
     prisma.checkIn.groupBy({
       by: ["type", "mealKind"],
       where: { date: targetDate },
@@ -31,25 +31,27 @@ export async function GET(request: Request) {
       },
       orderBy: { checkedAt: "asc" },
     }),
-    prisma.mealRegistrationDate.findFirst({
-      where: {
-        date: targetDate,
-        registration: {
-          status: "APPROVED",
-          application: { type: "BREAKFAST" },
-        },
-      },
+    prisma.mealRegistrationMealDate.findFirst({
+      where: { date: targetDate, mealKind: "BREAKFAST", registration: { status: "APPROVED" } },
+      select: { date: true },
+    }),
+    prisma.mealRegistrationMealDate.findFirst({
+      where: { date: targetDate, mealKind: "LUNCH", registration: { status: "APPROVED" } },
       select: { date: true },
     }),
   ]);
 
   const hasBreakfast = Boolean(breakfastApproved);
+  const hasLunch = Boolean(lunchApproved);
 
   const studentBreakfastCount = counts
     .filter((c) => c.type === "STUDENT" && c.mealKind === "BREAKFAST")
     .reduce((sum, c) => sum + c._count.id, 0);
+  const studentLunchCount = counts
+    .filter((c) => c.type === "STUDENT" && c.mealKind === "LUNCH")
+    .reduce((sum, c) => sum + c._count.id, 0);
   const studentDinnerCount = counts
-    .filter((c) => c.type === "STUDENT" && c.mealKind !== "BREAKFAST")
+    .filter((c) => c.type === "STUDENT" && c.mealKind === "DINNER")
     .reduce((sum, c) => sum + c._count.id, 0);
   const teacherWorkCount = counts
     .filter((c) => c.type === "WORK")
@@ -61,8 +63,10 @@ export async function GET(request: Request) {
   return NextResponse.json({
     date: dateParam,
     hasBreakfast,
+    hasLunch,
     studentCount: studentDinnerCount,
     breakfastStudentCount: studentBreakfastCount,
+    lunchStudentCount: studentLunchCount,
     dinnerStudentCount: studentDinnerCount,
     teacherWorkCount,
     teacherPersonalCount,

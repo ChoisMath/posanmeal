@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const isTeacher = category === "teacher";
   const grade = isTeacher ? undefined : parseInt(category);
 
-  const [users, breakfastDates] = await Promise.all([
+  const [users, activeRows] = await Promise.all([
     prisma.user.findMany({
       where: isTeacher
         ? { role: "TEACHER" }
@@ -40,29 +40,21 @@ export async function GET(request: Request) {
         ? { name: "asc" }
         : [{ classNum: "asc" }, { number: "asc" }],
     }),
-    prisma.mealRegistrationDate.findMany({
+    prisma.mealRegistrationMealDate.findMany({
       where: {
         date: { gte: startDate, lte: endDate },
-        registration: {
-          status: "APPROVED",
-          application: { type: "BREAKFAST" },
-        },
+        mealKind: { in: ["BREAKFAST", "LUNCH"] },
+        registration: { status: "APPROVED" },
       },
-      select: { date: true },
-      distinct: ["date"],
-      orderBy: { date: "asc" },
+      select: { date: true, mealKind: true },
+      distinct: ["date", "mealKind"],
     }),
   ]);
 
-  const breakfastDateKeys = new Set(breakfastDates.map((item) => getDateDayKey(item.date)));
-  for (const user of users) {
-    for (const checkIn of user.checkIns) {
-      if (checkIn.mealKind === "BREAKFAST") {
-        breakfastDateKeys.add(getDateDayKey(checkIn.date));
-      }
-    }
-  }
-  const mealColumns = buildMonthlyMealColumns(year, month, { BREAKFAST: Array.from(breakfastDateKeys) });
+  const mealColumns = buildMonthlyMealColumns(year, month, {
+    BREAKFAST: activeRows.filter((r) => r.mealKind === "BREAKFAST").map((r) => r.date),
+    LUNCH: activeRows.filter((r) => r.mealKind === "LUNCH").map((r) => r.date),
+  });
 
   return NextResponse.json({ users, year, month, category, mealColumns });
 }

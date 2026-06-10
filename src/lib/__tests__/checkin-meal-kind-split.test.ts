@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   checkInCreate: vi.fn(),
   checkInUpdate: vi.fn(),
   checkInDelete: vi.fn(),
-  mealRegistrationDateFindMany: vi.fn(),
+  mealRegistrationMealDateFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
@@ -28,8 +28,8 @@ vi.mock("@/lib/prisma", () => ({
       update: mocks.checkInUpdate,
       delete: mocks.checkInDelete,
     },
-    mealRegistrationDate: {
-      findMany: mocks.mealRegistrationDateFindMany,
+    mealRegistrationMealDate: {
+      findMany: mocks.mealRegistrationMealDateFindMany,
     },
   },
 }));
@@ -84,7 +84,9 @@ describe("CheckIn mealKind split", () => {
   it("returns meal columns for admin monthly check-in rows", async () => {
     const { GET } = await import("@/app/api/admin/checkins/route");
     mocks.userFindMany.mockResolvedValue([]);
-    mocks.mealRegistrationDateFindMany.mockResolvedValue([{ date: new Date("2026-05-30T00:00:00.000Z") }]);
+    mocks.mealRegistrationMealDateFindMany.mockResolvedValue([
+      { date: new Date("2026-05-30T00:00:00.000Z"), mealKind: "BREAKFAST" },
+    ]);
 
     const response = await GET(new Request("http://localhost/api/admin/checkins?year=2026&month=5&category=teacher"));
     const body = await response.json();

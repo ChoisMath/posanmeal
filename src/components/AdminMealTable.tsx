@@ -240,7 +240,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   );
                 })()}
                 <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-1.5 font-medium">
-                  {user.checkIns.length}{isTeacher ? "" : `/${mealColumns.length}`}
+                  {user.checkIns.length}{isTeacher ? "" : `/${mealColumns.filter((c) => c.mealKind === "DINNER").length}`}
                 </td>
               </tr>
             );

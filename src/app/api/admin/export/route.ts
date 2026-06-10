@@ -109,7 +109,11 @@ export async function GET(request: Request) {
     const dailyWork = new Array(daysInMonth + 1).fill(0);
     const dailyTotal = new Array(daysInMonth + 1).fill(0);
 
-    type DaySlot = { dinner?: { type?: string; mealKind?: string | null }; breakfast?: { type?: string; mealKind?: string | null } };
+    type DaySlot = {
+      dinner?: { type?: string; mealKind?: string | null };
+      breakfast?: { type?: string; mealKind?: string | null };
+      lunch?: { type?: string; mealKind?: string | null };
+    };
     for (const user of users) {
       const row = sheet.addRow([]);
       const slotMap = new Map<number, DaySlot>();
@@ -117,6 +121,7 @@ export async function GET(request: Request) {
         const day = new Date(c.date).getDate();
         const slot = slotMap.get(day) ?? {};
         if (c.mealKind === "BREAKFAST") slot.breakfast = c;
+        else if (c.mealKind === "LUNCH") slot.lunch = c;
         else slot.dinner = c;
         slotMap.set(day, slot);
       }
@@ -153,6 +158,9 @@ export async function GET(request: Request) {
         }
         if (slot.breakfast) {
           cellValue = cellValue ? `${cellValue}+조` : "조";
+        }
+        if (slot.lunch) {
+          cellValue = cellValue ? `${cellValue}+중` : "중";
         }
         row.getCell(d + 1).value = cellValue;
       }
