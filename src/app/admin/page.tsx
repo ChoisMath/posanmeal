@@ -84,7 +84,7 @@ interface RegistrationItem {
 
 interface DashboardRecord {
   id: number; userName: string; role: string; type: string;
-  mealKind?: "BREAKFAST" | "DINNER" | null;
+  mealKind?: "BREAKFAST" | "LUNCH" | "DINNER" | null;
   source: CheckInSourceLabel;
   checkedAt: string; grade?: number; classNum?: number; number?: number;
 }
@@ -92,8 +92,10 @@ interface DashboardRecord {
 interface DashboardData {
   date: string;
   hasBreakfast: boolean;
+  hasLunch?: boolean;
   studentCount: number;
   breakfastStudentCount: number;
+  lunchStudentCount?: number;
   dinnerStudentCount: number;
   teacherWorkCount: number;
   teacherPersonalCount: number;
@@ -840,7 +842,7 @@ export default function AdminPage() {
     const isStudent = (r: DashboardRecord, g: number) => r.role === "STUDENT" && r.grade === g;
     const byGrade = (g: number) => records.filter((r) => isStudent(r, g));
     const breakfast = (rs: DashboardRecord[]) => rs.filter((r) => r.mealKind === "BREAKFAST").length;
-    const dinner = (rs: DashboardRecord[]) => rs.filter((r) => r.mealKind !== "BREAKFAST").length;
+    const dinner = (rs: DashboardRecord[]) => rs.filter((r) => r.mealKind === "DINNER" || !r.mealKind).length;
     const g1 = byGrade(1), g2 = byGrade(2), g3 = byGrade(3);
     return {
       grade1Count: g1.length,
