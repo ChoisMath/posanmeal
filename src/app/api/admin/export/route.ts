@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel } from "@/lib/checkin-source";
 import { buildMonthDateRange, dateKeyToUtcDate } from "@/lib/date-range";
+import { MEAL_LABEL } from "@/lib/meal-plan";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -354,7 +355,7 @@ async function exportDaily(dateParam: string) {
       isStudent ? r.number : "",
       r.name,
       isStudent ? "" : (r.subject ?? ""),
-      r.mealKind === "BREAKFAST" ? "조식" : "석식",
+      MEAL_LABEL[r.mealKind],
       formatDateTimeKST(r.checkedAt),
       sourceLabel(r.source),
     ]);

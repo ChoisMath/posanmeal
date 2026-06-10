@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { signQRToken, getQRExpirySeconds } from "@/lib/qr-token";
 import { getCachedSettings } from "@/lib/settings-cache";
 import { isStudentEligibleToday, resolveMealKind } from "@/lib/meal-kind";
+import { MEAL_LABEL } from "@/lib/meal-plan";
 import { nowKST, todayKST } from "@/lib/timezone";
 
 export async function GET(request: Request) {
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     const eligible = await isStudentEligibleToday(userId, mealKind, new Date(todayKST()));
     if (!eligible) {
       return NextResponse.json(
-        { error: `오늘 ${mealKind === "BREAKFAST" ? "조식" : "석식"} 신청 내역이 없습니다.`, errorCode: "NO_MEAL_PERIOD" },
+        { error: `오늘 ${MEAL_LABEL[mealKind]} 신청 내역이 없습니다.`, errorCode: "NO_MEAL_PERIOD" },
         { status: 400 },
       );
     }

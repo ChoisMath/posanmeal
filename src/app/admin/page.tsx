@@ -23,6 +23,7 @@ import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
 import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import { EditableTextCell, EditableSelectCell, type SaveResult } from "@/components/EditableCell";
+import { MEAL_LABEL } from "@/lib/meal-plan";
 import {
   validateMealWindows,
   mapServerError,
@@ -1328,7 +1329,7 @@ export default function AdminPage() {
                                       ? "border-amber-300 text-amber-600 dark:text-amber-400"
                                       : "border-slate-300 text-slate-600 dark:text-slate-400"
                                   }`}>
-                                    {r.mealKind === "BREAKFAST" ? "조식" : "석식"}
+                                    {r.mealKind ? MEAL_LABEL[r.mealKind] : "석식"}
                                   </Badge>
                                 </td>
                               )}

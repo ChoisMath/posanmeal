@@ -28,6 +28,7 @@ import {
   type MealKind,
   type MealWindows,
 } from "@/lib/meal-kind-local";
+import { MEAL_LABEL } from "@/lib/meal-plan";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
 
 interface CheckInResult {
@@ -437,7 +438,7 @@ export default function CheckPage() {
       if (user.role === "STUDENT") {
         const eligible = await isEligible(parsed.userId, today, currentMealKind);
         if (!eligible) {
-          setResult({ success: false, error: `오늘 ${currentMealKind === "BREAKFAST" ? "조식" : "석식"} 신청 내역이 없습니다.` });
+          setResult({ success: false, error: `오늘 ${MEAL_LABEL[currentMealKind]} 신청 내역이 없습니다.` });
           playDoubleBeep();
           return;
         }
@@ -455,7 +456,7 @@ export default function CheckPage() {
           user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
           mealKind: currentMealKind,
           checkedAt: existing.checkedAt,
-          error: `이미 ${currentMealKind === "BREAKFAST" ? "조식" : "석식"} 체크인 하였습니다 (${hh}:${mm})`,
+          error: `이미 ${MEAL_LABEL[currentMealKind]} 체크인 하였습니다 (${hh}:${mm})`,
         });
         playLongBeep();
         return;
@@ -623,7 +624,7 @@ export default function CheckPage() {
                     <p className="text-emerald-700 dark:text-emerald-300 text-fit-sm mt-1.5 font-medium">
                       {result.user?.role === "TEACHER" && result.checkedAt
                         ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
-                        : `${result.mealKind === "BREAKFAST" ? "조식" : "석식"} 체크인 하였습니다.`}
+                        : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
                     </p>
                   )}
 

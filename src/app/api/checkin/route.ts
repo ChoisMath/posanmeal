@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { todayKST, nowKST } from "@/lib/timezone";
 import { getCachedSettings } from "@/lib/settings-cache";
 import { isStudentEligibleToday, resolveMealKind, type MealKind } from "@/lib/meal-kind";
+import { MEAL_LABEL } from "@/lib/meal-plan";
 
 export async function POST(request: Request) {
   try {
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
         user,
         mealKind,
         checkedAt: existing.checkedAt,
-        error: `이미 ${mealKind === "BREAKFAST" ? "조식" : "석식"} 체크인 하였습니다.`,
+        error: `이미 ${MEAL_LABEL[mealKind]} 체크인 하였습니다.`,
       });
     }
 
