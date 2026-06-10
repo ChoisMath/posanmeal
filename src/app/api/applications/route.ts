@@ -1,7 +1,6 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { toDateKey } from "@/lib/meal-plan-server";
 
 export async function GET() {
   const session = await auth();

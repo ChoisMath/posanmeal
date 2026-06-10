@@ -213,7 +213,14 @@ export async function DELETE(
   const now = new Date();
   const app = await prisma.mealApplication.findUnique({ where: { id: applicationId } });
 
-  if (!app || !app.applyStartAt || !app.applyEndAt || now < app.applyStartAt || now > app.applyEndAt) {
+  if (
+    !app ||
+    app.status !== "OPEN" ||
+    !app.applyStartAt ||
+    !app.applyEndAt ||
+    now < app.applyStartAt ||
+    now > app.applyEndAt
+  ) {
     return NextResponse.json(
       { error: "신청 취소 기간이 아닙니다.", errorCode: "OUT_OF_APPLY_WINDOW" },
       { status: 400 },
