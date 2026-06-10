@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canWriteAdmin } from "@/lib/permissions";
+import { studentNumberOf } from "@/lib/meal-plan";
+import { buildStatsWorkbook, type MealKind } from "@/lib/meal-stats-excel";
+import { toDateKey } from "@/lib/meal-plan-server";
 
 export async function GET(
   request: Request,
@@ -29,25 +32,22 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    // 신청자 목록 (별도 쿼리, orderBy 단순화)
-    const registrations = await prisma.mealRegistration.findMany({
-      where: { applicationId: appId, status: "APPROVED" },
-      include: {
-        user: { select: { id: true, name: true, grade: true, classNum: true, number: true, gender: true } },
-      },
-    });
-
-    // JS에서 정렬
-    registrations.sort((a, b) =>
-      (a.user.grade ?? 0) - (b.user.grade ?? 0) ||
-      (a.user.classNum ?? 0) - (b.user.classNum ?? 0) ||
-      (a.user.number ?? 0) - (b.user.number ?? 0)
-    );
-
     const ExcelJS = (await import("exceljs")).default;
-    const workbook = new ExcelJS.Workbook();
 
+    // ── Template mode (Task 14: 건드리지 말 것) ──
     if (isTemplate) {
+      const registrations = await prisma.mealRegistration.findMany({
+        where: { applicationId: appId, status: "APPROVED" },
+        include: {
+          user: { select: { id: true, name: true, grade: true, classNum: true, number: true, gender: true } },
+        },
+      });
+      registrations.sort((a, b) =>
+        (a.user.grade ?? 0) - (b.user.grade ?? 0) ||
+        (a.user.classNum ?? 0) - (b.user.classNum ?? 0) ||
+        (a.user.number ?? 0) - (b.user.number ?? 0)
+      );
+
       const allStudents = await prisma.user.findMany({
         where: { role: "STUDENT" },
         select: { id: true, name: true, grade: true, classNum: true, number: true },
@@ -55,7 +55,7 @@ export async function GET(
       });
 
       const registeredIds = new Set(registrations.map((r) => r.user.id));
-
+      const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet("신청양식");
       sheet.mergeCells(1, 1, 1, 5);
       const titleCell = sheet.getCell(1, 1);
@@ -92,111 +92,134 @@ export async function GET(
       });
     }
 
-    // 신청명단 다운로드
-    const sheet = workbook.addWorksheet("신청명단");
-    sheet.mergeCells(1, 1, 1, 5);
-    const titleCell = sheet.getCell(1, 1);
-    titleCell.value = `${application.title} 신청명단`;
-    titleCell.font = { bold: true, size: 14 };
-    titleCell.alignment = { horizontal: "center" };
+    // ── 신청명단 모드: 리로 양식 3시트 ──
 
-    const headerRow = sheet.getRow(3);
-    ["학년", "반", "번호", "이름", "신청일시"].forEach((h, i) => {
-      const cell = headerRow.getCell(i + 1);
-      cell.value = h;
-      cell.font = { bold: true };
-      cell.alignment = { horizontal: "center" };
-    });
-    [6, 6, 6, 12, 20].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
-
-    let row = 4;
-    for (const reg of registrations) {
-      const r = sheet.getRow(row++);
-      r.getCell(1).value = reg.user.grade;
-      r.getCell(2).value = reg.user.classNum;
-      r.getCell(3).value = reg.user.number;
-      r.getCell(4).value = reg.user.name;
-      r.getCell(5).value = reg.createdAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
-    }
-
-    // 통계 시트
-    const stats = workbook.addWorksheet("통계");
-    stats.mergeCells(1, 1, 1, 4);
-    const statsTitle = stats.getCell(1, 1);
-    statsTitle.value = `${application.title} 학년·성별 신청자 수`;
-    statsTitle.font = { bold: true, size: 14 };
-    statsTitle.alignment = { horizontal: "center" };
-
-    const statsHeader = stats.getRow(3);
-    ["학년", "남", "여", "합계"].forEach((h, i) => {
-      const cell = statsHeader.getCell(i + 1);
-      cell.value = h;
-      cell.font = { bold: true };
-      cell.alignment = { horizontal: "center" };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFD580" } };
-    });
-    [10, 8, 8, 10].forEach((w, i) => { stats.getColumn(i + 1).width = w; });
-
-    type GradeKey = 1 | 2 | 3;
-    const counts: Record<GradeKey, { MALE: number; FEMALE: number; NONE: number }> = {
-      1: { MALE: 0, FEMALE: 0, NONE: 0 },
-      2: { MALE: 0, FEMALE: 0, NONE: 0 },
-      3: { MALE: 0, FEMALE: 0, NONE: 0 },
-    };
-    let other = 0;
-    for (const reg of registrations) {
-      const g = reg.user.grade;
-      if (g !== 1 && g !== 2 && g !== 3) { other++; continue; }
-      const key: "MALE" | "FEMALE" | "NONE" = reg.user.gender ?? "NONE";
-      counts[g as GradeKey][key]++;
-    }
-
-    let r = 4;
-    let totalMale = 0, totalFemale = 0, totalNone = 0;
-    for (const grade of [1, 2, 3] as GradeKey[]) {
-      const row = stats.getRow(r++);
-      row.getCell(1).value = `${grade}학년`;
-      row.getCell(2).value = counts[grade].MALE;
-      row.getCell(3).value = counts[grade].FEMALE;
-      row.getCell(4).value = counts[grade].MALE + counts[grade].FEMALE + counts[grade].NONE;
-      [2, 3, 4].forEach((c) => { row.getCell(c).alignment = { horizontal: "center" }; });
-      totalMale += counts[grade].MALE;
-      totalFemale += counts[grade].FEMALE;
-      totalNone += counts[grade].NONE;
-    }
-    const totalRow = stats.getRow(r++);
-    totalRow.getCell(1).value = "전체";
-    totalRow.getCell(2).value = totalMale;
-    totalRow.getCell(3).value = totalFemale;
-    totalRow.getCell(4).value = totalMale + totalFemale + totalNone;
-    [1, 2, 3, 4].forEach((c) => {
-      const cell = totalRow.getCell(c);
-      cell.font = { bold: true };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE9B3" } };
-      if (c >= 2) cell.alignment = { horizontal: "center" };
+    // Fetch meals config
+    const appMeals = await prisma.mealApplicationMeal.findMany({
+      where: { applicationId: appId, method: { not: "NONE" } },
     });
 
-    let noteR = r + 1;
-    if (totalNone > 0) {
-      const noteRow = stats.getRow(noteR++);
-      stats.mergeCells(noteRow.number, 1, noteRow.number, 4);
-      const note = noteRow.getCell(1);
-      note.value = `* 성별 미입력 학생 ${totalNone}명은 합계에 포함되며 남/여 어느 쪽에도 집계되지 않습니다.`;
-      note.font = { italic: true, color: { argb: "FF888888" } };
+    // All open dates across all grades (distinct union)
+    const allOpenDateRows = await prisma.mealApplicationMealDate.findMany({
+      where: { applicationId: appId },
+      select: { mealKind: true, date: true },
+    });
+
+    const openDatesMap: Partial<Record<MealKind, Set<string>>> = {};
+    for (const row of allOpenDateRows) {
+      const kind = row.mealKind as MealKind;
+      const dateKey = toDateKey(row.date);
+      if (!openDatesMap[kind]) openDatesMap[kind] = new Set();
+      openDatesMap[kind]!.add(dateKey);
     }
-    if (other > 0) {
-      const noteRow2 = stats.getRow(noteR++);
-      stats.mergeCells(noteRow2.number, 1, noteRow2.number, 4);
-      const note2 = noteRow2.getCell(1);
-      note2.value = `* 학년 미지정 ${other}명은 통계에서 제외되었습니다.`;
-      note2.font = { italic: true, color: { argb: "FF888888" } };
+    const openDates: Partial<Record<MealKind, string[]>> = {};
+    for (const kind of Object.keys(openDatesMap) as MealKind[]) {
+      openDates[kind] = [...openDatesMap[kind]!].sort();
     }
+
+    // APPROVED registrations with meal and date details, sorted grade→class→number
+    const registrations = await prisma.mealRegistration.findMany({
+      where: { applicationId: appId, status: "APPROVED" },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            grade: true,
+            classNum: true,
+            number: true,
+          },
+        },
+        meals: {
+          select: { mealKind: true, exempt: true },
+        },
+        mealDates: {
+          select: { mealKind: true, date: true },
+        },
+      },
+      orderBy: [
+        { user: { grade: "asc" } },
+        { user: { classNum: "asc" } },
+        { user: { number: "asc" } },
+      ],
+    });
+
+    // Build rows for buildStatsWorkbook
+    const rows = registrations.map((reg, idx) => {
+      const u = reg.user;
+      const loginId = u.email.split("@")[0] ?? u.email;
+      const grade = u.grade ?? 0;
+      const classNum = u.classNum ?? 0;
+      const number = u.number ?? 0;
+      const studentNo =
+        grade && classNum && number ? studentNumberOf(grade, classNum, number) : 0;
+
+      const exempt: Partial<Record<MealKind, boolean>> = {};
+      for (const m of reg.meals) {
+        exempt[m.mealKind as MealKind] = m.exempt;
+      }
+
+      const dates: Partial<Record<MealKind, string[]>> = {};
+      for (const md of reg.mealDates) {
+        const kind = md.mealKind as MealKind;
+        const dateKey = toDateKey(md.date);
+        if (!dates[kind]) dates[kind] = [];
+        dates[kind]!.push(dateKey);
+      }
+      for (const kind of Object.keys(dates) as MealKind[]) {
+        dates[kind] = dates[kind]!.sort();
+      }
+
+      const createdAt = reg.createdAt.toLocaleString("sv-SE", {
+        timeZone: "Asia/Seoul",
+      }).replace("T", " ");
+
+      return {
+        seq: idx + 1,
+        createdAt,
+        loginId,
+        studentNo,
+        name: u.name,
+        grade: u.grade ?? undefined,
+        classNum: u.classNum ?? undefined,
+        number: u.number ?? undefined,
+        exempt,
+        dates,
+      };
+    });
+
+    // months array from application
+    const startYear = application.startYear ?? new Date().getFullYear();
+    const startMonth = application.startMonth ?? new Date().getMonth() + 1;
+    const monthCount = application.monthCount ?? 1;
+    const months = Array.from({ length: monthCount }, (_, i) => {
+      const m = startMonth - 1 + i;
+      return { year: startYear + Math.floor(m / 12), month: (m % 12) + 1 };
+    });
+
+    const meals = appMeals.map((m) => ({
+      mealKind: m.mealKind as MealKind,
+      price: m.price,
+    }));
+
+    const workbook = await buildStatsWorkbook({
+      title: application.title,
+      months,
+      meals,
+      openDates,
+      rows,
+    });
 
     const buffer = await workbook.xlsx.writeBuffer();
+
+    const mm = String(startMonth).padStart(2, "0");
+    const filename = `${startYear}년_${mm}월_${application.title}_내역서(${rows.length}).xlsx`;
+
     return new NextResponse(Buffer.from(buffer), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(application.title)}_list.xlsx"`,
+        "Content-Disposition": `attachment; filename="${encodeURIComponent(filename)}"`,
       },
     });
   } catch (err) {
