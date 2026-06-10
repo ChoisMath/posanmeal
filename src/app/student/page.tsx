@@ -15,88 +15,28 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
-import { DateCheckboxList } from "@/components/DateCheckboxList";
 import { PhotoUpload } from "@/components/PhotoUpload";
-import { SignaturePad } from "@/components/SignaturePad";
 import { LogOut } from "lucide-react";
 import { MealMenu } from "@/components/MealMenu";
 import { PageLoadingSkeleton } from "@/components/PageSkeleton";
-import { toast } from "sonner";
 import { useUser } from "@/hooks/useUser";
 import { useApplications } from "@/hooks/useApplications";
-
-interface UserProfile {
-  id: number;
-  name: string;
-  email: string;
-  grade: number;
-  classNum: number;
-  number: number;
-  photoUrl: string | null;
-  registrations?: Array<{
-    id: number;
-    createdAt: string;
-    application: { id: number; title: string; type: string; mealStart: string | null; mealEnd: string | null };
-    selectedDates?: Array<{ date: string }>;
-  }>;
-}
-
-interface MealApplicationItem {
-  id: number;
-  title: string;
-  description: string | null;
-  type: string;
-  applyStart: string;
-  applyEnd: string;
-  mealStart: string | null;
-  mealEnd: string | null;
-  status: string;
-  allowedDates?: Array<{ date: string }>;
-  registrations: Array<{
-    id: number;
-    status: string;
-    createdAt: string;
-    selectedDates?: Array<{ date: string }>;
-  }>;
-}
-
-function typeBadge(type: string) {
-  switch (type) {
-    case "DINNER":
-      return (
-        <span className="whitespace-nowrap inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-          석식
-        </span>
-      );
-    case "BREAKFAST":
-      return (
-        <span className="whitespace-nowrap inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800 dark:bg-purple-900/30 dark:text-purple-300">
-          조식
-        </span>
-      );
-    default:
-      return (
-        <span className="whitespace-nowrap inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-800 dark:text-gray-300">
-          기타
-        </span>
-      );
-  }
-}
+import { StudentApplicationView } from "@/components/meal/StudentApplicationView";
+import { MEAL_LABEL, type MealKind } from "@/lib/meal-plan";
 
 export default function StudentPage() {
   const { user, mutate: mutateUser } = useUser();
   const { applications, mutate: mutateApps } = useApplications();
-  const [signDialogOpen, setSignDialogOpen] = useState(false);
-  const [signatureData, setSignatureData] = useState<string | null>(null);
-  const [selectedApp, setSelectedApp] = useState<MealApplicationItem | null>(
-    null
-  );
-  const [submitting, setSubmitting] = useState(false);
-  const [selectedBreakfastDates, setSelectedBreakfastDates] = useState<Set<string>>(new Set());
+  const [selectedAppId, setSelectedAppId] = useState<number | null>(null);
+  const [myHistoryOpen, setMyHistoryOpen] = useState(false);
+  const [myRegistrations, setMyRegistrations] = useState<MyRegistrationItem[]>([]);
+  const [myLoading, setMyLoading] = useState(false);
 
   if (!user) return <PageLoadingSkeleton />;
 
   const today = new Date().toISOString().slice(0, 10);
+
+  // QR 탭: APPLIED 신청이 있는 공고 중 오늘이 급식 기간인 것 (기존 로직 유지)
   const activeRegistrations = (user.registrations || []).filter((r) => {
     if (r.application.type === "BREAKFAST") {
       return (r.selectedDates ?? []).some((date) => date.date.slice(0, 10) === today);
@@ -105,68 +45,23 @@ export default function StudentPage() {
     return today >= r.application.mealStart.slice(0, 10) && today <= r.application.mealEnd.slice(0, 10);
   });
   const hasActiveMeal = activeRegistrations.length > 0;
+
   const hasApplicationTab = applications.length > 0;
-  const pendingCount = applications.filter(
-    (a) =>
-      a.registrations.length === 0 ||
-      a.registrations[0]?.status === "CANCELLED"
-  ).length;
+  const pendingCount = applications.filter((a) => a.myStatus !== "APPLIED").length;
 
-  const handleRegister = async () => {
-    if (!selectedApp || !signatureData) return;
-    setSubmitting(true);
+  async function openMyHistory() {
+    setMyLoading(true);
+    setMyHistoryOpen(true);
     try {
-      const body =
-        selectedApp.type === "BREAKFAST"
-          ? {
-              signature: signatureData,
-              selectedDates: Array.from(selectedBreakfastDates).sort(),
-            }
-          : { signature: signatureData };
-      const res = await fetch(
-        `/api/applications/${selectedApp.id}/register`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
+      const res = await fetch("/api/applications/my");
       if (res.ok) {
-        toast.success("신청이 완료되었습니다.");
-        setSignDialogOpen(false);
-        setSignatureData(null);
-        setSelectedApp(null);
-        mutateUser();
-        mutateApps();
-      } else {
-        const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "신청에 실패했습니다.");
+        const json = await res.json();
+        setMyRegistrations(json.registrations ?? []);
       }
-    } catch {
-      toast.error("신청 중 오류가 발생했습니다.");
     } finally {
-      setSubmitting(false);
+      setMyLoading(false);
     }
-  };
-
-  const handleCancel = async (app: MealApplicationItem) => {
-    if (!confirm("신청을 취소하시겠습니까?")) return;
-    try {
-      const res = await fetch(`/api/applications/${app.id}/register`, {
-        method: "DELETE",
-      });
-      if (res.ok) {
-        toast.success("신청이 취소되었습니다.");
-        mutateUser();
-        mutateApps();
-      } else {
-        const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "취소에 실패했습니다.");
-      }
-    } catch {
-      toast.error("취소 중 오류가 발생했습니다.");
-    }
-  };
+  }
 
   return (
     <div className="min-h-screen bg-warm-subtle">
@@ -190,10 +85,7 @@ export default function StudentPage() {
           <TabsList
             className={`grid w-full ${hasApplicationTab ? "grid-cols-5" : "grid-cols-4"} rounded-xl h-11`}
           >
-            <TabsTrigger
-              value="meal"
-              className="rounded-lg text-xs sm:text-sm"
-            >
+            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm">
               식단
             </TabsTrigger>
             {hasApplicationTab && (
@@ -209,22 +101,13 @@ export default function StudentPage() {
                 )}
               </TabsTrigger>
             )}
-            <TabsTrigger
-              value="qr"
-              className="rounded-lg text-xs sm:text-sm"
-            >
+            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm">
               QR
             </TabsTrigger>
-            <TabsTrigger
-              value="profile"
-              className="rounded-lg text-xs sm:text-sm"
-            >
+            <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm">
               개인정보
             </TabsTrigger>
-            <TabsTrigger
-              value="history"
-              className="rounded-lg text-xs sm:text-sm"
-            >
+            <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm">
               확인
             </TabsTrigger>
           </TabsList>
@@ -239,119 +122,89 @@ export default function StudentPage() {
 
           {hasApplicationTab && (
             <TabsContent value="apply">
-              <div className="space-y-3">
-                {applications.map((app) => {
-                  const isRegistered =
-                    app.registrations.length > 0 &&
-                    app.registrations[0].status === "APPROVED";
-                  return (
-                    <Card
-                      key={app.id}
-                      className="card-elevated rounded-2xl border-0"
+              {selectedAppId !== null ? (
+                <StudentApplicationView
+                  applicationId={selectedAppId}
+                  onBack={() => setSelectedAppId(null)}
+                  onSubmitted={() => {
+                    mutateUser();
+                    mutateApps();
+                  }}
+                />
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-lg text-xs min-h-9 whitespace-nowrap"
+                      onClick={openMyHistory}
                     >
-                      <CardContent className="pt-5 pb-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {typeBadge(app.type)}
-                            <span className="font-semibold text-sm whitespace-nowrap">
-                              {app.title}
-                            </span>
-                          </div>
-                          {isRegistered ? (
-                            <span className="whitespace-nowrap inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
-                              신청 완료
-                            </span>
-                          ) : (
-                            <span className="whitespace-nowrap inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                              신청 가능
-                            </span>
-                          )}
-                        </div>
-
-                        {app.description && (
-                          <p className="text-sm text-muted-foreground">
-                            {app.description}
-                          </p>
-                        )}
-
-                        <div className="text-xs text-muted-foreground space-y-0.5">
-                          <p className="whitespace-nowrap">
-                            신청 기간:{" "}
-                            {new Date(app.applyStart).toLocaleDateString(
-                              "ko-KR"
-                            )}{" "}
-                            ~{" "}
-                            {new Date(app.applyEnd).toLocaleDateString(
-                              "ko-KR"
+                      신청내역
+                    </Button>
+                  </div>
+                  {applications.map((app) => {
+                    const isApplied = app.myStatus === "APPLIED";
+                    const isCancelled = app.myStatus === "CANCELLED";
+                    return (
+                      <Card
+                        key={app.id}
+                        className="card-elevated rounded-2xl border-0 cursor-pointer hover:shadow-md transition-shadow"
+                        onClick={() => setSelectedAppId(app.id)}
+                      >
+                        <CardContent className="pt-5 pb-4 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-semibold text-sm line-clamp-2">{app.title}</span>
+                            {isApplied ? (
+                              <span className="whitespace-nowrap shrink-0 inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                                신청완료
+                              </span>
+                            ) : isCancelled ? (
+                              <span className="whitespace-nowrap shrink-0 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                                취소됨
+                              </span>
+                            ) : (
+                              <span className="whitespace-nowrap shrink-0 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+                                미신청
+                              </span>
                             )}
-                          </p>
-                          <p className="whitespace-nowrap">
-                            {app.mealStart && app.mealEnd
-                              ? `급식 기간: ${new Date(app.mealStart).toLocaleDateString("ko-KR")} ~ ${new Date(app.mealEnd).toLocaleDateString("ko-KR")}`
-                              : "명단 수합용"}
-                          </p>
-                        </div>
+                          </div>
 
-                        <div className="flex justify-end">
-                          {isRegistered ? (
-                            <div className="flex gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-lg text-xs"
-                                onClick={() => {
-                                  setSelectedApp(app);
-                                  setSelectedBreakfastDates(
-                                    new Set(
-                                      app.type === "BREAKFAST"
-                                        ? app.registrations[0]?.selectedDates?.map((d) => d.date.slice(0, 10)) ?? []
-                                        : [],
-                                    ),
-                                  );
-                                  setSignatureData(null);
-                                  setSignDialogOpen(true);
-                                }}
+                          <div className="text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(app.applyStartAt).toLocaleDateString("ko-KR")} ~{" "}
+                            {new Date(app.applyEndAt).toLocaleDateString("ko-KR")}
+                          </div>
+
+                          <div className="flex flex-wrap gap-1">
+                            {app.meals.map((m) => (
+                              <span
+                                key={m.mealKind}
+                                className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 whitespace-nowrap"
                               >
-                                수정
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="rounded-lg text-xs"
-                                onClick={() => handleCancel(app)}
-                              >
-                                신청 취소
-                              </Button>
-                            </div>
-                          ) : (
+                                {MEAL_LABEL[m.mealKind]} {m.price.toLocaleString()}원
+                              </span>
+                            ))}
+                          </div>
+
+                          <div className="flex justify-end">
                             <Button
                               size="sm"
-                              className="rounded-lg text-xs"
-                              onClick={() => {
-                                setSelectedApp(app);
-                                const existingDates = app.registrations[0]?.selectedDates?.map((d) => d.date.slice(0, 10));
-                                setSelectedBreakfastDates(
-                                  new Set(
-                                    app.type === "BREAKFAST"
-                                      ? existingDates?.length
-                                        ? existingDates
-                                        : (app.allowedDates ?? []).map((d) => d.date.slice(0, 10))
-                                      : [],
-                                  ),
-                                );
-                                setSignatureData(null);
-                                setSignDialogOpen(true);
+                              variant={isApplied ? "outline" : "default"}
+                              className="rounded-lg text-xs min-h-9 whitespace-nowrap"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedAppId(app.id);
                               }}
                             >
-                              신청하기
+                              {isApplied ? "수정/취소" : "신청하기"}
                             </Button>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
             </TabsContent>
           )}
 
@@ -419,78 +272,74 @@ export default function StudentPage() {
         </Tabs>
       </div>
 
-      {/* Signature Dialog */}
-      <Dialog open={signDialogOpen} onOpenChange={setSignDialogOpen}>
+      {/* 신청내역 Dialog */}
+      <Dialog open={myHistoryOpen} onOpenChange={setMyHistoryOpen}>
         <DialogContent className="rounded-2xl max-w-sm">
           <DialogHeader>
-            <DialogTitle>석식 신청</DialogTitle>
+            <DialogTitle>신청내역</DialogTitle>
           </DialogHeader>
-          {selectedApp && (
-            <div className="space-y-4">
-              <div className="text-sm space-y-1">
-                <p>
-                  <span className="text-muted-foreground">이름:</span>{" "}
-                  <span className="font-medium">{user.name}</span>
-                </p>
-                <p className="whitespace-nowrap">
-                  <span className="text-muted-foreground">학번:</span>{" "}
-                  <span className="font-medium">
-                    {user.grade}학년 {user.classNum}반 {user.number}번
-                  </span>
-                </p>
-                {selectedApp.mealStart && selectedApp.mealEnd && (
-                  <p className="whitespace-nowrap">
-                    <span className="text-muted-foreground">급식 기간:</span>{" "}
-                    <span className="font-medium">
-                      {new Date(selectedApp.mealStart).toLocaleDateString(
-                        "ko-KR"
-                      )}{" "}
-                      ~{" "}
-                      {new Date(selectedApp.mealEnd).toLocaleDateString(
-                        "ko-KR"
-                      )}
+          {myLoading ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">불러오는 중...</p>
+          ) : myRegistrations.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">신청 내역이 없습니다.</p>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {myRegistrations.map((reg) => (
+                <div key={reg.id} className="border border-border/50 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-sm line-clamp-1">{reg.application.title}</span>
+                    <span className={`whitespace-nowrap text-xs px-2 py-0.5 rounded-full font-medium ${
+                      reg.status === "APPROVED"
+                        ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                        : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                    }`}>
+                      {reg.status === "APPROVED" ? "승인" : "취소"}
                     </span>
-                  </p>
-                )}
-              </div>
-
-              {selectedApp.type === "BREAKFAST" && (
-                <DateCheckboxList
-                  dates={(selectedApp.allowedDates ?? []).map((date) => date.date.slice(0, 10))}
-                  value={selectedBreakfastDates}
-                  onChange={setSelectedBreakfastDates}
-                />
-              )}
-
-              <div>
-                <p className="text-sm font-medium mb-2">서명</p>
-                <SignaturePad onSignatureChange={setSignatureData} />
-              </div>
-
-              <div className="flex gap-2 justify-end">
-                <Button
-                  variant="outline"
-                  className="rounded-lg"
-                  onClick={() => {
-                    setSignDialogOpen(false);
-                    setSignatureData(null);
-                    setSelectedApp(null);
-                  }}
-                >
-                  취소
-                </Button>
-                <Button
-                  className="rounded-lg"
-                  disabled={!signatureData || submitting || (selectedApp.type === "BREAKFAST" && selectedBreakfastDates.size === 0)}
-                  onClick={handleRegister}
-                >
-                  {submitting ? "처리 중..." : "신청 완료"}
-                </Button>
-              </div>
+                  </div>
+                  {reg.meals.map((m) => (
+                    <div key={m.mealKind} className="flex justify-between text-xs text-muted-foreground">
+                      <span className="whitespace-nowrap">
+                        {MEAL_LABEL[m.mealKind as MealKind]} {m.dayCount}일
+                      </span>
+                      <span className="whitespace-nowrap font-medium text-foreground">
+                        {m.fee.toLocaleString()}원
+                      </span>
+                    </div>
+                  ))}
+                  {reg.meals.length > 0 && (
+                    <div className="flex justify-between text-sm font-semibold border-t border-border/50 pt-2">
+                      <span className="whitespace-nowrap">합계</span>
+                      <span className="whitespace-nowrap">
+                        {reg.meals.reduce((s, m) => s + m.fee, 0).toLocaleString()}원
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+interface MyRegistrationItem {
+  id: number;
+  status: string;
+  createdAt: string;
+  application: {
+    id: number;
+    title: string;
+    applyStartAt: string;
+    applyEndAt: string;
+  };
+  meals: Array<{
+    mealKind: string;
+    applied: boolean;
+    exempt: boolean;
+    dayCount: number;
+    price: number;
+    fee: number;
+  }>;
 }

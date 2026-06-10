@@ -1,23 +1,20 @@
 import useSWR from "swr";
 import { fetcher } from "@/lib/fetcher";
+import type { MealKind, MealApplyMethod } from "@/lib/meal-plan";
 
-interface MealApplicationItem {
+export interface ApplicationListItem {
   id: number;
   title: string;
   description: string | null;
-  type: string;
-  applyStart: string;
-  applyEnd: string;
-  mealStart: string | null;
-  mealEnd: string | null;
-  status: string;
-  allowedDates?: Array<{ date: string }>;
-  registrations: Array<{
-    id: number;
-    status: string;
-    createdAt: string;
-    selectedDates?: Array<{ date: string }>;
+  applyStartAt: string;
+  applyEndAt: string;
+  meals: Array<{
+    mealKind: MealKind;
+    price: number;
+    method: MealApplyMethod;
+    exemptionSelectable: boolean;
   }>;
+  myStatus: "NONE" | "APPLIED" | "CANCELLED";
 }
 
 export function useApplications() {
@@ -27,10 +24,10 @@ export function useApplications() {
     {
       revalidateOnFocus: false,
       dedupingInterval: 10000,
-    }
+    },
   );
   return {
-    applications: (data?.applications ?? []) as MealApplicationItem[],
+    applications: (data?.applications ?? []) as ApplicationListItem[],
     error,
     isLoading,
     mutate,
