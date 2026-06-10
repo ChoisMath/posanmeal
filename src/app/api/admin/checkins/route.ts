@@ -62,7 +62,7 @@ export async function GET(request: Request) {
       }
     }
   }
-  const mealColumns = buildMonthlyMealColumns(year, month, Array.from(breakfastDateKeys));
+  const mealColumns = buildMonthlyMealColumns(year, month, { BREAKFAST: Array.from(breakfastDateKeys) });
 
   return NextResponse.json({ users, year, month, category, mealColumns });
 }

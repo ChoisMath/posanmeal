@@ -65,7 +65,7 @@ describe("CheckIn mealKind split", () => {
   });
 
   it("builds separate breakfast and dinner columns for breakfast service dates", () => {
-    const columns = buildMonthlyMealColumns(2026, 5, ["2026-05-30"]);
+    const columns = buildMonthlyMealColumns(2026, 5, { BREAKFAST: ["2026-05-30"] });
 
     expect(columns.filter((column) => column.date === "2026-05-29")).toEqual([
       expect.objectContaining({ date: "2026-05-29", day: 29, mealKind: "DINNER" }),
