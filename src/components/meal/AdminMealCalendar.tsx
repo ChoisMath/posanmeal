@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { formatMonthDateKey, getDaysInMonthUtc } from "@/lib/date-range";
 import { WEEKDAY_LABELS, weekdayOf, type MealKind } from "@/lib/meal-plan";
 import { MEAL_THEME } from "./meal-ui";
@@ -72,7 +73,6 @@ export default function AdminMealCalendar({
 
   // 달력 주(week) 빌드: 첫날 요일에 맞춰 null 패딩
   const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  const totalCells = firstWeekday + daysInMonth;
   const weeks: (number | null)[][] = [];
   let current: (number | null)[] = Array(firstWeekday).fill(null);
   for (let day = 1; day <= daysInMonth; day++) {
@@ -170,76 +170,63 @@ export default function AdminMealCalendar({
         <tbody>
           {weeks.map((week, wi) => (
             /* 주마다 2행: 날짜 숫자 행 + 체크박스 행 */
-            <>
+            <Fragment key={wi}>
               {/* 날짜 숫자 행 */}
-              <tr key={`w${wi}-date`}>
-                {week.map((day, di) => {
-                  const dateKey = day ? formatMonthDateKey(year, month, day) : null;
-                  const wd = di; // di == 요일 인덱스 (0=일)
-                  return (
-                    <td
-                      key={di}
-                      colSpan={3}
-                      className={`px-1 py-0.5 text-center whitespace-nowrap border border-border/30 text-xs font-medium
-                        ${day ? theme.cell : "bg-muted/20"}
-                        ${wd === 0 ? "text-red-500" : wd === 6 ? "text-blue-500" : ""}
-                      `}
-                    >
-                      {day ?? ""}
-                    </td>
-                  );
-                })}
+              <tr>
+                {week.map((day, di) => (
+                  <td
+                    key={di}
+                    colSpan={3}
+                    className={`px-1 py-0.5 text-center whitespace-nowrap border border-border/30 text-xs font-medium
+                      ${day ? theme.cell : "bg-muted/20"}
+                      ${di === 0 ? "text-red-500" : di === 6 ? "text-blue-500" : ""}
+                    `}
+                  >
+                    {day ?? ""}
+                  </td>
+                ))}
               </tr>
 
               {/* 체크박스 행 */}
-              <tr key={`w${wi}-check`}>
-                {week.map((day, di) => {
-                  if (!day) {
+              <tr>
+                {week.flatMap((day, di) =>
+                  GRADES.map((grade) => {
+                    if (!day) {
+                      return (
+                        <td
+                          key={`${di}-${grade}`}
+                          className="border border-border/30 bg-muted/20"
+                        />
+                      );
+                    }
+                    const k = gradeKey(grade, formatMonthDateKey(year, month, day));
                     return (
-                      <>
-                        {GRADES.map((g) => (
-                          <td
-                            key={g}
-                            className="border border-border/30 bg-muted/20"
+                      <td
+                        key={`${di}-${grade}`}
+                        className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/30 ${theme.cell}`}
+                      >
+                        <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={checked.has(k)}
+                            onChange={() => {
+                              const next = new Set(checked);
+                              if (next.has(k)) next.delete(k);
+                              else next.add(k);
+                              onChange(next);
+                            }}
                           />
-                        ))}
-                      </>
+                          <span className={`text-[10px] leading-none whitespace-nowrap ${theme.text}`}>
+                            {grade}
+                          </span>
+                        </label>
+                      </td>
                     );
-                  }
-                  const dateKey = formatMonthDateKey(year, month, day);
-                  return (
-                    <>
-                      {GRADES.map((grade) => {
-                        const k = gradeKey(grade, dateKey);
-                        return (
-                          <td
-                            key={grade}
-                            className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/30 ${theme.cell}`}
-                          >
-                            <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4"
-                                checked={checked.has(k)}
-                                onChange={() => {
-                                  const next = new Set(checked);
-                                  if (next.has(k)) next.delete(k);
-                                  else next.add(k);
-                                  onChange(next);
-                                }}
-                              />
-                              <span className={`text-[10px] leading-none whitespace-nowrap ${theme.text}`}>
-                                {grade}
-                              </span>
-                            </label>
-                          </td>
-                        );
-                      })}
-                    </>
-                  );
-                })}
+                  }),
+                )}
               </tr>
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>
