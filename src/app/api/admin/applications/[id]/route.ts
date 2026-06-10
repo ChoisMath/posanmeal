@@ -2,14 +2,55 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { canWriteAdmin } from "@/lib/permissions";
-import { applicationSchema } from "@/lib/schemas/application";
+import { adminApplicationSchema } from "@/lib/schemas/meal-plan";
+import { saveApplication, toDateKey } from "@/lib/meal-plan-server";
 
-function dateFromKey(date: string) {
-  return new Date(`${date}T00:00:00.000Z`);
-}
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!canWriteAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-function uniqSortedDates(dates: string[]) {
-  return Array.from(new Set(dates)).sort();
+  const { id } = await params;
+  const applicationId = parseInt(id, 10);
+
+  const app = await prisma.mealApplication.findUnique({
+    where: { id: applicationId },
+    include: {
+      meals: true,
+      mealDates: { orderBy: [{ mealKind: "asc" }, { grade: "asc" }, { date: "asc" }] },
+    },
+  });
+
+  if (!app) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    application: {
+      id: app.id,
+      title: app.title,
+      description: app.description,
+      status: app.status,
+      startYear: app.startYear,
+      startMonth: app.startMonth,
+      monthCount: app.monthCount,
+      applyStartAt: app.applyStartAt?.toISOString() ?? null,
+      applyEndAt: app.applyEndAt?.toISOString() ?? null,
+      meals: app.meals.map((m) => ({
+        mealKind: m.mealKind,
+        price: m.price,
+        exemptionSelectable: m.exemptionSelectable,
+        method: m.method,
+        dates: app.mealDates
+          .filter((d) => d.mealKind === m.mealKind)
+          .map((d) => ({ grade: d.grade, date: toDateKey(d.date) })),
+      })),
+    },
+  });
 }
 
 export async function PUT(
@@ -23,7 +64,16 @@ export async function PUT(
 
   const { id } = await params;
   const applicationId = parseInt(id, 10);
-  const parsed = applicationSchema.safeParse(await request.json());
+
+  const exists = await prisma.mealApplication.findUnique({
+    where: { id: applicationId },
+    select: { id: true },
+  });
+  if (!exists) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const parsed = adminApplicationSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json(
       { error: "잘못된 요청입니다.", errorCode: "INVALID_BODY" },
@@ -31,86 +81,8 @@ export async function PUT(
     );
   }
 
-  const body = parsed.data;
-  if (body.type === "BREAKFAST") {
-    const allowedDates = uniqSortedDates(body.allowedDates);
-    const allowedDateObjects = allowedDates.map(dateFromKey);
-    const overlap = await prisma.mealApplicationDate.findFirst({
-      where: {
-        date: { in: allowedDateObjects },
-        application: {
-          id: { not: applicationId },
-          type: "BREAKFAST",
-          status: "OPEN",
-        },
-      },
-    });
-    if (overlap) {
-      return NextResponse.json(
-        { error: "다른 진행 중인 조식 공고와 날짜가 겹칩니다.", errorCode: "OVERLAPPING_DATES" },
-        { status: 409 },
-      );
-    }
-
-    const affectedRegistrations = await prisma.mealRegistration.count({
-      where: {
-        applicationId,
-        status: "APPROVED",
-        selectedDates: { some: { date: { notIn: allowedDateObjects } } },
-      },
-    });
-
-    const application = await prisma.$transaction(async (tx) => {
-      await tx.mealApplicationDate.deleteMany({ where: { applicationId } });
-      await tx.mealRegistrationDate.deleteMany({
-        where: {
-          registration: { applicationId },
-          date: { notIn: allowedDateObjects },
-        },
-      });
-
-      return tx.mealApplication.update({
-        where: { id: applicationId },
-        data: {
-          title: body.title,
-          description: body.description || null,
-          type: "BREAKFAST",
-          applyStart: dateFromKey(body.applyStart),
-          applyEnd: dateFromKey(body.applyEnd),
-          mealStart: dateFromKey(allowedDates[0]),
-          mealEnd: dateFromKey(allowedDates[allowedDates.length - 1]),
-          allowedDates: {
-            create: allowedDates.map((date) => ({ date: dateFromKey(date) })),
-          },
-        },
-        include: { allowedDates: { orderBy: { date: "asc" } } },
-      });
-    });
-
-    return NextResponse.json({ application, affectedRegistrations });
-  }
-
-  const application = await prisma.$transaction(async (tx) => {
-    await tx.mealApplicationDate.deleteMany({ where: { applicationId } });
-    await tx.mealRegistrationDate.deleteMany({
-      where: { registration: { applicationId } },
-    });
-
-    return tx.mealApplication.update({
-      where: { id: applicationId },
-      data: {
-        title: body.title,
-        description: body.description || null,
-        type: body.type,
-        applyStart: dateFromKey(body.applyStart),
-        applyEnd: dateFromKey(body.applyEnd),
-        mealStart: body.type === "DINNER" ? dateFromKey(body.mealStart) : null,
-        mealEnd: body.type === "DINNER" ? dateFromKey(body.mealEnd) : null,
-      },
-    });
-  });
-
-  return NextResponse.json({ application, affectedRegistrations: 0 });
+  const app = await saveApplication(parsed.data, applicationId);
+  return NextResponse.json({ application: { id: app.id } });
 }
 
 export async function DELETE(

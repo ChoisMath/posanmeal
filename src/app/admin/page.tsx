@@ -37,18 +37,34 @@ interface User {
   gender?: "MALE" | "FEMALE" | null;
 }
 
+interface MealAppMealItem {
+  mealKind: string;
+  price: number;
+  exemptionSelectable: boolean;
+  method: string;
+  openDateCount: number;
+}
+
 interface MealAppItem {
   id: number;
   title: string;
   description: string | null;
-  type: string;
-  applyStart: string;
-  applyEnd: string;
-  mealStart: string | null;
-  mealEnd: string | null;
   status: string;
-  _count: { registrations: number };
+  // 신규 식사별 구조
+  startYear: number | null;
+  startMonth: number | null;
+  monthCount: number | null;
+  applyStartAt: string | null;
+  applyEndAt: string | null;
+  meals: MealAppMealItem[];
+  registrationCount: number;
   cancelledCount: number;
+  // 구 필드 (하위 호환 — 새 API는 반환하지 않음, undefined 처리 필요)
+  type?: string;
+  applyStart?: string;
+  applyEnd?: string;
+  mealStart?: string | null;
+  mealEnd?: string | null;
   allowedDates?: Array<{ date: string }>;
   allowedDatesCount?: number;
   dailyCounts?: Record<string, number>;
@@ -1141,12 +1157,11 @@ export default function AdminPage() {
                               </Badge>
                               {(() => {
                                 const today = new Date().toISOString().slice(0, 10);
-                                const applyEnd = app.applyEnd.slice(0, 10);
-                                const mealEnd = app.mealEnd ? app.mealEnd.slice(0, 10) : null;
-                                const applyStart = app.applyStart.slice(0, 10);
-                                if (today >= applyStart && today <= applyEnd) {
+                                const applyEnd = (app.applyEndAt ?? app.applyEnd ?? "")?.slice(0, 10);
+                                const applyStart = (app.applyStartAt ?? app.applyStart ?? "")?.slice(0, 10);
+                                if (applyStart && today >= applyStart && today <= applyEnd) {
                                   return <Badge variant="default" className="text-xs">신청중</Badge>;
-                                } else if (mealEnd && today <= mealEnd) {
+                                } else if (app.status === "OPEN") {
                                   return <Badge className="text-xs bg-green-600 hover:bg-green-700">급식중</Badge>;
                                 } else {
                                   return <Badge variant="secondary" className="text-xs">마감</Badge>;
@@ -1154,16 +1169,13 @@ export default function AdminPage() {
                               })()}
                               <span className="font-medium">{app.title}</span>
                             </div>
-                            <p className="text-xs text-muted-foreground whitespace-nowrap">
-                              신청: {new Date(app.applyStart).toLocaleDateString("ko-KR")} ~ {new Date(app.applyEnd).toLocaleDateString("ko-KR")}
-                            </p>
-                            {app.mealStart && app.mealEnd && (
+                            {(app.applyStartAt ?? app.applyStart) && (
                               <p className="text-xs text-muted-foreground whitespace-nowrap">
-                                급식: {new Date(app.mealStart).toLocaleDateString("ko-KR")} ~ {new Date(app.mealEnd).toLocaleDateString("ko-KR")}
+                                신청: {new Date(app.applyStartAt ?? app.applyStart!).toLocaleDateString("ko-KR")} ~ {new Date(app.applyEndAt ?? app.applyEnd!).toLocaleDateString("ko-KR")}
                               </p>
                             )}
                             <p className="text-xs text-muted-foreground mt-1">
-                              신청 {app._count.registrations}명 (취소 {app.cancelledCount}명)
+                              신청 {app.registrationCount}명 (취소 {app.cancelledCount}명)
                             </p>
                           </div>
                           <div className="flex gap-1 shrink-0">
@@ -1183,9 +1195,9 @@ export default function AdminPage() {
                               setAppForm({
                                 title: app.title,
                                 description: app.description || "",
-                                type: app.type,
-                                applyStart: app.applyStart.slice(0, 10),
-                                applyEnd: app.applyEnd.slice(0, 10),
+                                type: app.type ?? "DINNER",
+                                applyStart: (app.applyStartAt ?? app.applyStart ?? "").slice(0, 10),
+                                applyEnd: (app.applyEndAt ?? app.applyEnd ?? "").slice(0, 10),
                                 mealStart: app.mealStart ? app.mealStart.slice(0, 10) : "",
                                 mealEnd: app.mealEnd ? app.mealEnd.slice(0, 10) : "",
                                 allowedDates: (app.allowedDates ?? []).map((d) => d.date.slice(0, 10)),
@@ -1800,7 +1812,7 @@ export default function AdminPage() {
           {selectedAppForReg?.type === "BREAKFAST" && (
             <div className="mb-3">
               <BreakfastMatrixTable
-                allowedDates={(selectedAppForReg.allowedDates ?? []).map((d) => d.date.slice(0, 10))}
+                allowedDates={(selectedAppForReg.allowedDates ?? []).map((d) => d.date.slice(0, 10) as string)}
                 students={visibleRegs.map((r) => r.user)}
                 registrations={visibleRegs}
                 showCancelled={showCancelled}
