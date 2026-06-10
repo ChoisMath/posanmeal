@@ -94,6 +94,14 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const { id } = await params;
-  await prisma.mealApplication.delete({ where: { id: parseInt(id, 10) } });
+  const applicationId = parseInt(id, 10);
+  const exists = await prisma.mealApplication.findUnique({
+    where: { id: applicationId },
+    select: { id: true },
+  });
+  if (!exists) {
+    return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
+  }
+  await prisma.mealApplication.delete({ where: { id: applicationId } });
   return NextResponse.json({ success: true });
 }
