@@ -16,6 +16,7 @@ export function getDateDayKey(value: string | Date): string {
     const match = value.match(/^\d{4}-\d{2}-\d{2}/);
     if (match) return match[0];
   }
+  // DB 날짜는 dateKeyToUtcDate()로 UTC 자정에 저장되므로 toISOString 슬라이스가 안전하다
   return new Date(value).toISOString().slice(0, 10);
 }
 
