@@ -345,7 +345,7 @@ export function StudentApplicationView({
 
       {/* 상단 정보 표 */}
       <div className="card-elevated rounded-2xl border-0 p-4 space-y-3">
-        <h2 className="font-bold text-base whitespace-nowrap">{application.title}</h2>
+        <h2 className="font-bold text-base whitespace-nowrap overflow-hidden text-ellipsis" title={application.title}>{application.title}</h2>
         {application.description && (
           <p className="text-sm text-muted-foreground whitespace-pre-wrap">
             {application.description}

@@ -677,7 +677,7 @@ export default function AdminPage() {
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => clearClientStateAndSignOut("/")}><LogOut className="h-4 w-4" /></Button>
         </div>
       </header>
-      <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-4 md:p-6 flex flex-col overflow-hidden page-enter">
+      <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-1.5 sm:p-3 md:p-4 flex flex-col overflow-hidden page-enter">
         <Tabs
           defaultValue="users"
           className="flex flex-col flex-1 min-h-0"
@@ -1183,7 +1183,7 @@ export default function AdminPage() {
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-7 w-7 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    className="h-9 w-9 disabled:opacity-60 disabled:cursor-not-allowed"
                                     disabled={adminPerm.isSubadmin}
                                     onClick={() => {
                                       if (adminPerm.isSubadmin) return;
@@ -1208,8 +1208,8 @@ export default function AdminPage() {
 
           {!adminPerm.isSubadmin && (
           <TabsContent value="settings" className="flex-1 min-h-0 mt-1 overflow-hidden">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-2 space-y-6">
+            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
+              <CardContent className="pt-2 space-y-6 flex-1 min-h-0 overflow-y-auto">
                 <div>
                   <h3 className="font-semibold mb-4 flex items-center gap-2">
                     <Settings className="h-4 w-4" /> 시스템 설정
@@ -1535,7 +1535,7 @@ export default function AdminPage() {
                     </label>
                     <button
                       type="button"
-                      className="text-xs text-muted-foreground underline"
+                      className="text-xs text-muted-foreground underline min-h-11 px-2"
                       onClick={() => setAddForm({ ...addForm, gender: "" })}
                     >
                       선택 해제

@@ -125,7 +125,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
   }
 
   return (
-    <div className="border rounded-lg overflow-auto max-h-[70vh]">
+    <div className="border rounded-lg overflow-auto max-h-[70dvh]">
       <table className="text-xs border-collapse w-full whitespace-nowrap">
         <thead className="sticky top-0 z-20">
           <tr>

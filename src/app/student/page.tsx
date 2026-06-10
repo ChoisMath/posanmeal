@@ -58,7 +58,7 @@ export default function StudentPage() {
   }
 
   return (
-    <div className="min-h-screen bg-warm-subtle">
+    <div className="min-h-dvh bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between">
         <BrandMark variant="header" label="PosanMeal" />
         <div className="flex items-center gap-1">
@@ -74,7 +74,7 @@ export default function StudentPage() {
         </div>
       </header>
 
-      <div className="max-w-md mx-auto p-4 page-enter">
+      <div className="max-w-md mx-auto p-2 sm:p-4 page-enter">
         <Tabs defaultValue="meal">
           <TabsList
             className={`grid w-full ${hasApplicationTab ? "grid-cols-5" : "grid-cols-4"} rounded-xl h-11`}
@@ -131,7 +131,7 @@ export default function StudentPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="rounded-lg text-xs min-h-9 whitespace-nowrap"
+                      className="rounded-lg text-xs min-h-11 whitespace-nowrap"
                       onClick={openMyHistory}
                     >
                       신청내역
@@ -184,7 +184,7 @@ export default function StudentPage() {
                             <Button
                               size="sm"
                               variant={isApplied ? "outline" : "default"}
-                              className="rounded-lg text-xs min-h-9 whitespace-nowrap"
+                              className="rounded-lg text-xs min-h-11 whitespace-nowrap"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedAppId(app.id);

@@ -124,7 +124,7 @@ export default function AdminMealCalendar({
                   colSpan={3}
                   className={`px-1 py-1 text-center whitespace-nowrap border border-border/30 ${theme.head}`}
                 >
-                  <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer min-h-9 justify-center">
+                  <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer min-h-11 justify-center">
                     <input
                       type="checkbox"
                       className="h-4 w-4"
@@ -155,7 +155,7 @@ export default function AdminMealCalendar({
                       type="button"
                       onClick={() => toggle(keys)}
                       disabled={keys.length === 0}
-                      className={`min-h-9 w-full px-1 text-xs rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors whitespace-nowrap ${theme.text} disabled:opacity-30`}
+                      className={`min-h-11 w-full px-1 text-xs rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors whitespace-nowrap ${theme.text} disabled:opacity-30`}
                       title={`${["일","월","화","수","목","금","토"][wd]}요일 ${grade}학년 전체 토글`}
                     >
                       ⬇ {grade}
@@ -205,7 +205,7 @@ export default function AdminMealCalendar({
                         key={`${di}-${grade}`}
                         className={`px-0.5 py-0.5 text-center whitespace-nowrap border border-border/30 ${theme.cell}`}
                       >
-                        <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer">
+                        <label className="inline-flex flex-col items-center gap-0.5 cursor-pointer min-h-11 min-w-7 justify-center">
                           <input
                             type="checkbox"
                             className="h-4 w-4"

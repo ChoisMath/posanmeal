@@ -331,7 +331,7 @@ function AddDialog({ applicationId, appMeals, existingUserIds, onAdded }: AddDia
                       <button
                         type="button"
                         onClick={() => !alreadyRegistered && setSelectedUserId(u.id)}
-                        className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors ${
+                        className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors min-h-11 ${
                           isSelected
                             ? "bg-primary/10 font-medium"
                             : alreadyRegistered
@@ -368,7 +368,7 @@ function AddDialog({ applicationId, appMeals, existingUserIds, onAdded }: AddDia
                     key={m.mealKind}
                     type="button"
                     onClick={() => toggleMeal(m.mealKind)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border transition-colors min-h-11 ${
                       checked
                         ? `${theme.side} ${theme.text} border-current`
                         : "bg-muted border-transparent"
@@ -705,16 +705,16 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
 
         {/* 표 */}
         <div className="card-elevated rounded-2xl border-0 overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[70dvh]">
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-muted/80 border-b">
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">#</th>
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">입력시간</th>
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">아이디</th>
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">학번</th>
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">이름</th>
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">성별</th>
+                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">#</th>
+                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">입력시간</th>
+                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">아이디</th>
+                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">학번</th>
+                  <th className="sticky top-0 left-0 z-40 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">이름</th>
+                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">성별</th>
                   {mealColumns.map(({ kind, type }) => {
                     const theme = MEAL_THEME[kind];
                     return (
@@ -726,7 +726,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                       </th>
                     );
                   })}
-                  <th className="sticky top-0 z-20 bg-muted/90 px-2 py-2 text-center font-semibold whitespace-nowrap text-xs">관리</th>
+                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-center font-semibold whitespace-nowrap text-xs">관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -762,7 +762,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                         <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">
                           {studentNo(reg.user)}
                         </td>
-                        <td className="px-2 py-1.5 whitespace-nowrap font-medium">
+                        <td className={`sticky left-0 z-30 px-2 py-1.5 whitespace-nowrap font-medium ${isCancelled ? "bg-muted/40" : "bg-background"}`}>
                           {reg.user.name}
                         </td>
                         <td className="px-2 py-1.5 whitespace-nowrap">
@@ -793,7 +793,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                             <button
                               type="button"
                               onClick={() => handleStatusToggle(reg)}
-                              className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-7 transition-colors ${
+                              className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 transition-colors ${
                                 isCancelled
                                   ? "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300"
                                   : "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300"
@@ -804,7 +804,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                             <button
                               type="button"
                               onClick={() => handleDelete(reg)}
-                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-7 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
+                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
                             >
                               삭제
                             </button>
