@@ -50,55 +50,92 @@ export async function PUT(request: Request) {
   }
 
   if (body.mealWindows !== undefined) {
-    const mealWindows = body.mealWindows as {
+    const incoming = body.mealWindows as {
       breakfast?: { start?: string; end?: string };
+      lunch?: { start?: string; end?: string };
       dinner?: { start?: string; end?: string };
     };
+
+    // 부분 업데이트 지원: 누락된 윈도우는 현재 DB 값으로 채움
+    const current = await getCachedSettings();
+    const merged = {
+      breakfast: {
+        start: incoming.breakfast?.start ?? current.mealWindows.breakfast.start,
+        end: incoming.breakfast?.end ?? current.mealWindows.breakfast.end,
+      },
+      lunch: {
+        start: incoming.lunch?.start ?? current.mealWindows.lunch.start,
+        end: incoming.lunch?.end ?? current.mealWindows.lunch.end,
+      },
+      dinner: {
+        start: incoming.dinner?.start ?? current.mealWindows.dinner.start,
+        end: incoming.dinner?.end ?? current.mealWindows.dinner.end,
+      },
+    };
+
     const timePattern = /^\d{2}:\d{2}$/;
-    const values = [
-      mealWindows.breakfast?.start,
-      mealWindows.breakfast?.end,
-      mealWindows.dinner?.start,
-      mealWindows.dinner?.end,
+    const allValues = [
+      merged.breakfast.start,
+      merged.breakfast.end,
+      merged.lunch.start,
+      merged.lunch.end,
+      merged.dinner.start,
+      merged.dinner.end,
     ];
-    if (values.some((value) => typeof value !== "string" || !timePattern.test(value))) {
+    if (allValues.some((v) => typeof v !== "string" || !timePattern.test(v))) {
       return NextResponse.json({ error: "Invalid meal window" }, { status: 400 });
     }
-    const toMinutes = (value: string) => {
-      const [hour, minute] = value.split(":").map(Number);
-      return hour * 60 + minute;
+
+    const toMinutes = (v: string) => {
+      const [h, m] = v.split(":").map(Number);
+      return h * 60 + m;
     };
-    const bfStart = mealWindows.breakfast!.start!;
-    const bfEnd = mealWindows.breakfast!.end!;
-    const dnStart = mealWindows.dinner!.start!;
-    const dnEnd = mealWindows.dinner!.end!;
-    if (toMinutes(bfStart) >= toMinutes(bfEnd) || toMinutes(dnStart) >= toMinutes(dnEnd)) {
+    const bfS = toMinutes(merged.breakfast.start);
+    const bfE = toMinutes(merged.breakfast.end);
+    const luS = toMinutes(merged.lunch.start);
+    const luE = toMinutes(merged.lunch.end);
+    const dnS = toMinutes(merged.dinner.start);
+    const dnE = toMinutes(merged.dinner.end);
+
+    if (bfS >= bfE || luS >= luE || dnS >= dnE) {
       return NextResponse.json({ error: "Start time must be before end time" }, { status: 400 });
     }
-    if (toMinutes(bfEnd) > toMinutes(dnStart) && toMinutes(bfStart) < toMinutes(dnEnd)) {
+    // 3쌍 겹침 검사: 조-중, 조-석, 중-석
+    const overlaps = (aS: number, aE: number, bS: number, bE: number) => aE > bS && aS < bE;
+    if (overlaps(bfS, bfE, luS, luE) || overlaps(bfS, bfE, dnS, dnE) || overlaps(luS, luE, dnS, dnE)) {
       return NextResponse.json({ error: "Meal windows must not overlap" }, { status: 400 });
     }
 
     await prisma.$transaction([
       prisma.systemSetting.upsert({
         where: { key: "breakfast_window_start" },
-        update: { value: bfStart },
-        create: { key: "breakfast_window_start", value: bfStart },
+        update: { value: merged.breakfast.start },
+        create: { key: "breakfast_window_start", value: merged.breakfast.start },
       }),
       prisma.systemSetting.upsert({
         where: { key: "breakfast_window_end" },
-        update: { value: bfEnd },
-        create: { key: "breakfast_window_end", value: bfEnd },
+        update: { value: merged.breakfast.end },
+        create: { key: "breakfast_window_end", value: merged.breakfast.end },
+      }),
+      prisma.systemSetting.upsert({
+        where: { key: "lunch_window_start" },
+        update: { value: merged.lunch.start },
+        create: { key: "lunch_window_start", value: merged.lunch.start },
+      }),
+      prisma.systemSetting.upsert({
+        where: { key: "lunch_window_end" },
+        update: { value: merged.lunch.end },
+        create: { key: "lunch_window_end", value: merged.lunch.end },
       }),
       prisma.systemSetting.upsert({
         where: { key: "dinner_window_start" },
-        update: { value: dnStart },
-        create: { key: "dinner_window_start", value: dnStart },
+        update: { value: merged.dinner.start },
+        create: { key: "dinner_window_start", value: merged.dinner.start },
       }),
       prisma.systemSetting.upsert({
         where: { key: "dinner_window_end" },
-        update: { value: dnEnd },
-        create: { key: "dinner_window_end", value: dnEnd },
+        update: { value: merged.dinner.end },
+        create: { key: "dinner_window_end", value: merged.dinner.end },
       }),
     ]);
   }
