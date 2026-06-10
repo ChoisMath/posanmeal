@@ -52,3 +52,7 @@ public/uploads/*
 .worktrees/
 
 /src/generated/prisma
+
+# Playwright MCP artifacts
+.playwright-mcp/
+/*.png
