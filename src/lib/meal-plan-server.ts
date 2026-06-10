@@ -188,10 +188,6 @@ export async function saveApplication(input: AdminApplicationInput, id?: number)
       monthCount: input.monthCount,
       applyStartAt: new Date(input.applyStartAt),
       applyEndAt: new Date(input.applyEndAt),
-      // 구 코드 호환: type="MULTI" 마커 (구 코드의 BREAKFAST 분기를 타지 않게)
-      type: "MULTI",
-      applyStart: dateKeyToUtcDate(input.applyStartAt.slice(0, 10)),
-      applyEnd: dateKeyToUtcDate(input.applyEndAt.slice(0, 10)),
     };
 
     const app = id

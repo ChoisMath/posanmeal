@@ -76,10 +76,10 @@ model MealApplication {
   id          Int     @id @default(autoincrement())
   title       String
   description String?
-  type        String // "DINNER" | "BREAKFAST" | "OTHER"
+  type        String   @default("MULTI") // "DINNER" | "BREAKFAST" | "OTHER" | "MULTI"
 
-  applyStart DateTime @db.Date
-  applyEnd   DateTime @db.Date
+  applyStart DateTime? @db.Date
+  applyEnd   DateTime? @db.Date
 
   mealStart DateTime? @db.Date
   mealEnd   DateTime? @db.Date
