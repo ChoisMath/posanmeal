@@ -335,7 +335,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               onValueChange={(v) => handleRangeChange(Number(v), startMonth, monthCount)}
             >
               <SelectTrigger className="w-24">
-                <SelectValue />
+                <SelectValue>{(v: string) => `${v}년`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {yearOptions.map((y) => (
@@ -351,7 +351,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               onValueChange={(v) => handleRangeChange(startYear, Number(v), monthCount)}
             >
               <SelectTrigger className="w-20">
-                <SelectValue />
+                <SelectValue>{(v: string) => `${v}월`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
@@ -369,7 +369,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               onValueChange={(v) => handleRangeChange(startYear, startMonth, Number(v))}
             >
               <SelectTrigger className="w-24">
-                <SelectValue />
+                <SelectValue>{(v: string) => `${v}개월간`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {[1, 2, 3, 4, 5, 6].map((n) => (
@@ -427,7 +427,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   onValueChange={(v) => { if (v) setter((prev) => ({ ...prev, hour: v })); }}
                 >
                   <SelectTrigger className="w-16">
-                    <SelectValue />
+                    <SelectValue>{(v: string) => `${v}시`}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {hourOptions.map((h) => (
@@ -442,7 +442,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   onValueChange={(v) => { if (v) setter((prev) => ({ ...prev, minute: v })); }}
                 >
                   <SelectTrigger className="w-16">
-                    <SelectValue />
+                    <SelectValue>{(v: string) => `${v}분`}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {minuteOptions.map((m) => (
@@ -494,7 +494,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   }
                 >
                   <SelectTrigger className="w-28">
-                    <SelectValue />
+                    <SelectValue>{(v: string) => (v === "true" ? "선택가능" : "선택불가")}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="false">선택불가</SelectItem>
@@ -508,7 +508,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   onValueChange={(v) => updateMeal(kind, "method", v as MealApplyMethod)}
                 >
                   <SelectTrigger className="w-28">
-                    <SelectValue />
+                    <SelectValue>{(v: string) => METHOD_LABEL[v as MealApplyMethod]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {(Object.entries(METHOD_LABEL) as [MealApplyMethod, string][]).map(

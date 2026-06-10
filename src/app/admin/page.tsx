@@ -113,6 +113,14 @@ export default function AdminPage() {
   // Applications (신청관리)
   const [apps, setApps] = useState<MealAppItem[]>([]);
 
+  // 진입 시 ?tab= 쿼리 반영 (공고 저장 후 /admin?tab=applications 복귀 등)
+  const [initialTab] = useState(() => {
+    if (typeof window === "undefined") return "users";
+    const t = new URLSearchParams(window.location.search).get("tab");
+    const valid = ["users", "applications", "meals", "dashboard", "settings"];
+    return t && valid.includes(t) ? t : "users";
+  });
+
   // System settings
   const [sysMode, setSysMode] = useState<"online" | "local">("online");
   const [sysGeneration, setSysGeneration] = useState(1);
@@ -679,7 +687,7 @@ export default function AdminPage() {
       </header>
       <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-1.5 sm:p-3 md:p-4 flex flex-col overflow-hidden page-enter">
         <Tabs
-          defaultValue="users"
+          defaultValue={initialTab}
           className="flex flex-col flex-1 min-h-0"
           onValueChange={(v) => {
             if (v === "dashboard") fetchDashboard(dashboardDate);
@@ -1465,7 +1473,7 @@ export default function AdminPage() {
           <div className="space-y-3">
             <div><Label>역할</Label>
               <Select value={addForm.role} onValueChange={(v) => setAddForm({ ...addForm, role: v as "STUDENT" | "TEACHER", gender: "" })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger><SelectValue>{(v: string) => (v === "STUDENT" ? "학생" : "교사")}</SelectValue></SelectTrigger>
                 <SelectContent><SelectItem value="STUDENT">학생</SelectItem><SelectItem value="TEACHER">교사</SelectItem></SelectContent>
               </Select>
             </div>

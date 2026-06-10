@@ -121,7 +121,7 @@ export async function GET(
       return new NextResponse(Buffer.from(buffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="${encodeURIComponent(application.title)}_일괄신청양식.xlsx"`,
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(`${application.title}_일괄신청양식.xlsx`)}"`,
         },
       });
     }
@@ -248,7 +248,9 @@ export async function GET(
     const buffer = await workbook.xlsx.writeBuffer();
 
     const mm = String(startMonth).padStart(2, "0");
-    const filename = `${startYear}년_${mm}월_${application.title}_내역서(${rows.length}).xlsx`;
+    // title에는 "{년}년 {월}월 " 접두가 이미 포함돼 제목 부분만 사용
+    const subject = application.title.replace(/^\d{4}년 \d{2}월 /, "");
+    const filename = `${startYear}년_${mm}월_${subject}_내역서(${rows.length}).xlsx`;
 
     return new NextResponse(Buffer.from(buffer), {
       headers: {

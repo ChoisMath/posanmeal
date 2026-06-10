@@ -1,0 +1,196 @@
+- generic [ref=e1]:
+  - alert [ref=e91]
+  - generic [ref=e1134]:
+    - banner [ref=e1135]:
+      - link "PosanMeal Admin — 홈" [ref=e1136] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e1138]: PosanMeal Admin
+      - generic [ref=e1139]:
+        - generic [ref=e1140]: chois · 최고관리자
+        - button "Toggle theme" [ref=e1141]:
+          - img
+        - link "체크인 페이지" [ref=e1142] [cursor=pointer]:
+          - /url: /check
+          - img [ref=e1143]
+        - button [ref=e1146]:
+          - img
+    - generic [ref=e1148]:
+      - tablist [ref=e1149]:
+        - tab "사용자 관리" [ref=e1150]
+        - tab "신청관리" [active] [selected] [ref=e1151]
+        - tab "석식 확인" [ref=e1152]
+        - tab "당일 현황" [ref=e1153]
+        - tab "설정" [ref=e1154]
+      - tabpanel "신청관리" [ref=e12895]:
+        - generic [ref=e12897]:
+          - generic [ref=e12898]:
+            - heading "신청 공고" [level=3] [ref=e12899]
+            - link "새 공고 작성" [ref=e12900] [cursor=pointer]:
+              - /url: /admin/applications/new
+              - button "새 공고 작성" [ref=e12901]:
+                - img
+                - text: 새 공고 작성
+          - generic [ref=e12902]:
+            - generic [ref=e12903]:
+              - generic [ref=e12904]:
+                - generic [ref=e12905]: 신청중
+                - generic [ref=e12906]: 2026년 06월 검증테스트-삭제예정
+              - paragraph [ref=e12907]: 2026-06-11 00:00 ~ 2026-06-11 23:55
+              - generic [ref=e12908]:
+                - generic [ref=e12909]: 조식 신청불가
+                - generic [ref=e12910]: 중식 5,000원·신청/미신청
+                - generic [ref=e12911]: 석식 5,680원·날짜선택
+              - paragraph [ref=e12912]: 신청 0명 · 취소 0명 · 개설일 60일
+              - generic [ref=e12913]:
+                - link "통계·명단" [ref=e12914] [cursor=pointer]:
+                  - /url: /admin/applications/14/stats
+                  - button "통계·명단" [ref=e12915]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e12916] [cursor=pointer]:
+                  - /url: /admin/applications/14/edit
+                  - button "수정" [ref=e12917]
+                - button "마감" [ref=e12918]
+                - button "삭제" [ref=e12919]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e12920]:
+              - generic [ref=e12921]:
+                - generic [ref=e12922]: 기간종료
+                - generic [ref=e12923]: 7월 토요 조식 신청
+              - paragraph [ref=e12924]: 2026-06-01 00:00 ~ 2026-06-04 23:59
+              - generic [ref=e12926]: 조식 0원·날짜선택
+              - paragraph [ref=e12927]: 신청 0명 · 취소 1명 · 개설일 4일
+              - generic [ref=e12928]:
+                - link "통계·명단" [ref=e12929] [cursor=pointer]:
+                  - /url: /admin/applications/13/stats
+                  - button "통계·명단" [ref=e12930]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e12931] [cursor=pointer]:
+                  - /url: /admin/applications/13/edit
+                  - button "수정" [ref=e12932]
+                - button "마감" [ref=e12933]
+                - button "삭제" [ref=e12934]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e12935]:
+              - generic [ref=e12936]:
+                - generic [ref=e12937]: 기간종료
+                - generic [ref=e12938]: 7월 석식 신청
+              - paragraph [ref=e12939]: 2026-06-01 00:00 ~ 2026-06-04 23:59
+              - generic [ref=e12941]: 석식 0원·날짜선택
+              - paragraph [ref=e12942]: 신청 171명 · 취소 0명 · 개설일 31일
+              - generic [ref=e12943]:
+                - link "통계·명단" [ref=e12944] [cursor=pointer]:
+                  - /url: /admin/applications/12/stats
+                  - button "통계·명단" [ref=e12945]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e12946] [cursor=pointer]:
+                  - /url: /admin/applications/12/edit
+                  - button "수정" [ref=e12947]
+                - button "마감" [ref=e12948]
+                - button "삭제" [ref=e12949]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e12950]:
+              - generic [ref=e12951]:
+                - generic [ref=e12952]: 기간종료
+                - generic [ref=e12953]: 기말고사 중식희망신청(연장)
+              - paragraph [ref=e12954]: 2026-05-11 00:00 ~ 2026-05-21 23:59
+              - generic [ref=e12956]: 석식 0원·날짜선택
+              - paragraph [ref=e12957]: 신청 120명 · 취소 5명 · 개설일 0일
+              - generic [ref=e12958]:
+                - link "통계·명단" [ref=e12959] [cursor=pointer]:
+                  - /url: /admin/applications/11/stats
+                  - button "통계·명단" [ref=e12960]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e12961] [cursor=pointer]:
+                  - /url: /admin/applications/11/edit
+                  - button "수정" [ref=e12962]
+                - button "마감" [ref=e12963]
+                - button "삭제" [ref=e12964]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e12965]:
+              - generic [ref=e12966]:
+                - generic [ref=e12967]: 기간종료
+                - generic [ref=e12968]: 6월 토요조식(소인수수업) 신청
+              - paragraph [ref=e12969]: 2026-04-28 00:00 ~ 2026-04-30 23:59
+              - generic [ref=e12971]: 조식 0원·날짜선택
+              - paragraph [ref=e12972]: 신청 1명 · 취소 0명 · 개설일 4일
+              - generic [ref=e12973]:
+                - link "통계·명단" [ref=e12974] [cursor=pointer]:
+                  - /url: /admin/applications/8/stats
+                  - button "통계·명단" [ref=e12975]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e12976] [cursor=pointer]:
+                  - /url: /admin/applications/8/edit
+                  - button "수정" [ref=e12977]
+                - button "마감" [ref=e12978]
+                - button "삭제" [ref=e12979]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e12980]:
+              - generic [ref=e12981]:
+                - generic [ref=e12982]: 기간종료
+                - generic [ref=e12983]: 6월 석식 신청
+              - paragraph [ref=e12984]: 2026-04-28 00:00 ~ 2026-04-30 23:59
+              - generic [ref=e12986]: 석식 0원·날짜선택
+              - paragraph [ref=e12987]: 신청 229명 · 취소 2명 · 개설일 30일
+              - generic [ref=e12988]:
+                - link "통계·명단" [ref=e12989] [cursor=pointer]:
+                  - /url: /admin/applications/7/stats
+                  - button "통계·명단" [ref=e12990]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e12991] [cursor=pointer]:
+                  - /url: /admin/applications/7/edit
+                  - button "수정" [ref=e12992]
+                - button "마감" [ref=e12993]
+                - button "삭제" [ref=e12994]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e12995]:
+              - generic [ref=e12996]:
+                - generic [ref=e12997]: 기간종료
+                - generic [ref=e12998]: 4월 석식 신청
+              - paragraph [ref=e12999]: 2026-03-23 00:00 ~ 2026-03-27 23:59
+              - generic [ref=e13001]: 석식 0원·날짜선택
+              - paragraph [ref=e13002]: 신청 247명 · 취소 1명 · 개설일 30일
+              - generic [ref=e13003]:
+                - link "통계·명단" [ref=e13004] [cursor=pointer]:
+                  - /url: /admin/applications/4/stats
+                  - button "통계·명단" [ref=e13005]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e13006] [cursor=pointer]:
+                  - /url: /admin/applications/4/edit
+                  - button "수정" [ref=e13007]
+                - button "마감" [ref=e13008]
+                - button "삭제" [ref=e13009]:
+                  - img
+                  - text: 삭제
+            - generic [ref=e13010]:
+              - generic [ref=e13011]:
+                - generic [ref=e13012]: 기간종료
+                - generic [ref=e13013]: 5월 석식 신청
+              - paragraph [ref=e13014]: 2026-04-06 00:00 ~ 2026-04-14 23:59
+              - generic [ref=e13016]: 석식 0원·날짜선택
+              - paragraph [ref=e13017]: 신청 239명 · 취소 0명 · 개설일 31일
+              - generic [ref=e13018]:
+                - link "통계·명단" [ref=e13019] [cursor=pointer]:
+                  - /url: /admin/applications/3/stats
+                  - button "통계·명단" [ref=e13020]:
+                    - img
+                    - text: 통계·명단
+                - link "수정" [ref=e13021] [cursor=pointer]:
+                  - /url: /admin/applications/3/edit
+                  - button "수정" [ref=e13022]
+                - button "마감" [ref=e13023]
+                - button "삭제" [ref=e13024]:
+                  - img
+                  - text: 삭제

@@ -293,7 +293,7 @@ function AddDialog({ applicationId, appMeals, existingUserIds, onAdded }: AddDia
           <div className="flex gap-2">
             <Select value={filterGrade} onValueChange={(v) => { setFilterGrade(v ?? "all"); setFilterClass("all"); setSelectedUserId(null); }}>
               <SelectTrigger className="w-24">
-                <SelectValue placeholder="학년" />
+                <SelectValue placeholder="학년">{(v: string) => (v === "all" ? "전체" : `${v}학년`)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체</SelectItem>
@@ -305,7 +305,7 @@ function AddDialog({ applicationId, appMeals, existingUserIds, onAdded }: AddDia
             {filterGrade !== "all" && (
               <Select value={filterClass} onValueChange={(v) => { setFilterClass(v ?? "all"); setSelectedUserId(null); }}>
                 <SelectTrigger className="w-20">
-                  <SelectValue placeholder="반" />
+                  <SelectValue placeholder="반">{(v: string) => (v === "all" ? "전체" : `${v}반`)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">전체</SelectItem>
@@ -654,7 +654,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
               }}
             >
               <SelectTrigger className="w-24">
-                <SelectValue placeholder="학년" />
+                <SelectValue placeholder="학년">{(v: string) => (v === "all" ? "전체학년" : `${v}학년`)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체학년</SelectItem>
@@ -670,7 +670,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
               disabled={filterGrade === "all"}
             >
               <SelectTrigger className="w-20">
-                <SelectValue placeholder="반" />
+                <SelectValue placeholder="반">{(v: string) => (v === "all" ? "전체반" : `${v}반`)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체반</SelectItem>

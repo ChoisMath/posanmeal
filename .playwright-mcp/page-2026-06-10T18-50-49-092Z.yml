@@ -1,0 +1,64 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - link "PosanMeal Admin — 홈" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e6]: PosanMeal Admin
+      - generic [ref=e7]:
+        - generic [ref=e41]: chois · 최고관리자
+        - button "Toggle theme" [ref=e8]:
+          - img
+        - link "체크인 페이지" [ref=e9] [cursor=pointer]:
+          - /url: /check
+          - img [ref=e10]
+        - button [ref=e13]:
+          - img
+    - generic [ref=e15]:
+      - tablist [ref=e16]:
+        - tab "사용자 관리" [ref=e17]
+        - tab "신청관리" [ref=e18]
+        - tab "석식 확인" [ref=e19]
+        - tab "당일 현황" [active] [selected] [ref=e20]
+        - tab "설정" [ref=e21]
+      - tabpanel "당일 현황" [ref=e11764]:
+        - generic [ref=e11766]:
+          - generic [ref=e11767]:
+            - generic [ref=e11768]:
+              - button "이전 날짜" [ref=e11769]:
+                - img
+              - textbox [ref=e11770]: 2026-06-11
+              - button "다음 날짜" [ref=e11771]:
+                - img
+              - button "오늘" [disabled]
+            - generic [ref=e11772]:
+              - button "새로고침" [ref=e11773]:
+                - img
+              - button "Excel 다운로드" [ref=e11774]:
+                - img
+                - text: Excel 다운로드
+          - generic [ref=e11775]:
+            - generic [ref=e11776]:
+              - paragraph [ref=e11777]: "0"
+              - paragraph [ref=e11778]: 1학년
+            - generic [ref=e11779]:
+              - paragraph [ref=e11780]: "0"
+              - paragraph [ref=e11781]: 2학년
+            - generic [ref=e11782]:
+              - paragraph [ref=e11783]: "0"
+              - paragraph [ref=e11784]: 3학년
+            - generic [ref=e11785]:
+              - paragraph [ref=e11786]: "0"
+              - paragraph [ref=e11787]: 교사(근무)
+            - generic [ref=e11788]:
+              - paragraph [ref=e11789]: "0"
+              - paragraph [ref=e11790]: 교사(개인)
+          - table [ref=e11792]:
+            - rowgroup [ref=e11793]:
+              - row "이름 구분 체크인 시각 출처 수정" [ref=e11794]:
+                - columnheader "이름" [ref=e11795]
+                - columnheader "구분" [ref=e11796]
+                - columnheader "체크인 시각" [ref=e11797]
+                - columnheader "출처" [ref=e11798]
+                - columnheader "수정" [ref=e11799]
+            - rowgroup
+  - alert [ref=e40]

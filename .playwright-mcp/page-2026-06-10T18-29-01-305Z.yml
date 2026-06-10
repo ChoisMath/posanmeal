@@ -1,0 +1,49 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - link "PosanMeal Admin — 홈" [ref=e4] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e6]: PosanMeal Admin
+      - generic [ref=e7]:
+        - generic [ref=e8]: admin · 최고관리자
+        - button "Toggle theme" [ref=e9]:
+          - img
+        - link "체크인 페이지" [ref=e10] [cursor=pointer]:
+          - /url: /check
+          - img [ref=e11]
+        - button [ref=e14]:
+          - img
+    - generic [ref=e16]:
+      - tablist [ref=e17]:
+        - tab "사용자 관리" [selected] [ref=e18]
+        - tab "신청관리" [ref=e19]
+        - tab "석식 확인" [ref=e20]
+        - tab "당일 현황" [ref=e21]
+        - tab "설정" [ref=e22]
+      - tabpanel "사용자 관리" [ref=e23]:
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - generic [ref=e27]:
+              - button "학생" [ref=e28]
+              - button "교사" [ref=e29]
+            - generic [ref=e30]:
+              - button "Sheet연결" [ref=e31]:
+                - img
+                - text: Sheet연결
+              - button "추가" [ref=e32]:
+                - img
+                - text: 추가
+          - table [ref=e34]:
+            - rowgroup [ref=e35]:
+              - row "이름 학년 반 번호 이메일 성별 관리" [ref=e36]:
+                - columnheader "이름" [ref=e37]
+                - columnheader "학년" [ref=e38]
+                - columnheader "반" [ref=e39]
+                - columnheader "번호" [ref=e40]
+                - columnheader "이메일" [ref=e41]
+                - columnheader "성별" [ref=e42]
+                - columnheader "관리" [ref=e43]
+            - rowgroup
+  - button "Open Next.js Dev Tools" [ref=e49] [cursor=pointer]:
+    - img [ref=e50]
+  - alert [ref=e53]

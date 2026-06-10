@@ -1,0 +1,23 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "PosanMeal — 홈" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e5]: PosanMeal
+    - button "Toggle theme" [ref=e7]:
+      - img
+    - generic [ref=e8]:
+      - generic [ref=e9]:
+        - img [ref=e11]
+        - heading "관리자 로그인" [level=1] [ref=e14]
+        - paragraph [ref=e15]: PosanMeal Admin
+      - generic [ref=e17]:
+        - generic [ref=e18]:
+          - generic [ref=e19]: 아이디
+          - textbox "아이디" [ref=e20]: chois
+        - generic [ref=e21]:
+          - generic [ref=e22]: 비밀번호
+          - textbox "비밀번호" [ref=e23]: "0000"
+        - button "로그인" [ref=e24]
+      - link "← 메인으로 돌아가기" [ref=e25] [cursor=pointer]:
+        - /url: /
+  - alert [ref=e26]

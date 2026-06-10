@@ -1,0 +1,26 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - link "PosanMeal — 홈" [ref=e3] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e5]: PosanMeal
+    - button "Toggle theme" [ref=e34]:
+      - img
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - img [ref=e10]
+        - heading "관리자 로그인" [level=1] [ref=e13]
+        - paragraph [ref=e14]: PosanMeal Admin
+      - generic [ref=e16]:
+        - generic [ref=e17]:
+          - generic [ref=e18]: 아이디
+          - textbox "아이디" [ref=e19]: admin
+        - generic [ref=e20]:
+          - generic [ref=e21]: 비밀번호
+          - textbox "비밀번호" [ref=e22]: e2e-test-1234
+        - paragraph [ref=e36]: 아이디 또는 비밀번호가 올바르지 않습니다.
+        - button "로그인" [ref=e23]
+      - link "← 메인으로 돌아가기" [ref=e24] [cursor=pointer]:
+        - /url: /
+  - button "Open Next.js Dev Tools" [ref=e30] [cursor=pointer]:
+    - img [ref=e31]
+  - alert [ref=e35]

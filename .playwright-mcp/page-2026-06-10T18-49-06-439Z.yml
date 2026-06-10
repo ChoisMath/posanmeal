@@ -1,0 +1,95 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e5]:
+      - link "목록" [ref=e2332] [cursor=pointer]:
+        - /url: /admin?tab=applications
+        - img [ref=e7]
+        - generic [ref=e9]: 목록
+      - heading "신청 통계" [level=1] [ref=e2333]
+    - generic [ref=e11]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - paragraph [ref=e15]: 2026년 06월 검증테스트-삭제예정
+          - paragraph [ref=e16]: "신청기간: 2026-06-11 00:00 ~ 2026-06-11 23:55"
+        - generic [ref=e17]:
+          - link "양식 다운로드" [active] [ref=e2334] [cursor=pointer]:
+            - /url: /api/admin/applications/14/export?template=true
+          - generic [ref=e19] [cursor=pointer]:
+            - text: 일괄 업로드
+            - button "일괄 업로드" [ref=e2335]
+          - link "엑셀저장" [ref=e2336] [cursor=pointer]:
+            - /url: /api/admin/applications/14/export
+          - button "신청 추가" [ref=e2337]
+      - generic [ref=e24]:
+        - combobox [ref=e25]:
+          - generic [ref=e26]: all
+          - img: ▼
+        - textbox [ref=e27]: all
+        - combobox [disabled] [ref=e28]:
+          - generic [ref=e29]: all
+          - img: ▼
+        - textbox [disabled] [ref=e30]: all
+        - textbox "이름 검색" [ref=e2338]
+        - generic [ref=e32] [cursor=pointer]:
+          - checkbox "취소 포함" [ref=e2339]
+          - text: 취소 포함
+        - generic [ref=e34]: 1명 표시 / 전체 1명
+      - table [ref=e37]:
+        - rowgroup [ref=e38]:
+          - row "# 입력시간 아이디 학번 이름 성별 중 신청일수 석 면제 석 신청일수 관리" [ref=e2340]:
+            - columnheader "#" [ref=e2341]
+            - columnheader "입력시간" [ref=e2342]
+            - columnheader "아이디" [ref=e2343]
+            - columnheader "학번" [ref=e2344]
+            - columnheader "이름" [ref=e2345]
+            - columnheader "성별" [ref=e2346]
+            - columnheader "중 신청일수" [ref=e2347]
+            - columnheader "석 면제" [ref=e2348]
+            - columnheader "석 신청일수" [ref=e2349]
+            - columnheader "관리" [ref=e2350]
+        - rowgroup [ref=e50]:
+          - row "1 2026-06-11 03:48 h_s_posan26_1101 10101 김규은 여 30일 — 30일 취소 삭제" [ref=e2353]:
+            - cell "1" [ref=e2354]
+            - cell "2026-06-11 03:48" [ref=e2355]
+            - cell "h_s_posan26_1101" [ref=e2356]
+            - cell "10101" [ref=e2357]
+            - cell "김규은" [ref=e2358]
+            - cell "여" [ref=e2359]
+            - cell "30일" [ref=e2360]
+            - cell "—" [ref=e2361]
+            - cell "30일" [ref=e2362]
+            - cell "취소 삭제" [ref=e2363]:
+              - generic [ref=e2364]:
+                - button "취소" [ref=e2365]
+                - button "삭제" [ref=e2366]
+      - table [ref=e2369]:
+        - rowgroup [ref=e2370]:
+          - row "구분 신청자 중식 석식" [ref=e2371]:
+            - columnheader "구분" [ref=e2372]
+            - columnheader "신청자" [ref=e2373]
+            - columnheader "중식" [ref=e2374]
+            - columnheader "석식" [ref=e2375]
+          - row "일수 면제 일수" [ref=e2376]:
+            - columnheader [ref=e2377]
+            - columnheader [ref=e2378]
+            - columnheader "일수" [ref=e2379]
+            - columnheader "면제" [ref=e2380]
+            - columnheader "일수" [ref=e2381]
+        - rowgroup [ref=e2382]:
+          - row "1학년 1명 (남 0/여 1) 30일 0 30일" [ref=e2383]:
+            - cell "1학년" [ref=e2384]
+            - cell "1명 (남 0/여 1)" [ref=e2385]:
+              - text: 1명
+              - generic [ref=e2386]: (남 0/여 1)
+            - cell "30일" [ref=e2387]
+            - cell "0" [ref=e2388]
+            - cell "30일" [ref=e2389]
+          - row "전체 1명 (남 0/여 1) 30일 0 30일" [ref=e2390]:
+            - cell "전체" [ref=e2391]
+            - cell "1명 (남 0/여 1)" [ref=e2392]:
+              - text: 1명
+              - generic [ref=e2393]: (남 0/여 1)
+            - cell "30일" [ref=e2394]
+            - cell "0" [ref=e2395]
+            - cell "30일" [ref=e2396]
+  - alert [ref=e4]

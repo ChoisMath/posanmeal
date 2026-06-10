@@ -1,0 +1,97 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - link [ref=e63] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e6]: PosanMeal Admin
+      - generic [ref=e7]:
+        - generic [ref=e8]: admin · 최고관리자
+        - button [ref=e64]:
+          - img
+        - link [ref=e65] [cursor=pointer]:
+          - /url: /check
+          - img [ref=e11]
+        - button [ref=e14]:
+          - img
+    - generic [ref=e16]:
+      - tablist [ref=e17]:
+        - tab [selected] [ref=e66]: 사용자 관리
+        - tab [ref=e67]: 신청관리
+        - tab [ref=e68]: 석식 확인
+        - tab [ref=e69]: 당일 현황
+        - tab [ref=e70]: 설정
+      - tabpanel [ref=e71]:
+        - generic [ref=e25]:
+          - generic [ref=e26]:
+            - generic [ref=e27]:
+              - button [ref=e72]: 학생
+              - button [ref=e73]: 교사
+            - generic [ref=e30]:
+              - button [ref=e74]:
+                - img
+                - text: Sheet연결
+              - button [ref=e75]:
+                - img
+                - text: 추가
+          - table [ref=e34]:
+            - rowgroup [ref=e35]:
+              - row [ref=e76]:
+                - columnheader [ref=e77]: 이름
+                - columnheader [ref=e78]: 학년
+                - columnheader [ref=e79]: 반
+                - columnheader [ref=e80]: 번호
+                - columnheader [ref=e81]: 이메일
+                - columnheader [ref=e82]: 성별
+                - columnheader [ref=e83]: 관리
+  - generic [ref=e48] [cursor=pointer]:
+    - button "Open Next.js Dev Tools" [ref=e49]:
+      - img [ref=e50]
+    - generic [ref=e54]:
+      - button "Open issues overlay" [ref=e55]:
+        - generic [ref=e84]:
+          - generic [ref=e85]: "1"
+          - generic [ref=e86]: "2"
+        - generic [ref=e59]:
+          - text: Issue
+          - generic [ref=e87]: s
+      - button "Collapse issues badge" [ref=e60]:
+        - img [ref=e61]
+  - alert [ref=e53]
+  - dialog "사용자 추가" [ref=e91]:
+    - heading "사용자 추가" [level=2] [ref=e93]
+    - generic [ref=e94]:
+      - generic [ref=e95]:
+        - generic [ref=e96]: 역할
+        - combobox [ref=e97]:
+          - generic [ref=e98]: STUDENT
+          - img: ▼
+        - textbox [ref=e99]: STUDENT
+      - generic [ref=e100]:
+        - generic [ref=e101]: 이메일
+        - textbox [ref=e102]: e2e-student@test.local
+      - generic [ref=e103]:
+        - generic [ref=e104]: 이름
+        - textbox [ref=e105]: E2E학생
+      - generic [ref=e106]:
+        - generic [ref=e107]:
+          - generic [ref=e108]: 학년
+          - spinbutton [ref=e109]: "1"
+        - generic [ref=e110]:
+          - generic [ref=e111]: 반
+          - spinbutton [ref=e112]: "1"
+        - generic [ref=e113]:
+          - generic [ref=e114]: 번호
+          - spinbutton [ref=e115]: "1"
+      - generic [ref=e116]:
+        - generic [ref=e117]: 성별 *
+        - generic [ref=e118]:
+          - generic [ref=e119] [cursor=pointer]:
+            - radio "남" [checked] [ref=e120]
+            - generic [ref=e121]: 남
+          - generic [ref=e122] [cursor=pointer]:
+            - radio "여" [ref=e123]
+            - generic [ref=e124]: 여
+      - button "추가" [active] [ref=e125]
+    - button "Close" [ref=e126]:
+      - img
+      - generic [ref=e127]: Close
