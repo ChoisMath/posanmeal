@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -15,16 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogClose,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { MEAL_LABEL, MEAL_SHORT, METHOD_LABEL, studentNumberOf, type MealKind } from "@/lib/meal-plan";
+import { MEAL_LABEL, MEAL_SHORT, studentNumberOf, type MealKind } from "@/lib/meal-plan";
+import { AdminApplyDialog, type AdminApplyMode } from "./AdminApplyDialog";
 import { MEAL_THEME } from "@/components/meal/meal-ui";
 import { genderLabel } from "@/lib/gender";
 import { formatDateTimeKST } from "@/lib/timezone";
@@ -83,25 +74,6 @@ interface StatsData {
   registrations: Registration[];
 }
 
-// For the add dialog: application detail with dates
-interface AppDetail {
-  meals: {
-    mealKind: MealKind;
-    method: MealApplyMethod;
-    dates: { grade: number; date: string }[];
-  }[];
-}
-
-interface AdminUser {
-  id: number;
-  name: string;
-  email: string;
-  grade: number | null;
-  classNum: number | null;
-  number: number | null;
-  gender: "MALE" | "FEMALE" | null;
-}
-
 // ---------- Helpers ----------
 
 function emailIdOf(email: string): string {
@@ -122,293 +94,6 @@ function formatApplyRange(start: string | null, end: string | null): string {
   return `${s} ~ ${e}`;
 }
 
-// ---------- AddDialog ----------
-
-interface AddDialogProps {
-  applicationId: number;
-  appMeals: AppMealConfig[];
-  existingUserIds: Set<number>;
-  onAdded: () => void;
-}
-
-function AddDialog({ applicationId, appMeals, existingUserIds, onAdded }: AddDialogProps) {
-  const [open, setOpen] = useState(false);
-  const [filterGrade, setFilterGrade] = useState("all");
-  const [filterClass, setFilterClass] = useState("all");
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
-  const [selectedMealKinds, setSelectedMealKinds] = useState<Set<MealKind>>(new Set());
-  const [saving, setSaving] = useState(false);
-
-  const { data: usersData } = useSWR<{ users: AdminUser[] }>(
-    open ? `/api/admin/users?role=STUDENT` : null,
-    fetcher,
-  );
-
-  // Fetch app detail for DATE/WEEKDAY meal dates
-  const { data: appDetail } = useSWR<{ application: AppDetail }>(
-    open ? `/api/admin/applications/${applicationId}` : null,
-    fetcher,
-  );
-
-  const allStudents = usersData?.users ?? [];
-
-  // Filter out already-registered (non-cancelled) users is handled at display level
-  // We show all students but note if already registered
-  const gradeOptions = [...new Set(allStudents.map((u) => u.grade).filter((g): g is number => g != null))].sort();
-  const classOptions = filterGrade === "all"
-    ? []
-    : [...new Set(allStudents.filter((u) => u.grade === Number(filterGrade)).map((u) => u.classNum).filter((c): c is number => c != null))].sort();
-
-  const filteredStudents = allStudents.filter((u) => {
-    if (filterGrade !== "all" && u.grade !== Number(filterGrade)) return false;
-    if (filterClass !== "all" && u.classNum !== Number(filterClass)) return false;
-    return true;
-  });
-
-  const activeMeals = appMeals.filter((m) => m.method !== "NONE");
-
-  function toggleMeal(kind: MealKind) {
-    setSelectedMealKinds((prev) => {
-      const next = new Set(prev);
-      if (next.has(kind)) {
-        next.delete(kind);
-      } else {
-        next.add(kind);
-      }
-      return next;
-    });
-  }
-
-  async function handleAdd() {
-    if (selectedUserId == null) {
-      toast.error("학생을 선택해주세요.");
-      return;
-    }
-    if (selectedMealKinds.size === 0) {
-      toast.error("신청할 식사를 선택해주세요.");
-      return;
-    }
-    // DATE/WEEKDAY 식사는 개설일 데이터가 있어야 전체 적용 payload를 만들 수 있다
-    if (!appDetail?.application) {
-      toast.error("개설일 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.");
-      return;
-    }
-
-    const appMealMap = new Map<MealKind, AppMealConfig>(appMeals.map((m) => [m.mealKind, m]));
-    const appDetailMeals = appDetail?.application?.meals ?? [];
-    const appDetailMealMap = new Map<MealKind, AppDetail["meals"][number]>(
-      appDetailMeals.map((m) => [m.mealKind, m]),
-    );
-
-    // Find selected user's grade for date filtering
-    const selectedUser = allStudents.find((u) => u.id === selectedUserId);
-    const userGrade = selectedUser?.grade ?? null;
-
-    const mealsPayload = [...selectedMealKinds].map((kind) => {
-      const config = appMealMap.get(kind);
-      const detail = appDetailMealMap.get(kind);
-      const method = config?.method ?? "YN";
-
-      if (method === "DATE" && detail) {
-        // Send all open dates for this user's grade
-        const gradeDates = detail.dates
-          .filter((d) => userGrade == null || d.grade === userGrade)
-          .map((d) => d.date);
-        return {
-          mealKind: kind,
-          applied: true,
-          exempt: false,
-          selectedDates: gradeDates,
-        };
-      }
-
-      if (method === "WEEKDAY" && detail) {
-        // Send all weekdays (0-6) for all months as weekdaysByMonth
-        // Build months list from app dates
-        const allMonths = [...new Set(
-          detail.dates
-            .filter((d) => userGrade == null || d.grade === userGrade)
-            .map((d) => d.date.slice(0, 7)),
-        )];
-        const weekdaysByMonth: Record<string, number[]> = {};
-        for (const monthKey of allMonths) {
-          weekdaysByMonth[monthKey] = [0, 1, 2, 3, 4, 5, 6];
-        }
-        return {
-          mealKind: kind,
-          applied: true,
-          exempt: false,
-          weekdaysByMonth,
-        };
-      }
-
-      // YN: just applied=true
-      return {
-        mealKind: kind,
-        applied: true,
-        exempt: false,
-      };
-    });
-
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/admin/applications/${applicationId}/registrations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: selectedUserId, meals: mealsPayload }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        toast.error(json.error ?? "등록에 실패했습니다.");
-        return;
-      }
-      toast.success("신청이 등록되었습니다.");
-      setOpen(false);
-      setSelectedUserId(null);
-      setSelectedMealKinds(new Set());
-      onAdded();
-    } catch {
-      toast.error("네트워크 오류가 발생했습니다.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button variant="default" size="sm" className="min-h-11 whitespace-nowrap" />
-        }
-      >
-        신청 추가
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md max-h-[90dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>신청 추가</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-3">
-          {/* 학년/반 필터 */}
-          <div className="flex gap-2">
-            <Select value={filterGrade} onValueChange={(v) => { setFilterGrade(v ?? "all"); setFilterClass("all"); setSelectedUserId(null); }}>
-              <SelectTrigger className="w-24">
-                <SelectValue placeholder="학년">{(v: string) => (v === "all" ? "전체" : `${v}학년`)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체</SelectItem>
-                {gradeOptions.map((g) => (
-                  <SelectItem key={g} value={String(g)}>{g}학년</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {filterGrade !== "all" && (
-              <Select value={filterClass} onValueChange={(v) => { setFilterClass(v ?? "all"); setSelectedUserId(null); }}>
-                <SelectTrigger className="w-20">
-                  <SelectValue placeholder="반">{(v: string) => (v === "all" ? "전체" : `${v}반`)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  {classOptions.map((c) => (
-                    <SelectItem key={c} value={String(c)}>{c}반</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          {/* 학생 목록 */}
-          <div className="border rounded-xl overflow-y-auto max-h-48">
-            {filteredStudents.length === 0 ? (
-              <p className="text-sm text-muted-foreground p-3 text-center">학생 없음</p>
-            ) : (
-              <ul>
-                {filteredStudents.map((u) => {
-                  const alreadyRegistered = existingUserIds.has(u.id);
-                  const isSelected = selectedUserId === u.id;
-                  return (
-                    <li key={u.id}>
-                      <button
-                        type="button"
-                        onClick={() => !alreadyRegistered && setSelectedUserId(u.id)}
-                        className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors min-h-11 ${
-                          isSelected
-                            ? "bg-primary/10 font-medium"
-                            : alreadyRegistered
-                              ? "opacity-40 cursor-not-allowed"
-                              : "hover:bg-muted"
-                        }`}
-                        disabled={alreadyRegistered}
-                      >
-                        <span className="text-muted-foreground min-w-12 whitespace-nowrap">
-                          {u.grade}{u.classNum?.toString().padStart(2, "0")}{u.number?.toString().padStart(2, "0")}
-                        </span>
-                        <span className="whitespace-nowrap">{u.name}</span>
-                        {alreadyRegistered && (
-                          <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">이미 신청</span>
-                        )}
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-
-          {/* 식사 선택 */}
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">신청 식사</Label>
-            <div className="flex flex-wrap gap-2">
-              {activeMeals.map((m) => {
-                const theme = MEAL_THEME[m.mealKind];
-                const checked = selectedMealKinds.has(m.mealKind);
-                const isComplexMethod = m.method === "DATE" || m.method === "WEEKDAY";
-                return (
-                  <button
-                    key={m.mealKind}
-                    type="button"
-                    onClick={() => toggleMeal(m.mealKind)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap border transition-colors min-h-11 ${
-                      checked
-                        ? `${theme.side} ${theme.text} border-current`
-                        : "bg-muted border-transparent"
-                    }`}
-                  >
-                    {MEAL_LABEL[m.mealKind]}
-                    {isComplexMethod && (
-                      <span className="ml-1 text-xs opacity-70">({METHOD_LABEL[m.method]}→전체)</span>
-                    )}
-                  </button>
-                );
-              })}
-              {activeMeals.length === 0 && (
-                <p className="text-sm text-muted-foreground">개설된 식사 없음</p>
-              )}
-            </div>
-            {[...selectedMealKinds].some((k) => {
-              const config = appMeals.find((m) => m.mealKind === k);
-              return config?.method === "DATE" || config?.method === "WEEKDAY";
-            }) && (
-              <p className="text-xs text-muted-foreground">
-                날짜선택/요일선택 식사는 해당 학년 개설일 전체로 등록됩니다.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" className="whitespace-nowrap" />}>
-            취소
-          </DialogClose>
-          <Button onClick={handleAdd} disabled={saving} className="whitespace-nowrap">
-            {saving ? "등록 중..." : "등록"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ---------- Main Component ----------
 
 interface ApplicationStatsProps {
@@ -427,6 +112,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
   const [showCancelled, setShowCancelled] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [dialogMode, setDialogMode] = useState<AdminApplyMode | null>(null);
 
   const application = data?.application;
   const registrations = data?.registrations ?? [];
@@ -633,12 +319,14 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                 엑셀저장
               </a>
 
-              <AddDialog
-                applicationId={applicationId}
-                appMeals={application.meals}
-                existingUserIds={existingUserIds}
-                onAdded={() => mutate()}
-              />
+              <Button
+                variant="default"
+                size="sm"
+                className="min-h-11 whitespace-nowrap"
+                onClick={() => setDialogMode({ type: "add" })}
+              >
+                신청 추가
+              </Button>
             </div>
           </div>
         </div>
@@ -746,7 +434,13 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                       ? "bg-muted/40 text-muted-foreground"
                       : "bg-background hover:bg-muted/30 transition-colors";
                     return (
-                      <tr key={reg.id} className={`border-b last:border-0 ${rowCls}`}>
+                      <tr
+                        key={reg.id}
+                        onClick={() =>
+                          setDialogMode({ type: "edit", registrationId: reg.id, user: reg.user })
+                        }
+                        className={`border-b last:border-0 cursor-pointer ${rowCls}`}
+                      >
                         <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">
                           {idx + 1}
                           {isCancelled && (
@@ -764,6 +458,9 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                         </td>
                         <td className={`sticky left-0 z-30 px-2 py-1.5 whitespace-nowrap font-medium ${isCancelled ? "bg-muted/40" : "bg-background"}`}>
                           {reg.user.name}
+                          {reg.addedBy === "ADMIN" && (
+                            <span className="ml-1 inline-flex items-center px-1 py-0 text-[10px] rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 font-medium whitespace-nowrap">관리자</span>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 whitespace-nowrap">
                           {genderLabel(reg.user.gender)}
@@ -792,7 +489,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                           <div className="flex items-center gap-1 justify-center">
                             <button
                               type="button"
-                              onClick={() => handleStatusToggle(reg)}
+                              onClick={(e) => { e.stopPropagation(); handleStatusToggle(reg); }}
                               className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 transition-colors ${
                                 isCancelled
                                   ? "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300"
@@ -803,7 +500,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDelete(reg)}
+                              onClick={(e) => { e.stopPropagation(); handleDelete(reg); }}
                               className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
                             >
                               삭제
@@ -919,6 +616,14 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
         )}
 
       </div>
+
+      <AdminApplyDialog
+        applicationId={applicationId}
+        mode={dialogMode}
+        existingUserIds={existingUserIds}
+        onClose={() => setDialogMode(null)}
+        onSaved={() => mutate()}
+      />
     </div>
   );
 }
