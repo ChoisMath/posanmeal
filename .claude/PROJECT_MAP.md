@@ -96,7 +96,7 @@ prisma/
 | `/api/meals` | GET | 공개 | NEIS API 급식 메뉴 조회 (?date=YYYYMMDD) |
 | `/api/applications` | GET | 로그인 | 신청 가능한 공고 목록 (현재 OPEN, 기간 내) |
 | `/api/applications/my` | GET | 로그인 | 본인 신청 이력 전체 (식사별 meals 포함) |
-| `/api/applications/[id]` | GET | 학생 | 공고 상세 (식사별 가격/방식/학년별 개설일 — StudentApplicationView용) |
+| `/api/applications/[id]` | GET | 학생 | 공고 상세 (식사별 가격/방식/학년별 개설일 — StudentApplicationView용); myRegistration에 `addedBy`/`updatedAt` 포함 |
 | `/api/applications/[id]/register` | POST | 학생 | 식사별 신청 `{meals}` (studentRegisterSchema, 취소된 row 재활성화 포함) |
 | `/api/applications/[id]/register` | DELETE | 학생 | 신청 취소 |
 
@@ -120,9 +120,9 @@ prisma/
 | `/api/admin/applications/[id]` | GET/PUT/DELETE | 관리자 | 신청 공고 상세/수정/삭제 (수정 시 resyncRegistrations로 기존 신청 확정일 재계산) |
 | `/api/admin/applications/[id]/close` | POST | 관리자 | 신청 공고 강제 마감 |
 | `/api/admin/applications/[id]/registrations` | GET/POST | 관리자 | 공고별 신청자 목록 (식사별 meals) / 관리자 직접 추가 |
-| `/api/admin/applications/[id]/registrations/[regId]` | PATCH/DELETE | 관리자 | PATCH `{meals}`(식사별 신청 내용 수정) 또는 `{status}`(APPROVED/CANCELLED) / DELETE 신청 완전 삭제 |
-| `/api/admin/applications/[id]/export` | GET | 관리자 | 기본: 통계 워크북 3시트(전체신청내역·요일별·에듀파인, 수식 포함 — `lib/meal-stats-excel.ts`) / `?template=true`: 일괄신청 양식(조·중·석 O 표기) |
-| `/api/admin/applications/[id]/import` | POST | 관리자 | 엑셀 양식 일괄 신청 등록 (식사별 O 표기 파싱) |
+| `/api/admin/applications/[id]/registrations/[regId]` | GET/PATCH/DELETE | 관리자 | GET: 신청 상세(meals+selectedDates+weekdaysByMonth, canReadAdmin) / PATCH `{meals}` 또는 `{status}` / DELETE 완전 삭제 |
+| `/api/admin/applications/[id]/export` | GET | 관리자 | 기본: 통계 워크북 3시트(전체신청내역·요일별·에듀파인, 수식 포함 — `lib/meal-stats-excel.ts`) / `?template=true`: `meal-template-columns.ts` 기반 날짜/요일별 컬럼+프리필 양식 |
+| `/api/admin/applications/[id]/import` | POST | 관리자 | `meal-template-columns.ts` 헤더 파싱 기반 일괄 신청 등록; 응답에 `ignoredMarks` 포함, MAX_FILE_SIZE_MB 가드, `resolveRegistrationSelections`에 ResolveContext 옵션(N+1 제거) |
 
 ### 시스템 / 동기화
 
@@ -186,8 +186,10 @@ prisma/
 | `AdminMealCalendar` | `src/components/meal/AdminMealCalendar.tsx` | 공고 작성용 학년×식사별 개설일 달력 선택 |
 | `ApplicationForm` | `src/components/meal/ApplicationForm.tsx` | 공고 작성/수정 폼 (new·edit 페이지 공용) |
 | `StudentMealCalendar` | `src/components/meal/StudentMealCalendar.tsx` | 학생 DATE 방식 신청일 선택 달력 |
-| `StudentApplicationView` | `src/components/meal/StudentApplicationView.tsx` | 학생 공고 상세·식사별 신청 UI |
-| `ApplicationStats` | `src/components/meal/ApplicationStats.tsx` | 공고 통계·신청 명단 (stats 페이지) |
+| `ApplicationApplyForm` | `src/components/meal/ApplicationApplyForm.tsx` | 식사별 신청 폼 공용 컴포넌트 (학생 화면·관리자 모달 공유, footer render-prop) |
+| `AdminApplyDialog` | `src/components/meal/AdminApplyDialog.tsx` | 관리자 대리 신청 모달 — 행 클릭=수정/신청 추가=학생 선택 후 신규, 신청기간 무시 |
+| `StudentApplicationView` | `src/components/meal/StudentApplicationView.tsx` | 학생 공고 상세·식사별 신청 UI — 폼 로직이 ApplicationApplyForm으로 추출되어 래퍼화 |
+| `ApplicationStats` | `src/components/meal/ApplicationStats.tsx` | 공고 통계·신청 명단 (stats 페이지) — AddDialog 제거, AdminApplyDialog 통합, 행 클릭/수정 버튼/관리자 배지 |
 
 > `DateMultiPicker`, `BreakfastMatrixTable` 은 삭제됨 (meal/ 컴포넌트로 대체).
 
@@ -218,6 +220,7 @@ prisma/
 | `src/lib/schemas/meal-plan.ts` | zod 스키마: `adminApplicationSchema`(공고 CRUD) / `studentRegisterSchema`(학생 register) |
 | `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
 | `src/lib/gender.ts` | `normalizeGender` / `genderLabel` / `GENDER_LABEL` — 시트 임포트 입력 정규화 + UI 표시용 라벨, 서버·클라이언트 공용 (테스트 `__tests__/gender.test.ts`) |
+| `src/lib/meal-template-columns.ts` | 일괄신청 양식 컬럼 단일 진실 — `TemplateColumn` 타입(YN/DATE/WEEKDAY), `buildTemplateColumns`, `columnHeader`("중식-7월 5일"/"조식-월요일"), `parseColumnHeader`(months 기반 연도 복원). export/import 라우트 공유 (테스트 `__tests__/meal-template-columns.test.ts`) |
 
 ## §9 인증 / 미들웨어
 
@@ -276,6 +279,7 @@ prisma/
 - **라이트모드 전용 운영**: `globals.css` 의 `@custom-variant dark` 는 `dark:` 유틸리티가 `prefers-color-scheme` 미디어쿼리로 fallback 하지 않도록 의도적으로 유지 (`.dark` 클래스는 어디서도 부여되지 않음). 다크모드 재도입 금지.
 - **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트
 - **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
+- **관리자 대리 신청 표시**: `MealRegistration.addedBy="ADMIN"` + `updatedAt` 이 관리자 대리 신청의 근거. 관리자가 학생 신청을 생성/수정하면 `addedBy`가 ADMIN으로 기록됨(의도된 동작). `AdminApplyDialog`는 신청기간(`applyStartAt/EndAt`) 검사를 우회한다
 - **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)
 
 ## §13 Project-Map Maintenance
