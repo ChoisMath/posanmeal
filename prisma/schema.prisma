@@ -76,13 +76,6 @@ model MealApplication {
   id          Int     @id @default(autoincrement())
   title       String
   description String?
-  type        String   @default("MULTI") // "DINNER" | "BREAKFAST" | "OTHER" | "MULTI"
-
-  applyStart DateTime? @db.Date
-  applyEnd   DateTime? @db.Date
-
-  mealStart DateTime? @db.Date
-  mealEnd   DateTime? @db.Date
 
   status    String   @default("OPEN") // "OPEN" | "CLOSED"
   createdAt DateTime @default(now())
@@ -95,12 +88,10 @@ model MealApplication {
   monthCount   Int?
 
   registrations MealRegistration[]
-  allowedDates  MealApplicationDate[]
   meals         MealApplicationMeal[]
   mealDates     MealApplicationMealDate[]
 
   @@index([status])
-  @@index([applyStart, applyEnd])
 }
 
 model MealApplicationMeal {
@@ -127,16 +118,6 @@ model MealApplicationMealDate {
   @@index([date, mealKind])
 }
 
-model MealApplicationDate {
-  applicationId Int
-  date          DateTime @db.Date
-
-  application MealApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  @@id([applicationId, date])
-  @@index([date])
-}
-
 model MealRegistration {
   id            Int       @id @default(autoincrement())
   applicationId Int
@@ -149,11 +130,10 @@ model MealRegistration {
   cancelledBy   String? // "STUDENT" | "ADMIN"
   addedBy       String? // null = 학생 본인, "ADMIN" = 관리자 추가
 
-  application   MealApplication          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  user          User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  selectedDates MealRegistrationDate[]
-  meals         MealRegistrationMeal[]
-  mealDates     MealRegistrationMealDate[]
+  application MealApplication           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meals       MealRegistrationMeal[]
+  mealDates   MealRegistrationMealDate[]
 
   @@unique([applicationId, userId])
   @@index([userId])
@@ -181,17 +161,6 @@ model MealRegistrationMealDate {
 
   @@id([registrationId, mealKind, date])
   @@index([date, mealKind])
-}
-
-model MealRegistrationDate {
-  registrationId Int
-  date           DateTime @db.Date
-  createdAt      DateTime @default(now())
-
-  registration MealRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
-
-  @@id([registrationId, date])
-  @@index([date])
 }
 
 model CheckIn {
