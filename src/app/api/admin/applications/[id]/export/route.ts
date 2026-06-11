@@ -5,6 +5,8 @@ import { canWriteAdmin } from "@/lib/permissions";
 import { studentNumberOf } from "@/lib/meal-plan";
 import { buildStatsWorkbook, type MealKind } from "@/lib/meal-stats-excel";
 import { toDateKey } from "@/lib/meal-plan-server";
+import { buildTemplateColumns, columnHeader } from "@/lib/meal-template-columns";
+import type { MealApplyMethod } from "@/lib/meal-plan";
 
 export async function GET(
   request: Request,
@@ -34,18 +36,14 @@ export async function GET(
 
     const ExcelJS = (await import("exceljs")).default;
 
-    // ── Template mode: 일괄신청 양식 (조식/중식/석식 3열) ──
+    // ── Template mode: 일괄신청 양식 (YN=단일 / DATE=날짜별 / WEEKDAY=요일별 컬럼) ──
     if (isTemplate) {
-      const MEAL_KINDS_ORDER: MealKind[] = ["BREAKFAST", "LUNCH", "DINNER"];
-      const MEAL_LABEL_KO: Record<MealKind, string> = {
-        BREAKFAST: "조식",
-        LUNCH: "중식",
-        DINNER: "석식",
-      };
-
-      // 공고 식사 설정 + 학생 목록 + 기존 APPROVED 신청 병렬 조회
-      const [appMealsConfig, allStudents, approvedRegs] = await Promise.all([
+      const [appMealsConfig, openDateRows, allStudents, approvedRegs] = await Promise.all([
         prisma.mealApplicationMeal.findMany({ where: { applicationId: appId } }),
+        prisma.mealApplicationMealDate.findMany({
+          where: { applicationId: appId },
+          select: { mealKind: true, date: true },
+        }),
         prisma.user.findMany({
           where: { role: "STUDENT" },
           select: { id: true, name: true, grade: true, classNum: true, number: true },
@@ -53,55 +51,102 @@ export async function GET(
         }),
         prisma.mealRegistration.findMany({
           where: { applicationId: appId, status: "APPROVED" },
-          include: { meals: { select: { mealKind: true, applied: true } } },
+          include: {
+            meals: { select: { mealKind: true, applied: true, weekdaysByMonth: true } },
+            mealDates: { select: { mealKind: true, date: true } },
+          },
         }),
       ]);
 
-      // userId → 신청된 mealKind Set
-      const approvedMealsByUser = new Map<number, Set<MealKind>>();
-      for (const reg of approvedRegs) {
-        const kinds = new Set<MealKind>();
-        for (const m of reg.meals) {
-          if (m.applied) kinds.add(m.mealKind as MealKind);
-        }
-        approvedMealsByUser.set(reg.userId, kinds);
+      // 전 학년 합집합 개설일
+      const openSets: Partial<Record<MealKind, Set<string>>> = {};
+      for (const row of openDateRows) {
+        const kind = row.mealKind as MealKind;
+        (openSets[kind] ??= new Set()).add(toDateKey(row.date));
+      }
+      const openDatesUnion: Partial<Record<MealKind, string[]>> = {};
+      for (const kind of Object.keys(openSets) as MealKind[]) {
+        openDatesUnion[kind] = [...openSets[kind]!].sort();
       }
 
-      // 열 헤더: NONE이거나 미설정인 식사는 "(신청불가)" 표기
-      const mealMethodMap = new Map<MealKind, string>();
-      for (const m of appMealsConfig) {
-        mealMethodMap.set(m.mealKind as MealKind, m.method);
+      const columns = buildTemplateColumns(
+        appMealsConfig.map((m) => ({
+          mealKind: m.mealKind as MealKind,
+          method: m.method as MealApplyMethod,
+        })),
+        openDatesUnion,
+      );
+
+      // userId → 프리필 정보 (YN: applied, DATE: 확정일, WEEKDAY: 월 합집합 요일)
+      type Prefill = {
+        appliedKinds: Set<MealKind>;
+        dateKeys: Set<string>; // "KIND:YYYY-MM-DD"
+        weekdays: Set<string>; // "KIND:0..6"
+      };
+      const prefillByUser = new Map<number, Prefill>();
+      for (const reg of approvedRegs) {
+        const p: Prefill = { appliedKinds: new Set(), dateKeys: new Set(), weekdays: new Set() };
+        for (const m of reg.meals) {
+          if (!m.applied) continue;
+          p.appliedKinds.add(m.mealKind as MealKind);
+          if (m.weekdaysByMonth) {
+            const byMonth = JSON.parse(m.weekdaysByMonth) as Record<string, number[]>;
+            for (const wds of Object.values(byMonth)) {
+              for (const wd of wds) p.weekdays.add(`${m.mealKind}:${wd}`);
+            }
+          }
+        }
+        for (const d of reg.mealDates) {
+          p.dateKeys.add(`${d.mealKind}:${toDateKey(d.date)}`);
+        }
+        prefillByUser.set(reg.userId, p);
       }
-      const mealHeaders = MEAL_KINDS_ORDER.map((kind) => {
-        const method = mealMethodMap.get(kind);
-        return method && method !== "NONE"
-          ? MEAL_LABEL_KO[kind]
-          : `${MEAL_LABEL_KO[kind]}(신청불가)`;
-      });
+
+      const HEADER_FILL: Record<MealKind, string> = {
+        BREAKFAST: "FFFFF2CC",
+        LUNCH: "FFE2EFDA",
+        DINNER: "FFDDEBF7",
+      };
 
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet("일괄신청양식");
+      const totalCols = 4 + columns.length;
 
       // 1행: 헤더
       const headerRow = sheet.getRow(1);
-      ["학년", "반", "번호", "이름", ...mealHeaders].forEach((h, i) => {
+      ["학년", "반", "번호", "이름"].forEach((h, i) => {
         const cell = headerRow.getCell(i + 1);
         cell.value = h;
         cell.font = { bold: true };
         cell.alignment = { horizontal: "center" };
       });
+      columns.forEach((col, i) => {
+        const cell = headerRow.getCell(5 + i);
+        cell.value = columnHeader(col);
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: "center" };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: HEADER_FILL[col.kind] },
+        };
+      });
 
-      // 2행: 안내문 (A2:G2 병합)
-      sheet.mergeCells(2, 1, 2, 7);
+      // 2행: 안내문
+      sheet.mergeCells(2, 1, 2, Math.max(totalCols, 7));
       const guideCell = sheet.getCell(2, 1);
-      guideCell.value = "신청할 식사에 O 표시 (해당 학년 개설일 전체 신청 처리)";
-      guideCell.alignment = { horizontal: "center" };
+      guideCell.value =
+        "신청할 날짜/요일에 O 표시. O를 모두 지워도 기존 신청은 취소되지 않습니다 (취소는 신청 명단에서).";
+      guideCell.alignment = { horizontal: "left" };
       guideCell.font = { italic: true, color: { argb: "FF888888" } };
 
       // 열 너비
-      [6, 6, 6, 14, 8, 8, 8].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
+      [6, 6, 6, 14].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
+      columns.forEach((col, i) => {
+        sheet.getColumn(5 + i).width = col.type === "YN" ? 8 : 12;
+      });
 
-      // 3행~: 학생 목록
+      // 3행~: 학생 목록 + 프리필
       let rowIdx = 3;
       for (const s of allStudents) {
         const r = sheet.getRow(rowIdx++);
@@ -109,10 +154,16 @@ export async function GET(
         r.getCell(2).value = s.classNum;
         r.getCell(3).value = s.number;
         r.getCell(4).value = s.name;
-        const approvedKinds = approvedMealsByUser.get(s.id);
-        MEAL_KINDS_ORDER.forEach((kind, ki) => {
-          const cell = r.getCell(5 + ki);
-          cell.value = approvedKinds?.has(kind) ? "O" : "";
+        const p = prefillByUser.get(s.id);
+        columns.forEach((col, i) => {
+          const cell = r.getCell(5 + i);
+          let marked = false;
+          if (p) {
+            if (col.type === "YN") marked = p.appliedKinds.has(col.kind);
+            else if (col.type === "DATE") marked = p.dateKeys.has(`${col.kind}:${col.date}`);
+            else marked = p.weekdays.has(`${col.kind}:${col.weekday}`);
+          }
+          cell.value = marked ? "O" : "";
           cell.alignment = { horizontal: "center" };
         });
       }
