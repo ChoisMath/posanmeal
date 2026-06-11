@@ -22,19 +22,28 @@ export type ResolvedMealSelection = {
   dates: string[]; // "YYYY-MM-DD"
 };
 
+export type ResolveContext = {
+  appMeals: { mealKind: string; method: string; exemptionSelectable: boolean }[];
+  openRows: { mealKind: string; date: Date }[];
+};
+
 /**
  * Resolves the student's meal selection into concrete date lists.
  * Returns { ok: false, error } instead of throwing so the caller can return HTTP 400.
+ * Pass ctx to skip DB queries when the caller already has the data (N+1 prevention).
  */
 export async function resolveRegistrationSelections(
   applicationId: number,
   grade: number,
   meals: StudentRegisterInput["meals"],
+  ctx?: ResolveContext,
 ): Promise<{ ok: true; resolved: ResolvedMealSelection[] } | { ok: false; error: string }> {
-  const [appMeals, openRows] = await Promise.all([
-    prisma.mealApplicationMeal.findMany({ where: { applicationId } }),
-    prisma.mealApplicationMealDate.findMany({ where: { applicationId, grade } }),
-  ]);
+  const [appMeals, openRows] = ctx
+    ? [ctx.appMeals, ctx.openRows]
+    : await Promise.all([
+        prisma.mealApplicationMeal.findMany({ where: { applicationId } }),
+        prisma.mealApplicationMealDate.findMany({ where: { applicationId, grade } }),
+      ]);
 
   const openByKind = new Map<MealKind, string[]>();
   for (const row of openRows) {

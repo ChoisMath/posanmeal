@@ -54,10 +54,22 @@ export async function POST(
     return NextResponse.json({ error: "파일이 필요합니다." }, { status: 400 });
   }
 
+  const maxSizeMb = parseInt(process.env.MAX_FILE_SIZE_MB ?? "5", 10);
+  if (file.size > maxSizeMb * 1024 * 1024) {
+    return NextResponse.json(
+      { error: `파일이 너무 큽니다. 최대 ${maxSizeMb}MB까지 업로드할 수 있습니다.` },
+      { status: 400 },
+    );
+  }
+
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.default.Workbook();
   const buffer = await file.arrayBuffer();
-  await workbook.xlsx.load(buffer);
+  try {
+    await workbook.xlsx.load(buffer);
+  } catch {
+    return NextResponse.json({ error: "엑셀 파일을 읽을 수 없습니다." }, { status: 400 });
+  }
 
   const sheet = workbook.worksheets[0];
   if (!sheet) {
@@ -145,7 +157,7 @@ export async function POST(
 
     // 식사별 O 표시 수집
     const ynMarked = new Set<MealKind>();
-    const dateMarks = new Map<MealKind, string[]>();
+    const dateMarks = new Map<MealKind, Set<string>>();
     const weekdayMarks = new Map<MealKind, Set<number>>();
     let anyMark = false;
 
@@ -155,12 +167,12 @@ export async function POST(
       if (col.type === "YN") {
         ynMarked.add(col.kind);
       } else if (col.type === "DATE") {
-        let arr = dateMarks.get(col.kind);
-        if (!arr) {
-          arr = [];
-          dateMarks.set(col.kind, arr);
+        let set = dateMarks.get(col.kind);
+        if (!set) {
+          set = new Set();
+          dateMarks.set(col.kind, set);
         }
-        arr.push(col.date);
+        set.add(col.date);
       } else {
         let set = weekdayMarks.get(col.kind);
         if (!set) {
@@ -201,7 +213,7 @@ export async function POST(
       }
 
       if (method === "DATE") {
-        const marks = dateMarks.get(kind) ?? [];
+        const marks = [...(dateMarks.get(kind) ?? new Set<string>())];
         const valid = marks.filter((d) => open.has(d));
         ignoredMarks += marks.length - valid.length;
         if (valid.length === 0) continue; // 유효 날짜 없음 → 이 식사만 제외
@@ -228,11 +240,24 @@ export async function POST(
     toProcess.push({ userId: found.id, grade: found.grade, meals });
   });
 
+  const openRowsByGrade = new Map<number, { mealKind: string; date: Date }[]>();
+  for (const row of openDateRows) {
+    let arr = openRowsByGrade.get(row.grade);
+    if (!arr) {
+      arr = [];
+      openRowsByGrade.set(row.grade, arr);
+    }
+    arr.push({ mealKind: row.mealKind, date: row.date });
+  }
+
   let added = 0;
   let updated = 0;
 
   for (const entry of toProcess) {
-    const resolved = await resolveRegistrationSelections(applicationId, entry.grade, entry.meals);
+    const resolved = await resolveRegistrationSelections(applicationId, entry.grade, entry.meals, {
+      appMeals: appMealsConfig,
+      openRows: openRowsByGrade.get(entry.grade) ?? [],
+    });
     if (!resolved.ok) {
       skippedInvalid++;
       continue;
