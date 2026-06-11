@@ -158,10 +158,8 @@ prisma/
 - `MealKind`: BREAKFAST, **LUNCH**, DINNER
 - `Gender`: MALE, FEMALE
 
-### 레거시 (prod 호환용 유지, 후속 정리 예정)
-- `MealApplication.type`(구 DINNER/BREAKFAST/OTHER), `applyStart/End(@db.Date)`, `mealStart/End?` — 구 공고 데이터 호환
-- `MealApplicationDate`, `MealRegistrationDate` — 구 날짜 테이블. 신규 코드는 MealKind 포함 테이블만 사용
 - `MealPeriod` 는 제거됨
+- `MealApplicationDate`, `MealRegistrationDate`, `MealApplication.type/applyStart/applyEnd/mealStart/mealEnd` — Wave 2(20260611000004)에서 제거 완료
 
 ## §7 주요 컴포넌트
 
