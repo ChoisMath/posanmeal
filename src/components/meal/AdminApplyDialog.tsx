@@ -112,6 +112,7 @@ export function AdminApplyDialog({
 
   function handleOpenChange(next: boolean) {
     if (!next) {
+      if (saving) return; // 저장 중 닫기 방지 (취소 후 성공 토스트 혼란 방지)
       reset();
       onClose();
     }
@@ -275,6 +276,7 @@ export function AdminApplyDialog({
                   <Button
                     variant="outline"
                     className="rounded-lg min-h-11 whitespace-nowrap"
+                    disabled={saving}
                     onClick={() => handleOpenChange(false)}
                   >
                     취소

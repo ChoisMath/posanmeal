@@ -489,6 +489,16 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                           <div className="flex items-center gap-1 justify-center">
                             <button
                               type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDialogMode({ type: "edit", registrationId: reg.id, user: reg.user });
+                              }}
+                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 transition-colors"
+                            >
+                              수정
+                            </button>
+                            <button
+                              type="button"
                               onClick={(e) => { e.stopPropagation(); handleStatusToggle(reg); }}
                               className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 transition-colors ${
                                 isCancelled
