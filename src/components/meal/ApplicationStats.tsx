@@ -456,7 +456,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                         <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">
                           {studentNo(reg.user)}
                         </td>
-                        <td className={`sticky left-0 z-30 px-2 py-1.5 whitespace-nowrap font-medium ${isCancelled ? "bg-muted/40" : "bg-background"}`}>
+                        <td className={`sticky left-0 z-30 px-2 py-1.5 whitespace-nowrap font-medium ${isCancelled ? "bg-muted" : "bg-background"}`}>
                           {reg.user.name}
                           {reg.addedBy === "ADMIN" && (
                             <span className="ml-1 inline-flex items-center px-1 py-0 text-[10px] rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 font-medium whitespace-nowrap">관리자</span>
@@ -493,14 +493,14 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                                 e.stopPropagation();
                                 setDialogMode({ type: "edit", registrationId: reg.id, user: reg.user });
                               }}
-                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 transition-colors"
+                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 transition-colors"
                             >
                               수정
                             </button>
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleStatusToggle(reg); }}
-                              className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 transition-colors ${
+                              className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 transition-colors ${
                                 isCancelled
                                   ? "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300"
                                   : "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300"
@@ -511,7 +511,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleDelete(reg); }}
-                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-9 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
+                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
                             >
                               삭제
                             </button>

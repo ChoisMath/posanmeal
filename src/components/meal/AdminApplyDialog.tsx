@@ -221,7 +221,7 @@ export function AdminApplyDialog({
             </div>
 
             {/* 학생 목록 */}
-            <div className="border rounded-xl overflow-y-auto max-h-64">
+            <div className="border rounded-xl overflow-y-auto overflow-x-auto max-h-64">
               {filteredStudents.length === 0 ? (
                 <p className="text-sm text-muted-foreground p-3 text-center">학생 없음</p>
               ) : (
@@ -243,7 +243,7 @@ export function AdminApplyDialog({
                           </span>
                           <span className="whitespace-nowrap">{u.name}</span>
                           {alreadyRegistered && (
-                            <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap">이미 신청 — 명단에서 행을 클릭해 수정</span>
+                            <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap" title="이미 신청된 학생입니다. 명단에서 행을 클릭해 수정하세요.">이미 신청</span>
                           )}
                         </button>
                       </li>
@@ -266,7 +266,7 @@ export function AdminApplyDialog({
                 <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 text-sm text-amber-800 dark:text-amber-300 space-y-0.5">
                   <p className="font-medium whitespace-nowrap">관리자 대리 신청으로 등록됩니다.</p>
                   {isEdit && regData && (
-                    <p className="whitespace-nowrap">
+                    <p>
                       신청 시각: {formatDateTimeKST(new Date(regData.registration.updatedAt))}
                       {regData.registration.addedBy === "ADMIN" && " (관리자 등록)"}
                     </p>

@@ -248,7 +248,7 @@ export function ApplicationApplyForm({
               </span>
               {meal.method === "YN" && (
                 <div className="flex items-center gap-3 ml-auto">
-                  <label className={`inline-flex items-center gap-1.5 cursor-pointer text-sm whitespace-nowrap ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <label className={`min-h-11 inline-flex items-center gap-1.5 cursor-pointer text-sm whitespace-nowrap ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
                     <input
                       type="radio"
                       name={`yn-${meal.mealKind}`}
@@ -259,7 +259,7 @@ export function ApplicationApplyForm({
                     />
                     신청함
                   </label>
-                  <label className={`inline-flex items-center gap-1.5 cursor-pointer text-sm whitespace-nowrap ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
+                  <label className={`min-h-11 inline-flex items-center gap-1.5 cursor-pointer text-sm whitespace-nowrap ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
                     <input
                       type="radio"
                       name={`yn-${meal.mealKind}`}
@@ -304,7 +304,7 @@ export function ApplicationApplyForm({
 
               {/* 면제 체크박스 */}
               {meal.exemptionSelectable && (
-                <label className="inline-flex items-center gap-2 cursor-pointer text-sm">
+                <label className="min-h-11 inline-flex items-center gap-2 cursor-pointer text-sm">
                   <input
                     type="checkbox"
                     className="h-4 w-4"
