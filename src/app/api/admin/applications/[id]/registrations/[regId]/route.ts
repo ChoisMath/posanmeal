@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { canWriteAdmin } from "@/lib/permissions";
+import { canWriteAdmin, canReadAdmin } from "@/lib/permissions";
 import { studentRegisterSchema } from "@/lib/schemas/meal-plan";
-import { resolveRegistrationSelections } from "@/lib/meal-plan-server";
+import { resolveRegistrationSelections, toDateKey } from "@/lib/meal-plan-server";
 import { dateKeyToUtcDate } from "@/lib/date-range";
 import { z } from "zod";
 
@@ -14,6 +14,58 @@ const patchStatusSchema = z.object({
 const patchMealsSchema = z.object({
   meals: studentRegisterSchema.shape.meals,
 });
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string; regId: string }> },
+) {
+  const session = await auth();
+  if (!canReadAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { id, regId } = await params;
+  const applicationId = parseInt(id, 10);
+  const registrationId = parseInt(regId, 10);
+  if (Number.isNaN(applicationId) || Number.isNaN(registrationId)) {
+    return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
+  }
+
+  const reg = await prisma.mealRegistration.findUnique({
+    where: { id: registrationId },
+    include: {
+      user: { select: { id: true, name: true, grade: true, classNum: true, number: true } },
+      meals: true,
+      mealDates: { orderBy: { date: "asc" } },
+    },
+  });
+
+  if (!reg || reg.applicationId !== applicationId) {
+    return NextResponse.json({ error: "신청을 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    registration: {
+      id: reg.id,
+      status: reg.status,
+      addedBy: reg.addedBy,
+      createdAt: reg.createdAt,
+      updatedAt: reg.updatedAt,
+      user: reg.user,
+      meals: reg.meals.map((rm) => ({
+        mealKind: rm.mealKind,
+        applied: rm.applied,
+        exempt: rm.exempt,
+        weekdaysByMonth: rm.weekdaysByMonth
+          ? (JSON.parse(rm.weekdaysByMonth) as Record<string, number[]>)
+          : null,
+        selectedDates: reg.mealDates
+          .filter((d) => d.mealKind === rm.mealKind)
+          .map((d) => toDateKey(d.date)),
+      })),
+    },
+  });
+}
 
 export async function PATCH(
   request: Request,
