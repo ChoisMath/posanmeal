@@ -1,42 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/SignaturePad";
-import { StudentMealCalendar } from "./StudentMealCalendar";
-import { MEAL_THEME } from "./meal-ui";
 import {
-  MEAL_LABEL,
-  METHOD_LABEL,
-  monthsOf,
-  monthKeyOf,
-  weekdayOf,
-  calcMealFee,
-  studentNumberOf,
-  type MealKind,
-  type MealApplyMethod,
-} from "@/lib/meal-plan";
+  ApplicationApplyForm,
+  type ApplyFormMeal,
+  type InitialRegistrationMeal,
+  type RegistrationMealBody,
+} from "./ApplicationApplyForm";
+import { studentNumberOf } from "@/lib/meal-plan";
+import { formatDateTimeKST } from "@/lib/timezone";
 import { useUser } from "@/hooks/useUser";
-
-// 서버(resolveRegistrationSelections)와 동일하게 월별 요일 선택을 날짜로 전개
-function expandWeekdaysPerMonth(
-  openDates: string[],
-  weekdays: Record<string, Set<number>>,
-): string[] {
-  return openDates
-    .filter((d) => weekdays[monthKeyOf(d)]?.has(weekdayOf(d)) ?? false)
-    .sort();
-}
-
-interface ApplicationMeal {
-  mealKind: MealKind;
-  price: number;
-  exemptionSelectable: boolean;
-  method: MealApplyMethod;
-  openDates: string[];
-}
 
 interface ApplicationDetail {
   id: number;
@@ -48,30 +25,14 @@ interface ApplicationDetail {
   applyStartAt: string;
   applyEndAt: string;
   status: string;
-  meals: ApplicationMeal[];
-}
-
-interface MyRegistrationMeal {
-  mealKind: MealKind;
-  applied: boolean;
-  exempt: boolean;
-  weekdaysByMonth: Record<string, number[]> | null;
-  selectedDates: string[];
+  meals: ApplyFormMeal[];
 }
 
 interface MyRegistration {
   status: string;
-  meals: MyRegistrationMeal[];
-}
-
-// 식사별 UI 상태
-interface MealState {
-  applied: boolean;
-  exempt: boolean;
-  // DATE mode
-  dates: Set<string>;
-  // WEEKDAY mode: monthKey → 선택된 요일 Set
-  weekdays: Record<string, Set<number>>;
+  addedBy: string | null;
+  updatedAt: string;
+  meals: InitialRegistrationMeal[];
 }
 
 interface StudentApplicationViewProps {
@@ -89,35 +50,6 @@ function formatApplyDateTime(iso: string): string {
   return `${mm}-${dd} ${hh}시${min}분`;
 }
 
-function buildInitialMealState(
-  meal: ApplicationMeal,
-  existing?: MyRegistrationMeal,
-): MealState {
-  if (!existing) {
-    // YN 기본: applied=true
-    return {
-      applied: meal.method === "YN",
-      exempt: false,
-      dates: new Set(),
-      weekdays: {},
-    };
-  }
-
-  const weekdays: Record<string, Set<number>> = {};
-  if (existing.weekdaysByMonth) {
-    for (const [mk, wds] of Object.entries(existing.weekdaysByMonth)) {
-      weekdays[mk] = new Set(wds);
-    }
-  }
-
-  return {
-    applied: existing.applied,
-    exempt: existing.exempt,
-    dates: new Set(existing.selectedDates),
-    weekdays,
-  };
-}
-
 export function StudentApplicationView({
   applicationId,
   onBack,
@@ -128,8 +60,7 @@ export function StudentApplicationView({
   const [loading, setLoading] = useState(true);
   const [application, setApplication] = useState<ApplicationDetail | null>(null);
   const [registrationCount, setRegistrationCount] = useState(0);
-  const [hasExisting, setHasExisting] = useState(false);
-  const [mealStates, setMealStates] = useState<Record<string, MealState>>({});
+  const [myReg, setMyReg] = useState<MyRegistration | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -144,19 +75,9 @@ export function StudentApplicationView({
           return;
         }
         const json = await res.json();
-        const app: ApplicationDetail = json.application;
-        const myReg: MyRegistration | null = json.myRegistration;
-
-        setApplication(app);
+        setApplication(json.application);
         setRegistrationCount(json.registrationCount ?? 0);
-        setHasExisting(myReg?.status === "APPROVED");
-
-        const states: Record<string, MealState> = {};
-        for (const meal of app.meals) {
-          const existing = myReg?.meals.find((m) => m.mealKind === meal.mealKind);
-          states[meal.mealKind] = buildInitialMealState(meal, existing);
-        }
-        setMealStates(states);
+        setMyReg(json.myRegistration ?? null);
       } finally {
         setLoading(false);
       }
@@ -164,47 +85,7 @@ export function StudentApplicationView({
     load();
   }, [applicationId, onBack]);
 
-  const updateMealState = useCallback(
-    (kind: MealKind, patch: Partial<MealState>) => {
-      setMealStates((prev) => ({
-        ...prev,
-        [kind]: { ...prev[kind], ...patch },
-      }));
-    },
-    [],
-  );
-
-  const handleToggleDate = useCallback(
-    (kind: MealKind, dateKey: string) => {
-      setMealStates((prev) => {
-        const cur = prev[kind];
-        const next = new Set(cur.dates);
-        if (next.has(dateKey)) next.delete(dateKey);
-        else next.add(dateKey);
-        return { ...prev, [kind]: { ...cur, dates: next } };
-      });
-    },
-    [],
-  );
-
-  const handleToggleWeekday = useCallback(
-    (kind: MealKind, monthKey: string, weekday: number) => {
-      setMealStates((prev) => {
-        const cur = prev[kind];
-        const monthWds = new Set(cur.weekdays[monthKey] ?? []);
-        if (monthWds.has(weekday)) monthWds.delete(weekday);
-        else monthWds.add(weekday);
-        return {
-          ...prev,
-          [kind]: {
-            ...cur,
-            weekdays: { ...cur.weekdays, [monthKey]: monthWds },
-          },
-        };
-      });
-    },
-    [],
-  );
+  const hasExisting = myReg?.status === "APPROVED";
 
   const handleCancel = async () => {
     if (!confirm("신청을 취소하시겠습니까?")) return;
@@ -225,52 +106,14 @@ export function StudentApplicationView({
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (mealsBody: RegistrationMealBody[]) => {
     if (!signature) {
       toast.error("서명을 입력해주세요.");
       return;
     }
-    if (!application) return;
 
     setSubmitting(true);
     try {
-      const mealsBody = application.meals.map((meal) => {
-        const st = mealStates[meal.mealKind];
-        if (!st) return { mealKind: meal.mealKind, applied: false, exempt: false };
-
-        if (meal.method === "YN") {
-          return {
-            mealKind: meal.mealKind,
-            applied: st.applied,
-            exempt: st.exempt,
-          };
-        }
-
-        if (meal.method === "WEEKDAY") {
-          const weekdaysByMonth: Record<string, number[]> = {};
-          for (const [mk, wds] of Object.entries(st.weekdays)) {
-            weekdaysByMonth[mk] = [...wds];
-          }
-          return {
-            mealKind: meal.mealKind,
-            applied: Object.values(weekdaysByMonth).some((wds) => wds.length > 0),
-            exempt: st.exempt,
-            weekdaysByMonth,
-          };
-        }
-
-        if (meal.method === "DATE") {
-          return {
-            mealKind: meal.mealKind,
-            applied: st.dates.size > 0,
-            exempt: st.exempt,
-            selectedDates: [...st.dates].sort(),
-          };
-        }
-
-        return { mealKind: meal.mealKind, applied: false, exempt: false };
-      });
-
       const res = await fetch(`/api/applications/${applicationId}/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -307,24 +150,6 @@ export function StudentApplicationView({
     application.status === "OPEN" &&
     now >= new Date(application.applyStartAt) &&
     now <= new Date(application.applyEndAt);
-
-  const months = monthsOf(application.startYear, application.startMonth, application.monthCount);
-
-  // 전체 합계 계산
-  let totalFee = 0;
-  for (const meal of application.meals) {
-    const st = mealStates[meal.mealKind];
-    if (!st || !st.applied) continue;
-    let dayCount = 0;
-    if (meal.method === "YN") {
-      dayCount = meal.openDates.length;
-    } else if (meal.method === "DATE") {
-      dayCount = st.dates.size;
-    } else if (meal.method === "WEEKDAY") {
-      dayCount = expandWeekdaysPerMonth(meal.openDates, st.weekdays).length;
-    }
-    totalFee += calcMealFee(meal.price, dayCount, st.exempt);
-  }
 
   const studentNumber =
     user?.grade && user?.classNum && user?.number
@@ -381,6 +206,11 @@ export function StudentApplicationView({
             </tbody>
           </table>
         </div>
+        {hasExisting && myReg?.addedBy === "ADMIN" && (
+          <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">
+            이 신청은 관리자가 대리 신청했습니다 ({formatDateTimeKST(new Date(myReg.updatedAt))})
+          </div>
+        )}
         {!isApplyOpen && (
           <p className="text-sm text-amber-600 dark:text-amber-400 font-medium whitespace-nowrap">
             {application.status !== "OPEN"
@@ -390,139 +220,48 @@ export function StudentApplicationView({
         )}
       </div>
 
-      {/* 식사별 섹션 */}
-      {application.meals.map((meal) => {
-        const theme = MEAL_THEME[meal.mealKind];
-        const st = mealStates[meal.mealKind];
-        if (!st) return null;
+      {/* 식사별 신청 폼 (공용 컴포넌트) */}
+      <ApplicationApplyForm
+        key={applicationId}
+        application={application}
+        initialMeals={myReg?.meals}
+        disabled={!isApplyOpen}
+        footer={({ buildMealsBody }) =>
+          isApplyOpen ? (
+            <>
+              <div>
+                <p className="text-sm font-medium mb-2">서명</p>
+                <SignaturePad onSignatureChange={setSignature} />
+              </div>
 
-        const openDatesSet = new Set(meal.openDates);
-
-        let dayCount = 0;
-        let derivedSelectedDates = new Set<string>();
-
-        if (meal.method === "YN") {
-          dayCount = st.applied ? meal.openDates.length : 0;
-          if (st.applied) derivedSelectedDates = openDatesSet;
-        } else if (meal.method === "DATE") {
-          dayCount = st.dates.size;
-          derivedSelectedDates = st.dates;
-        } else if (meal.method === "WEEKDAY") {
-          const expanded = expandWeekdaysPerMonth(meal.openDates, st.weekdays);
-          dayCount = expanded.length;
-          derivedSelectedDates = new Set(expanded);
-        }
-
-        const fee = calcMealFee(meal.price, dayCount, st.exempt);
-        const isDisabled = !isApplyOpen;
-
-        return (
-          <div key={meal.mealKind} className="card-elevated rounded-2xl border-0 overflow-hidden">
-            {/* 섹션 헤더 */}
-            <div className={`px-4 py-3 flex flex-wrap items-center gap-2 ${theme.side}`}>
-              <span className={`font-semibold text-sm whitespace-nowrap ${theme.text}`}>
-                {MEAL_LABEL[meal.mealKind]}
-              </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${theme.head} ${theme.text}`}>
-                {METHOD_LABEL[meal.method]}
-              </span>
-              {meal.method === "YN" && (
-                <div className="flex items-center gap-3 ml-auto">
-                  <label className={`inline-flex items-center gap-1.5 cursor-pointer text-sm whitespace-nowrap ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`}>
-                    <input
-                      type="radio"
-                      name={`yn-${meal.mealKind}`}
-                      checked={st.applied}
-                      disabled={isDisabled}
-                      onChange={() => updateMealState(meal.mealKind, { applied: true })}
-                      className="h-4 w-4"
-                    />
-                    신청함
-                  </label>
-                  <label className={`inline-flex items-center gap-1.5 cursor-pointer text-sm whitespace-nowrap ${isDisabled ? "opacity-50 cursor-not-allowed" : ""}`}>
-                    <input
-                      type="radio"
-                      name={`yn-${meal.mealKind}`}
-                      checked={!st.applied}
-                      disabled={isDisabled}
-                      onChange={() => updateMealState(meal.mealKind, { applied: false })}
-                      className="h-4 w-4"
-                    />
-                    신청안함
-                  </label>
-                </div>
-              )}
-            </div>
-
-            <div className={`p-3 space-y-3 ${isDisabled ? "opacity-60 pointer-events-none" : ""}`}>
-              {/* 달력 */}
-              {months.map(({ year, month }) => {
-                const mk = `${year}-${String(month).padStart(2, "0")}`;
-                const selectedWdsForMonth = st.weekdays[mk] ?? new Set<number>();
-
-                return (
-                  <StudentMealCalendar
-                    key={mk}
-                    year={year}
-                    month={month}
-                    mealKind={meal.mealKind}
-                    openDates={openDatesSet}
-                    mode={
-                      meal.method === "WEEKDAY"
-                        ? "weekday"
-                        : meal.method === "DATE"
-                          ? "date"
-                          : "readonly"
-                    }
-                    selectedDates={derivedSelectedDates}
-                    selectedWeekdays={selectedWdsForMonth}
-                    onToggleDate={(d) => handleToggleDate(meal.mealKind, d)}
-                    onToggleWeekday={(wd) => handleToggleWeekday(meal.mealKind, mk, wd)}
-                  />
-                );
-              })}
-
-              {/* 면제 체크박스 */}
-              {meal.exemptionSelectable && (
-                <label className="inline-flex items-center gap-2 cursor-pointer text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={st.exempt}
-                    onChange={(e) => updateMealState(meal.mealKind, { exempt: e.target.checked })}
-                  />
-                  <span className="whitespace-nowrap">면제 대상입니다</span>
-                </label>
-              )}
-
-              {/* 금액 줄 */}
-              <p className="text-sm font-medium whitespace-nowrap">
-                총 급식비 : {fee.toLocaleString()}원
-                {meal.method !== "YN" && (
-                  <span className="text-muted-foreground font-normal">
-                    {" "}({meal.price.toLocaleString()}원×{dayCount}일)
-                  </span>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  className="rounded-lg min-h-11 whitespace-nowrap"
+                  onClick={onBack}
+                >
+                  목록으로
+                </Button>
+                {hasExisting && (
+                  <Button
+                    variant="outline"
+                    className="rounded-lg min-h-11 whitespace-nowrap text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950"
+                    onClick={handleCancel}
+                  >
+                    신청 취소
+                  </Button>
                 )}
-              </p>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* 합계 + 서명 + 버튼 */}
-      <div className="card-elevated rounded-2xl border-0 p-4 space-y-4">
-        <p className="text-base font-bold whitespace-nowrap">
-          총 납부 금액 : {totalFee.toLocaleString()}원
-        </p>
-
-        {isApplyOpen && (
-          <>
-            <div>
-              <p className="text-sm font-medium mb-2">서명</p>
-              <SignaturePad onSignatureChange={setSignature} />
-            </div>
-
-            <div className="flex flex-wrap gap-2 justify-end">
+                <Button
+                  className="rounded-lg min-h-11 whitespace-nowrap"
+                  disabled={!signature || submitting}
+                  onClick={() => handleSubmit(buildMealsBody())}
+                >
+                  {submitting ? "처리 중..." : hasExisting ? "신청 수정" : "신청하기"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-end">
               <Button
                 variant="outline"
                 className="rounded-lg min-h-11 whitespace-nowrap"
@@ -530,38 +269,10 @@ export function StudentApplicationView({
               >
                 목록으로
               </Button>
-              {hasExisting && (
-                <Button
-                  variant="outline"
-                  className="rounded-lg min-h-11 whitespace-nowrap text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950"
-                  onClick={handleCancel}
-                >
-                  신청 취소
-                </Button>
-              )}
-              <Button
-                className="rounded-lg min-h-11 whitespace-nowrap"
-                disabled={!signature || submitting}
-                onClick={handleSubmit}
-              >
-                {submitting ? "처리 중..." : hasExisting ? "신청 수정" : "신청하기"}
-              </Button>
             </div>
-          </>
-        )}
-
-        {!isApplyOpen && (
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              className="rounded-lg min-h-11 whitespace-nowrap"
-              onClick={onBack}
-            >
-              목록으로
-            </Button>
-          </div>
-        )}
-      </div>
+          )
+        }
+      />
     </div>
   );
 }

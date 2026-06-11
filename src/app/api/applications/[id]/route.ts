@@ -86,6 +86,8 @@ export async function GET(
   if (myRegistration) {
     myRegistrationResult = {
       status: myRegistration.status,
+      addedBy: myRegistration.addedBy,
+      updatedAt: myRegistration.updatedAt,
       meals: myRegistration.meals.map((rm) => {
         const selectedDates = myRegistration.mealDates
           .filter((d) => d.mealKind === rm.mealKind)
