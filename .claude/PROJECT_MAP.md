@@ -25,7 +25,6 @@
 | sharp | ^0.34.5 | 사진 WebP 변환 |
 | sonner | ^2.0.7 | Toast (shadcn/ui 대체) |
 | swr | ^2.4.1 | 클라이언트 데이터 페칭 |
-| next-themes | ^0.4.6 | 다크/라이트 테마 |
 | bcryptjs | ^3.0.3 | 관리자 패스워드 해시 |
 | jsonwebtoken | ^9.0.3 | QR JWT 토큰 |
 | @base-ui/react | ^1.3.0 | 헤드리스 UI 프리미티브 |
@@ -36,7 +35,7 @@
 ```
 src/
 ├── app/
-│   ├── layout.tsx               # Root layout (SwUpdater, ThemeProvider, AuthProvider)
+│   ├── layout.tsx               # Root layout (SwUpdater, AuthProvider)
 │   ├── page.tsx                 # 랜딩 (Google 로그인)
 │   ├── check/page.tsx           # QR 스캐너 (공개, 태블릿용)
 │   ├── student/page.tsx         # 학생 4탭 (QR, 신청, 개인정보, 확인)
@@ -52,7 +51,6 @@ src/
 │   └── meal/                    # 식사별 공고·신청 UI (meal-ui.ts 테마 포함)
 ├── lib/                         # (§8 참조)
 ├── providers/
-│   ├── ThemeProvider.tsx
 │   └── AuthProvider.tsx
 ├── hooks/                       # SWR 훅 등
 ├── types/
@@ -141,7 +139,7 @@ prisma/
 |------|----------|------|------|
 | `Admin` | id, username, passwordHash | — | 현재 미사용, 환경변수 방식 대체 |
 | `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, gender?(MALE/FEMALE), adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) — gender는 학생 필수(API 검증) / 교사 옵셔널, 컬럼은 nullable |
-| `MealApplication` | id, title, description?, type(String), **applyStartAt/applyEndAt?(DateTime)**, **startYear/startMonth/monthCount?(Int)**, status(OPEN/CLOSED) | registrations, meals, mealDates | 신규 공고는 type="MULTI" 마커 + applyStartAt/EndAt(시각 단위 신청기간) + startYear/Month/monthCount(대상 월 범위) 사용 |
+| `MealApplication` | id, title, description?, **applyStartAt/applyEndAt?(DateTime)**, **startYear/startMonth/monthCount?(Int)**, status(OPEN/CLOSED) | registrations, meals, mealDates | applyStartAt/EndAt(시각 단위 신청기간) + startYear/Month/monthCount(대상 월 범위) — 구 `type` 컬럼은 Wave 2b(20260611000004)에서 DROP 완료 |
 | `MealApplicationMeal` | applicationId, mealKind, price, exemptionSelectable, method(NONE/YN/WEEKDAY/DATE) | application | @@id([applicationId,mealKind]) — 공고가 제공하는 식사별 가격·신청 방식 |
 | `MealApplicationMealDate` | applicationId, mealKind, grade, date(@db.Date) | application | @@id([applicationId,mealKind,grade,date]) — 학년별 식사 개설일 |
 | `MealRegistration` | id, applicationId, userId, signature(Text), status(APPROVED/CANCELLED), cancelledAt?, cancelledBy?, addedBy? | application, user, meals, mealDates | @@unique([applicationId,userId]) — 취소 후 재신청 시 row 재활성화 |
@@ -175,7 +173,6 @@ prisma/
 | `MealMenu` | `src/components/MealMenu.tsx` | NEIS API 급식 메뉴 표시 |
 | `SwUpdater` | `src/components/SwUpdater.tsx` | Service Worker 등록·갱신 (SKIP_WAITING 트리거) |
 | `ResetOnQuery` | `src/components/ResetOnQuery.tsx` | ?reset=1 쿼리 시 브라우저 캐시·IDB·SW 전체 초기화 |
-| `ThemeToggle` | `src/components/ThemeToggle.tsx` | 다크/라이트 토글 |
 | `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 |
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
 | `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
@@ -275,7 +272,8 @@ prisma/
 - **체크인 자격 판정**: `MealRegistrationMealDate`(오늘 날짜 + 해당 mealKind) 존재 + registration status=APPROVED. 이 테이블이 신청 확정일의 단일 진실 — 공고(MealApplicationMealDate)는 개설일일 뿐 자격 기준 아님
 - **조식/중식 컬럼 노출 조건**: 관리자 석식확인·당일현황 모두 확정일(`MealRegistrationMealDate`, APPROVED) 기준으로만 BREAKFAST/LUNCH 컬럼·카드 부제 표시
 - **CANCELLED 필터 필수**: CANCELLED 신청의 MealRegistrationMealDate 행은 보존됨(재신청 재활성화 대비) → 모든 집계·자격 조회에 `status=APPROVED` + `applied=true` 필터를 빼먹지 말 것
-- **식사별 구조 마이그레이션**: `20260611000001`(MealKind에 LUNCH 추가, enum) + `20260611000002`(Meal/MealDate 테이블 4종 생성 + 구 데이터 백필, 멱등 `ON CONFLICT` — prod 머지 직전 수동 재실행 가능). 구 컬럼(type, applyStart/End)·구 테이블(MealApplicationDate/MealRegistrationDate)은 prod 호환용 유지, 후속 릴리스에서 정리 예정
+- **식사별 구조 마이그레이션**: `20260611000001`(MealKind에 LUNCH 추가, enum) + `20260611000002`(Meal/MealDate 테이블 4종 생성 + 구 데이터 백필, 멱등 `ON CONFLICT`). 구 컬럼(type, applyStart/End 등)·구 테이블(MealApplicationDate/MealRegistrationDate) 정리는 `20260611000003`(nullable 완화) + `20260611000004`(DROP) 두 단계로 완료
+- **라이트모드 전용 운영**: `globals.css` 의 `@custom-variant dark` 는 `dark:` 유틸리티가 `prefers-color-scheme` 미디어쿼리로 fallback 하지 않도록 의도적으로 유지 (`.dark` 클래스는 어디서도 부여되지 않음). 다크모드 재도입 금지.
 - **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트
 - **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
 - **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)

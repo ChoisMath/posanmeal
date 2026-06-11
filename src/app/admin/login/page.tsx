@@ -5,7 +5,6 @@ import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { ShieldCheck } from "lucide-react";
 
@@ -38,9 +37,6 @@ export default function AdminLoginPage() {
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col items-center justify-center px-6">
       <BrandMark variant="floating" label="PosanMeal" />
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
       <div className="w-full max-w-sm page-enter">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-warm-gradient text-white mb-4">

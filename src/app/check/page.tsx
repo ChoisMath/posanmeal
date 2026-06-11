@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { QRScanner } from "@/components/QRScanner";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import {
   getSetting,
@@ -553,9 +552,6 @@ export default function CheckPage() {
   return (
     <div className={`min-h-screen transition-colors duration-300 ${bgClass}`}>
       <BrandMark variant="overlay" href="/" label="홈으로" />
-      <div className="absolute top-4 right-4 z-10">
-        <ThemeToggle />
-      </div>
 
       {/* Status Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-1.5 bg-black/60 text-white text-xs">

@@ -2,7 +2,6 @@ import { auth, signIn } from "@/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { BrandMark } from "@/components/BrandMark";
 import { ResetOnQuery } from "@/components/ResetOnQuery";
 
@@ -20,9 +19,6 @@ export default async function HomePage() {
     <div className="min-h-screen bg-warm-subtle flex flex-col">
       <ResetOnQuery />
       <BrandMark variant="floating" label="PosanMeal" />
-      <div className="absolute top-4 right-4 z-10">
-        <ThemeToggle />
-      </div>
 
       {/* Hero gradient area */}
       <div className="bg-warm-gradient flex-1 flex flex-col items-center justify-center px-6 pb-16 pt-20 relative overflow-hidden">
