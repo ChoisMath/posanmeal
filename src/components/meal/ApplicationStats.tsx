@@ -500,7 +500,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
         return;
       }
       toast.success(
-        `추가 ${json.added ?? 0} · 갱신 ${json.updated ?? 0} · 미발견 ${json.skippedNotFound ?? 0} · 오류 ${json.skippedInvalid ?? 0}`,
+        `추가 ${json.added ?? 0} · 갱신 ${json.updated ?? 0} · 미발견 ${json.skippedNotFound ?? 0} · 오류 ${json.skippedInvalid ?? 0} · 무시된 표시 ${json.ignoredMarks ?? 0}`,
       );
       mutate();
     } catch {
