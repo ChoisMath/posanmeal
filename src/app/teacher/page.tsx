@@ -13,6 +13,7 @@ import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
 import { StudentTable } from "@/components/StudentTable";
+import { TeacherApplications } from "@/components/TeacherApplications";
 import { LogOut } from "lucide-react";
 import { MealMenu } from "@/components/MealMenu";
 import { PageLoadingSkeleton } from "@/components/PageSkeleton";
@@ -80,12 +81,13 @@ export default function TeacherPage() {
       </header>
       <div className="max-w-4xl mx-auto p-4 page-enter">
         <Tabs defaultValue="meal">
-          <TabsList className={`grid w-full max-w-md mx-auto rounded-xl h-11 ${isHomeroom ? "grid-cols-5" : "grid-cols-4"}`}>
-            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm">식단</TabsTrigger>
-            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm">QR</TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm">확인</TabsTrigger>
-            {isHomeroom && <TabsTrigger value="students" className="rounded-lg text-xs sm:text-sm">학생관리</TabsTrigger>}
-            <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm">개인정보</TabsTrigger>
+          <TabsList className={`grid w-full max-w-md mx-auto rounded-xl h-11 ${isHomeroom ? "grid-cols-6" : "grid-cols-4"}`}>
+            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">식단</TabsTrigger>
+            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">QR</TabsTrigger>
+            <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">확인</TabsTrigger>
+            {isHomeroom && <TabsTrigger value="students" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">학생관리</TabsTrigger>}
+            {isHomeroom && <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청현황</TabsTrigger>}
+            <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">개인정보</TabsTrigger>
           </TabsList>
 
           <TabsContent value="meal">
@@ -152,6 +154,14 @@ export default function TeacherPage() {
             <TabsContent value="students">
               <Card className="card-elevated rounded-2xl border-0">
                 <CardContent className="pt-6"><StudentTable /></CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {isHomeroom && (
+            <TabsContent value="applications">
+              <Card className="card-elevated rounded-2xl border-0">
+                <CardContent className="pt-6"><TeacherApplications /></CardContent>
               </Card>
             </TabsContent>
           )}
