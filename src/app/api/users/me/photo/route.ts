@@ -5,7 +5,7 @@ import sharp from "sharp";
 import { writeFile, unlink, mkdir } from "fs/promises";
 import path from "node:path";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), "public", "uploads");
 const MAX_SIZE = (parseInt(process.env.MAX_FILE_SIZE_MB || "5")) * 1024 * 1024;
 
 export async function POST(request: Request) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   const filepath = path.join(UPLOAD_DIR, filename);
   await writeFile(filepath, resized);
 
-  const photoUrl = `/uploads/${filename}?t=${Date.now()}`;
+  const photoUrl = `/api/uploads/${filename}?t=${Date.now()}`;
   await prisma.user.update({
     where: { id: session.user.dbUserId },
     data: { photoUrl },
@@ -54,11 +54,10 @@ export async function DELETE() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // findUnique 없이 직접 파일 삭제 시도 + DB 업데이트
   const filename = `${session.user.dbUserId}.webp`;
   const filepath = path.join(UPLOAD_DIR, filename);
 
-  const [, updated] = await Promise.all([
+  await Promise.all([
     unlink(filepath).catch(() => {}),
     prisma.user.update({
       where: { id: session.user.dbUserId },
