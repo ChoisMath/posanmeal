@@ -124,6 +124,7 @@ export function StudentTable() {
                   {mealColumns.map((column) => {
                     const checkIn = checkInMap.get(column.key);
                     const applied = appliedSet.has(column.key);
+                    // 신청 칸=흰색 / 미신청 칸=뚜렷한 회색 음영 (칸 단위 판정: column.key = 날짜:식사)
                     const cellClass = checkIn
                       ? column.mealKind === "BREAKFAST"
                         ? "bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 font-bold"
@@ -131,8 +132,8 @@ export function StudentTable() {
                           ? "bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 font-bold"
                           : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                       : applied
-                        ? "bg-background"
-                        : "bg-muted/60";
+                        ? "bg-white dark:bg-zinc-950"
+                        : "bg-stone-300/80 dark:bg-zinc-700/70";
                     return (
                       <td
                         key={column.key}
