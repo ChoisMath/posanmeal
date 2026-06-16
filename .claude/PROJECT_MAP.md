@@ -243,7 +243,7 @@ prisma/
 | `DATABASE_URL` | PostgreSQL 연결 (Railway 내부) |
 | `AUTH_SECRET` | NextAuth 시크릿 |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google OAuth |
-| `NEXT_PUBLIC_SITE_URL` | 절대 URL (prod: meal.posan.kr / test: posanmeal.up.railway.app) |
+| `NEXT_PUBLIC_SITE_URL` | 절대 URL (`https://meal.posan.kr`) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | 관리자 계정 (bcryptjs 해시) |
 | `QR_JWT_SECRET` | QR 토큰 서명 키 |
 | `QR_TOKEN_EXPIRY_SECONDS` | QR 만료 시간 (기본 180) |
@@ -253,15 +253,17 @@ prisma/
 
 > `AUTH_URL`, `DATABASE_PUBLIC_URL`, `RAILWAY_VOLUME_MOUNT_PATH` 는 Railway 서비스 환경에서 추가 설정.
 
-## §11 브랜치 / 배포
+## §11 브랜치 / 배포 (2026-06-16 단일 서비스)
 
 | 브랜치 | 환경 | 도메인 | Railway 서비스 |
 |--------|------|--------|----------------|
-| `main` | prod | `meal.posan.kr` | prod (watch=main) |
-| `feat/posanmeal-mvp` | test | `posanmeal.up.railway.app` | test (watch=feat/...) |
+| `main` | production | `meal.posan.kr` (+ `dinner-posan.up.railway.app`) | `dinner` (watch=main) |
 
-- DB(PostgreSQL) + Volume 공유. 마이그레이션은 additive 우선.
-- 빌드: `npx prisma generate && next build`
+- **단일 환경(production) + 단일 서비스(`dinner`)** 만 존재. test/staging 서비스·`posanmeal.up.railway.app` 도메인 **없음** (옛 2-서비스 정책 폐기).
+- 검증은 **로컬**(`npm run build` + `npm test`)에서. `main` push가 유일한 배포 트리거. `feat/*` push는 배포 안 됨.
+- 워크플로: feature 브랜치 작업 → 로컬 검증 → `main` 머지/push → `meal.posan.kr` 배포.
+- DB(PostgreSQL) + Volume(`posanmeal-volumn` → `/app/uploads`, `UPLOAD_DIR` 일치)은 이 서비스 단일 귀속. 마이그레이션은 additive 우선(운영 단일 DB 즉시 반영).
+- 빌드: `npx prisma generate && npm run build`
 - 시작: `npx prisma migrate deploy && next start`
 
 ## §12 주의사항 / 특이 패턴

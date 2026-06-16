@@ -51,31 +51,31 @@
 - `/api/uploads/[filename]` API Route로 서빙 (Next.js static이 아닌 API 경유)
 - photoUrl 형식: `/api/uploads/{userId}.webp?t={timestamp}`
 
-## 브랜치 전략 (2026-04-29 개정)
+## 브랜치 전략 (2026-06-16 개정 — 단일 서비스)
 
 | 브랜치 | 역할 | 도메인 | Railway 서비스 |
 |--------|------|--------|----------------|
-| `main` | **운영(production)** | `https://meal.posan.kr` | prod 서비스 (watch=main) |
-| `feat/posanmeal-mvp` | **테스트(staging)** | `https://posanmeal.up.railway.app` | test 서비스 (watch=feat/posanmeal-mvp) |
+| `main` | **운영(production)** | `https://meal.posan.kr` (+ `dinner-posan.up.railway.app`) | `dinner` 서비스 (watch=main) |
 
-- 두 서비스는 **PostgreSQL DB와 Volume 데이터를 공유**한다 (단일 학교 운영체로 같은 데이터를 두 도메인에서 노출).
-- `AUTH_SECRET`, `QR_JWT_SECRET`, `AUTH_GOOGLE_*`, `ADMIN_*`도 양쪽 동일.
-- `NEXT_PUBLIC_SITE_URL`, `AUTH_URL` 만 환경별로 다름.
-- Google OAuth Client는 공용. redirect URI에 두 도메인 모두 등록되어 있어야 한다.
+- Railway에는 **단일 환경(`production`) + 단일 앱 서비스(`dinner`)** 만 존재한다. **별도 test/staging 서비스나 `posanmeal.up.railway.app` 도메인은 없다** (옛 2-서비스 test/prod 정책은 폐기).
+- 검증은 **로컬에서** 수행한다: `npm run build`, `npm test`, 필요 시 `npm run dev` 수동 확인.
+- `main` push가 **유일한 배포 트리거**다. `feat/*` 브랜치 push는 아무 배포도 일으키지 않는다(브랜치 보관용).
+- PostgreSQL · Volume(`posanmeal-volumn` → `/app/uploads`) · 시크릿(`AUTH_SECRET`, `QR_JWT_SECRET`, `AUTH_GOOGLE_*`, `ADMIN_*`)은 이 단일 서비스에 귀속된다. `NEXT_PUBLIC_SITE_URL`, `AUTH_URL`은 `https://meal.posan.kr`.
 
 ### 표준 워크플로우
 
-1. 작업은 **항상 `feat/posanmeal-mvp` 먼저** → push → test 서비스 배포 → `posanmeal.up.railway.app`에서 검증.
-2. 검증 통과 후 `main`으로 머지(또는 fast-forward) → push → prod 서비스 배포 → `meal.posan.kr` 반영.
-3. 두 브랜치 차이는 **분 단위로 좁혀** 유지. 24시간 이상 분기 상태 두지 말 것.
+1. 개발은 feature 브랜치(`feat/posanmeal-mvp` 등)에서 진행.
+2. **로컬 검증**(배포 환경이 없으므로 로컬 통과가 게이트): `npm run build` + `npm test` (+ 필요 시 `npm run dev` 수동 확인).
+3. `main`으로 fast-forward/머지 → `git push origin main` → `dinner` 서비스가 `meal.posan.kr`에 배포.
+4. 배포 후 `railway status` + 사이트 헬스체크(`/` 200 등)로 확인.
 
-### 마이그레이션 안전 규칙 (DB 공유로 인해 필수)
+### 마이그레이션 안전 규칙
 
-DB가 공유이므로 한쪽 서비스의 `prisma migrate deploy`가 다른 쪽 스키마에 즉시 영향을 미침.
+`main` push 시 운영 단일 DB에 `prisma migrate deploy`가 즉시 적용된다(롤링 교체 중 옛 컨테이너가 잠시 새 스키마를 보는 구간이 있음). 따라서 **additive 우선**으로 진행한다.
 
-- ❌ **절대 금지**: 옛 컬럼 삭제, 컬럼 rename, NOT NULL 추가(기본값 없이) 같은 destructive 변경을 한 번에 적용.
-- ✅ **항상 additive 우선**: 새 컬럼 추가(nullable 또는 기본값) → 양쪽 코드가 새 컬럼을 안전히 다루도록 배포 → 그 다음 릴리스에서 정리 마이그레이션.
-- 신규 마이그레이션이 포함된 푸시는 반드시 위 1→2 순서로 진행. test에서 먼저 마이그레이션이 적용된 시점에 prod는 옛 코드 + 새 스키마 상태가 된다는 것을 의식할 것.
+- ❌ **한 번에 금지**: 옛 컬럼 삭제, 컬럼 rename, 기본값 없는 NOT NULL 추가 같은 destructive 변경.
+- ✅ **항상 additive 우선**: 새 컬럼 추가(nullable 또는 기본값) → 코드가 새 컬럼을 안전히 다루도록 배포 → 그 다음 릴리스에서 정리 마이그레이션.
+- Prisma는 모델의 전체 컬럼을 SELECT하므로, 컬럼 DROP은 **스키마에서 해당 필드를 제거한 코드가 배포된 다음 릴리스**에서 수행.
 - 위험한 변경 직전에는 `prisma-migration-guardian` 에이전트로 검수.
 
 ## 라우팅 구조
@@ -126,18 +126,17 @@ QR_JWT_SECRET, QR_TOKEN_EXPIRY_SECONDS (180)
 UPLOAD_DIR (/app/uploads on Railway)
 MAX_FILE_SIZE_MB (5)
 TZ (Asia/Seoul)
-NEXT_PUBLIC_SITE_URL  # prod: https://meal.posan.kr / test: https://posanmeal.up.railway.app
+NEXT_PUBLIC_SITE_URL  # https://meal.posan.kr
 ```
 
 ## Railway 배포 설정
 
 - 빌드: `npx prisma generate && npm run build`
 - 시작: `npx prisma migrate deploy && npm start`
-- Volume: `uploads` → `/app/uploads` (양쪽 서비스가 동일 내용 유지 필요 — 사진 업로드 시 데이터 동기화 고려)
-- PostgreSQL: Reference variable `${{Postgres.DATABASE_URL}}` (양쪽 서비스 공유)
-- 도메인:
-  - prod (main 서비스) → `https://meal.posan.kr` (Gabia DNS CNAME → Railway 타겟)
-  - test (feat/posanmeal-mvp 서비스) → `https://posanmeal.up.railway.app`
+- Volume: `posanmeal-volumn` → `/app/uploads` (`dinner` 서비스 단일 마운트). `UPLOAD_DIR=/app/uploads`로 사진을 이 볼륨에 저장하고 `/api/uploads/[filename]`로 스트리밍 서빙
+- PostgreSQL: Reference variable `${{Postgres.DATABASE_URL}}` (단일 서비스)
+- 도메인: `https://meal.posan.kr` (Gabia DNS CNAME → Railway 타겟) + 기본 `https://dinner-posan.up.railway.app`
+- 단일 서비스 운영: `main` watch만 존재. 별도 test 서비스/도메인 없음 (브랜치 전략 섹션 참조)
 
 ## 성능 최적화 (적용 완료)
 
