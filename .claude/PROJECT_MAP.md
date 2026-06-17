@@ -2,7 +2,7 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-06-16 (담임 신청현황 탭 6탭화 — TeacherApplications + `/api/teacher/applications` 2종, StudentTable 식사별 컬럼 재작성, 사진 UPLOAD_DIR 스트리밍 서빙)
+> 마지막 업데이트: 2026-06-17 (담임용 학생 QR 일괄 출력 — StudentQRCard/StudentQRPrintDialog + `lib/qr-card.ts`, StudentTable 체크박스 선택·QR출력 툴바, `/api/teacher/students` 학생별 `qrString` 추가)
 
 ## §1 개요
 
@@ -106,7 +106,7 @@ prisma/
 
 | API | 메서드 | 인증 | 설명 |
 |-----|--------|------|------|
-| `/api/teacher/students` | GET | 교사 | 담임 학급 학생 목록 + `mealColumns`(우리 반 승인 조/중 신청일) + 학생별 `appliedDates`({date,mealKind}, APPROVED 확정일) + checkIns에 mealKind/type (신청 음영·식사컬럼용) |
+| `/api/teacher/students` | GET | 교사 | 담임 학급 학생 목록 + `mealColumns`(우리 반 승인 조/중 신청일) + 학생별 `appliedDates`({date,mealKind}, APPROVED 확정일) + checkIns에 mealKind/type (신청 음영·식사컬럼용) + 학생별 `qrString`(고정 로컬 QR, 카드 출력용 — `getCachedSettings().qrGeneration` 사용) |
 | `/api/teacher/applications` | GET | 교사 | 담임용 전체 공고 목록(OPEN/CLOSED) `{id,title,status,startYear/Month,monthCount,applyStart/End,meals}` |
 | `/api/teacher/applications/[id]/registrations` | GET | 교사 | 공고별 우리 반(grade,classNum) APPROVED 신청자만 `{user(number,name),createdAt,signature,meals(applied/exempt/dayCount)}` (role=TEACHER + homeroom 검증) |
 
@@ -170,7 +170,9 @@ prisma/
 | `QRScanner` | `src/components/QRScanner.tsx` | nimiq/qr-scanner 래퍼, 카메라 전환 버튼 |
 | `QRGenerator` | `src/components/QRGenerator.tsx` | JWT 토큰 → QR 이미지 (STUDENT/WORK/PERSONAL) |
 | `MonthlyCalendar` | `src/components/MonthlyCalendar.tsx` | 월별 달력, showType prop으로 근무/개인 구분 |
-| `StudentTable` | `src/components/StudentTable.tsx` | 담임 학생관리 표 — 관리자 급식확인과 동일한 식사별(조/중/석) 컬럼 읽기전용 (미신청=회색 음영/신청=흰색/체크인=식사색 "O") |
+| `StudentTable` | `src/components/StudentTable.tsx` | 담임 학생관리 표 — 식사별(조/중/석) 컬럼 읽기전용 (미신청=회색 음영/신청=흰색/체크인=식사색 "O") + 첫 열 sticky 체크박스(전체선택 헤더·행별 선택 `Set<number>`)·"N명 선택"/"QR출력" 툴바 → `StudentQRPrintDialog` 연결 |
+| `StudentQRCard` | `src/components/StudentQRCard.tsx` | 인쇄용 5×5cm(≈47mm) 단일 학생 QR 카드(로고·식별 한 줄·QR), mm 고정 치수, 화면 미리보기·인쇄 공용 프레젠테이션 |
+| `StudentQRPrintDialog` | `src/components/StudentQRPrintDialog.tsx` | 선택 학생 QR 카드 A4 일괄 인쇄 모달 — 미리보기 + `qrcode` 이미지 생성 + body 직속 포털 + `@page A4` 인쇄 격리(4×4=16개/페이지, 페이지 분할). `PrintStudent` 타입 export |
 | `TeacherApplications` | `src/components/TeacherApplications.tsx` | 담임 신청현황 탭 — 공고 목록↔우리 반 신청자 마스터-디테일, 서명 이미지 썸네일+확대 모달 |
 | `AdminMealTable` | `src/components/AdminMealTable.tsx` | 관리자 석식 확인 (교사/1~3학년 탭, 체크인 수동 토글) |
 | `PhotoUpload` | `src/components/PhotoUpload.tsx` | 프로필 사진 업로드/삭제 |
@@ -226,6 +228,7 @@ prisma/
 | `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
 | `src/lib/gender.ts` | `normalizeGender` / `genderLabel` / `GENDER_LABEL` — 시트 임포트 입력 정규화 + UI 표시용 라벨, 서버·클라이언트 공용 (테스트 `__tests__/gender.test.ts`) |
 | `src/lib/meal-template-columns.ts` | 일괄신청 양식 컬럼 단일 진실 — `TemplateColumn` 타입(YN/DATE/WEEKDAY), `buildTemplateColumns`, `columnHeader`("중식-7월 5일"/"조식-월요일"), `parseColumnHeader`(months 기반 연도 복원). export/import 라우트 공유 (테스트 `__tests__/meal-template-columns.test.ts`) |
+| `src/lib/qr-card.ts` | 담임 QR 카드 출력용: `buildCardQrString(studentId, generation)`(고정 로컬 QR `posanmeal:{id}:{generation}:STUDENT` 생성) + `chunk<T>(items, size)` 페이지 분할 유틸 (테스트 `__tests__/qr-card.test.ts`) |
 
 ## §9 인증 / 미들웨어
 
@@ -288,6 +291,7 @@ prisma/
 - **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
 - **관리자 대리 신청 표시**: `MealRegistration.addedBy="ADMIN"` + `updatedAt` 이 관리자 대리 신청의 근거. 관리자가 학생 신청을 생성/수정하면 `addedBy`가 ADMIN으로 기록됨(의도된 동작). `AdminApplyDialog`는 신청기간(`applyStartAt/EndAt`) 검사를 우회한다
 - **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)
+- **출력 카드 QR**: 담임이 출력하는 학생 QR 카드는 `posanmeal:{id}:{qrGeneration}:STUDENT` 형식의 고정 로컬 QR(만료 없음·식사 무관)이며 `/check`의 `parseLocalQR`/`handleLocalScan`(기존 4-part 로컬 경로)로 체크인된다. `/api/checkin`·`/check`는 비변경. 관리자 QR 강제 갱신(`PUT /api/system/settings`로 `qrGeneration` 증가)으로 출력된 카드를 일괄 무효화할 수 있음
 
 ## §13 Project-Map Maintenance
 
