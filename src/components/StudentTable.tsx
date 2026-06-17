@@ -123,6 +123,7 @@ export function StudentTable() {
                 <label className="flex cursor-pointer items-center gap-1.5">
                   <input
                     type="checkbox"
+                    aria-label="전체 선택"
                     className="h-4 w-4 shrink-0 accent-amber-600"
                     checked={allSelected}
                     ref={(el) => {
