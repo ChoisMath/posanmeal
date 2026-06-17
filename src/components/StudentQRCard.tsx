@@ -11,7 +11,7 @@ interface StudentQRCardProps {
 export function StudentQRCard({ grade, classNum, number, name, qrDataUrl }: StudentQRCardProps) {
   return (
     <div
-      style={{ width: "47mm", height: "47mm", padding: "2.5mm", boxSizing: "border-box" }}
+      style={{ width: "47mm", height: "47mm", padding: "2.5mm", boxSizing: "border-box", breakInside: "avoid" }}
       className="flex flex-col items-center justify-between overflow-hidden rounded-[2mm] border border-stone-400 bg-white text-black"
     >
       <div className="flex items-center" style={{ gap: "1.5mm" }}>
