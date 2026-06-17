@@ -122,12 +122,12 @@ export function StudentQRPrintDialog({
         createPortal(
           <div className="qr-print-root" style={{ display: "none" }}>
             <style>{`
+@page { size: A4; margin: 8mm; }
 @media print {
   body > *:not(.qr-print-root) { display: none !important; }
   .qr-print-root { display: block !important; }
   .qr-print-page { break-after: page; }
   .qr-print-page:last-child { break-after: auto; }
-  @page { size: A4; margin: 8mm; }
 }
             `}</style>
             {pages.map((page, pageIndex) => (
