@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buildMonthDateRange } from "@/lib/date-range";
 import { buildMonthlyMealColumns, getDateDayKey, type MealKind } from "@/lib/meal-columns";
+import { getCachedSettings } from "@/lib/settings-cache";
+import { buildCardQrString } from "@/lib/qr-card";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -71,6 +73,8 @@ export async function GET(request: Request) {
     LUNCH: appliedRows.filter((r) => r.mealKind === "LUNCH").map((r) => r.date),
   });
 
+  const settings = await getCachedSettings();
+
   const studentsOut = students.map((s) => ({
     id: s.id,
     name: s.name,
@@ -78,6 +82,7 @@ export async function GET(request: Request) {
     photoUrl: s.photoUrl,
     checkIns: s.checkIns,
     appliedDates: appliedByUser.get(s.id) ?? [],
+    qrString: buildCardQrString(s.id, settings.qrGeneration),
   }));
 
   return NextResponse.json({ students: studentsOut, grade, classNum, mealColumns });

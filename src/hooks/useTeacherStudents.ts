@@ -9,6 +9,7 @@ interface Student {
   photoUrl: string | null;
   checkIns: { date: string; checkedAt: string; type: string; mealKind: MealKind | null }[];
   appliedDates: { date: string; mealKind: MealKind }[];
+  qrString: string;
 }
 
 export function useTeacherStudents(year: number, month: number) {
