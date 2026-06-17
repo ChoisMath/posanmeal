@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
 import { useTeacherStudents } from "@/hooks/useTeacherStudents";
 import { buildMonthlyMealColumns, getDateDayKey, type MealColumn } from "@/lib/meal-columns";
+import { StudentQRPrintDialog, type PrintStudent } from "@/components/StudentQRPrintDialog";
 
 export function StudentTable() {
   const now = new Date();
@@ -12,6 +13,33 @@ export function StudentTable() {
   const [month, setMonth] = useState(now.getMonth() + 1);
   const { students, mealColumns: fetchedColumns, grade = 0, classNum = 0, error } =
     useTeacherStudents(year, month);
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [printOpen, setPrintOpen] = useState(false);
+
+  const toggleOne = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const visibleIds = students.map((s) => s.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someSelected = visibleIds.some((id) => selectedIds.has(id));
+
+  const toggleAll = () =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+
+  const selectedPrintStudents: PrintStudent[] = students
+    .filter((s) => selectedIds.has(s.id))
+    .map((s) => ({ id: s.id, name: s.name, number: s.number, qrString: s.qrString }));
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(year - 1); }
@@ -72,12 +100,38 @@ export function StudentTable() {
         </Button>
       </div>
 
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="text-sm text-muted-foreground whitespace-nowrap">
+          {selectedIds.size}명 선택
+        </span>
+        <Button
+          size="sm"
+          className="rounded-xl whitespace-nowrap"
+          disabled={selectedIds.size === 0}
+          onClick={() => setPrintOpen(true)}
+        >
+          <Printer className="mr-1 h-4 w-4" />
+          QR출력
+        </Button>
+      </div>
+
       <div className="overflow-auto max-h-[70vh] border rounded-lg">
         <table className="text-xs border-collapse w-full whitespace-nowrap">
           <thead className="sticky top-0 z-20">
             <tr>
-              <th className="sticky left-0 z-30 bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[90px] text-fit-sm">
-                번호 이름
+              <th className="sticky left-0 z-30 bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">
+                <label className="flex cursor-pointer items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 shrink-0 accent-amber-600"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = !allSelected && someSelected;
+                    }}
+                    onChange={toggleAll}
+                  />
+                  <span>번호 이름</span>
+                </label>
               </th>
               {mealColumns.map((column) => {
                 const weekend = isWeekend(column.day);
@@ -116,10 +170,16 @@ export function StudentTable() {
               return (
                 <tr key={student.id} className="hover:bg-muted/50">
                   <td className="sticky left-0 z-10 bg-background px-2 py-1.5 border-b border-r">
-                    <div className="flex items-center gap-1 text-fit-sm">
+                    <label className="flex min-h-9 cursor-pointer items-center gap-1.5 text-fit-sm">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 accent-amber-600"
+                        checked={selectedIds.has(student.id)}
+                        onChange={() => toggleOne(student.id)}
+                      />
                       <span className="font-semibold">{student.number}</span>
                       <span>{student.name}</span>
-                    </div>
+                    </label>
                   </td>
                   {mealColumns.map((column) => {
                     const checkIn = checkInMap.get(column.key);
@@ -175,6 +235,14 @@ export function StudentTable() {
           </tfoot>
         </table>
       </div>
+
+      <StudentQRPrintDialog
+        open={printOpen}
+        onOpenChange={setPrintOpen}
+        students={selectedPrintStudents}
+        grade={grade}
+        classNum={classNum}
+      />
     </div>
   );
 }
