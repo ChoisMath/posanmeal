@@ -22,14 +22,18 @@ export function StudentQRCard({ grade, classNum, number, name, qrDataUrl }: Stud
 
       <div
         style={{ fontSize: "3mm", maxWidth: "42mm" }}
-        className="overflow-hidden font-semibold whitespace-nowrap"
+        className="overflow-hidden font-semibold whitespace-nowrap text-ellipsis"
       >
         {grade}학년 {classNum}반 {number}번 {name}
       </div>
 
       {qrDataUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={qrDataUrl} alt="" style={{ width: "35mm", height: "35mm" }} />
+        <img
+          src={qrDataUrl}
+          alt={`${grade}학년 ${classNum}반 ${number}번 ${name} QR 코드`}
+          style={{ width: "35mm", height: "35mm" }}
+        />
       ) : (
         <div style={{ width: "35mm", height: "35mm" }} className="bg-stone-100" />
       )}
