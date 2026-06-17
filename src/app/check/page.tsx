@@ -33,6 +33,7 @@ import { postCheckInWithRetry } from "@/lib/checkin-client";
 interface CheckInResult {
   success: boolean;
   duplicate?: boolean;
+  notApplicant?: boolean;
   error?: string;
   user?: {
     id: number;
@@ -437,8 +438,14 @@ export default function CheckPage() {
       if (user.role === "STUDENT") {
         const eligible = await isEligible(parsed.userId, today, currentMealKind);
         if (!eligible) {
-          setResult({ success: false, error: `오늘 ${MEAL_LABEL[currentMealKind]} 신청 내역이 없습니다.` });
-          playDoubleBeep();
+          setResult({
+            success: false,
+            notApplicant: true,
+            user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
+            mealKind: currentMealKind,
+            error: "신청자가 아닙니다.",
+          });
+          playLongBeep();
           return;
         }
       }
@@ -542,7 +549,7 @@ export default function CheckPage() {
   };
 
   const bgClass = result
-    ? result.duplicate
+    ? result.duplicate || result.notApplicant
       ? "bg-red-500"
       : result.success
         ? "bg-emerald-500"
@@ -630,7 +637,13 @@ export default function CheckPage() {
                     </p>
                   )}
 
-                  {!result.success && !result.duplicate && (
+                  {result.notApplicant && (
+                    <p className="text-red-700 dark:text-red-300 text-fit-sm mt-1.5 font-semibold">
+                      {result.error || "신청자가 아닙니다."}
+                    </p>
+                  )}
+
+                  {!result.success && !result.duplicate && !result.notApplicant && (
                     <p className="text-amber-800 dark:text-amber-200 text-fit-sm mt-1.5 font-medium">
                       {result.error || "인정되지 않는 QR입니다."}
                     </p>
