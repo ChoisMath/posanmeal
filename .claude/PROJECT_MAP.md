@@ -125,7 +125,7 @@ prisma/
 | `/api/admin/applications/[id]/close` | POST | 관리자 | 신청 공고 강제 마감 |
 | `/api/admin/applications/[id]/registrations` | GET/POST | 관리자 | 공고별 신청자 목록 (식사별 meals) / 관리자 직접 추가 |
 | `/api/admin/applications/[id]/registrations/[regId]` | GET/PATCH/DELETE | 관리자 | GET: 신청 상세(meals+selectedDates+weekdaysByMonth, canReadAdmin) / PATCH `{meals}` 또는 `{status}` / DELETE 완전 삭제 |
-| `/api/admin/applications/[id]/export` | GET | 관리자 | 기본: 통계 워크북 3시트(전체신청내역·요일별·에듀파인, 수식 포함 — `lib/meal-stats-excel.ts`) / `?template=true`: `meal-template-columns.ts` 기반 날짜/요일별 컬럼+프리필 양식 |
+| `/api/admin/applications/[id]/export` | GET | 관리자 | 기본: 통계 워크북 4시트(전체신청내역·요일별·에듀파인·학년별-성별, 수식 포함 — `lib/meal-stats-excel.ts`) / `?template=true`: `meal-template-columns.ts` 기반 날짜/요일별 컬럼+프리필 양식 |
 | `/api/admin/applications/[id]/import` | POST | 관리자 | `meal-template-columns.ts` 헤더 파싱 기반 일괄 신청 등록; 응답에 `ignoredMarks` 포함, MAX_FILE_SIZE_MB 가드, `resolveRegistrationSelections`에 ResolveContext 옵션(N+1 제거) |
 
 ### 시스템 / 동기화
@@ -223,7 +223,7 @@ prisma/
 | `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, activeDates)` — activeDates 객체 인자(식사별 운영일)로 컬럼 삽입 (관리자 표·엑셀 헤더 생성용) |
 | `src/lib/meal-plan.ts` | 식사별 공고 공용 유틸: `MEAL_LABEL`/`METHOD_LABEL`/`monthsOf`/`expandWeekdays`/`calcMealFee`/`buildAppTitle`/`studentNumberOf` (서버·클라이언트 공용) |
 | `src/lib/meal-plan-server.ts` | 서버 전용: `saveApplication`(공고 생성/수정 트랜잭션)/`resyncRegistrations`(공고 수정 시 확정일 재계산)/`resolveRegistrationSelections`/`writeRegistration` |
-| `src/lib/meal-stats-excel.ts` | `buildStatsWorkbook` — 공고 export 3시트(전체신청내역·요일별·에듀파인) 생성, 수식 포함 |
+| `src/lib/meal-stats-excel.ts` | `buildStatsWorkbook` — 공고 export 4시트(전체신청내역·요일별·에듀파인·학년별-성별) 생성, 수식 포함. `buildSheet4`는 제공 식사(MEAL_KINDS 순)별 학년×성별 신청자수 표를 세로 스택(미지정 열/학년미상 행 조건부) |
 | `src/lib/schemas/meal-plan.ts` | zod 스키마: `adminApplicationSchema`(공고 CRUD) / `studentRegisterSchema`(학생 register) |
 | `src/lib/date-range.ts` | 날짜 범위 유틸: `buildMonthDateRange(year, month)`, `dateKeyToUtcDate(dateKey)`, `formatMonthDateKey`, `getDaysInMonthUtc` — API 라우트 공통 사용 |
 | `src/lib/gender.ts` | `normalizeGender` / `genderLabel` / `GENDER_LABEL` — 시트 임포트 입력 정규화 + UI 표시용 라벨, 서버·클라이언트 공용 (테스트 `__tests__/gender.test.ts`) |
