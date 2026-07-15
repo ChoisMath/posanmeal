@@ -1,5 +1,5 @@
 import type ExcelJSType from "exceljs";
-import { MEAL_KINDS, MEAL_SHORT, WEEKDAY_LABELS, weekdayOf } from "@/lib/meal-plan";
+import { MEAL_KINDS, MEAL_LABEL, MEAL_SHORT, WEEKDAY_LABELS, weekdayOf } from "@/lib/meal-plan";
 
 export type MealKind = "BREAKFAST" | "LUNCH" | "DINNER";
 
@@ -405,6 +405,104 @@ function buildSheet3(
   });
 }
 
+type GenderKey = "MALE" | "FEMALE" | "UNKNOWN";
+
+function genderKeyOf(gender: string | null | undefined): GenderKey {
+  return gender === "MALE" || gender === "FEMALE" ? gender : "UNKNOWN";
+}
+
+const KNOWN_GRADES = [1, 2, 3];
+
+function buildSheet4(
+  workbook: ExcelJSType.Workbook,
+  input: StatsExcelInput,
+): void {
+  const ws = workbook.addWorksheet("학년별-성별");
+
+  const kinds = (MEAL_KINDS as MealKind[]).filter((kind) =>
+    input.meals.some((m) => m.mealKind === kind),
+  );
+
+  // 시트1 "식수"와 동일 기준: 확정일 1일 이상인 신청자만 카운트
+  const appliedRowsOf = (kind: MealKind) =>
+    input.rows.filter((r) => (r.dates[kind]?.length ?? 0) > 0);
+
+  const countedRows = kinds.flatMap(appliedRowsOf);
+  const hasUnknownGender = countedRows.some(
+    (r) => genderKeyOf(r.gender) === "UNKNOWN",
+  );
+  const hasUnknownGrade = countedRows.some(
+    (r) => !KNOWN_GRADES.includes(r.grade ?? 0),
+  );
+
+  const genderCols: Array<{ key: GenderKey; label: string }> = [
+    { key: "MALE", label: "남" },
+    { key: "FEMALE", label: "여" },
+    ...(hasUnknownGender ? [{ key: "UNKNOWN" as const, label: "미지정" }] : []),
+  ];
+
+  type StatsRow = StatsExcelInput["rows"][number];
+  const gradeGroups: Array<{ label: string; match: (r: StatsRow) => boolean }> = [
+    ...KNOWN_GRADES.map((g) => ({
+      label: `${g}학년`,
+      match: (r: StatsRow) => r.grade === g,
+    })),
+    ...(hasUnknownGrade
+      ? [{
+          label: "학년미상",
+          match: (r: StatsRow) => !KNOWN_GRADES.includes(r.grade ?? 0),
+        }]
+      : []),
+    { label: "합계", match: () => true },
+  ];
+
+  let rowNum = 1;
+  for (const kind of kinds) {
+    const labelCell = ws.getCell(rowNum, 1);
+    labelCell.value = MEAL_LABEL[kind];
+    labelCell.font = { bold: true };
+    rowNum++;
+
+    const headerLabels = ["구분", ...genderCols.map((g) => g.label), "계"];
+    headerLabels.forEach((label, i) => {
+      const cell = ws.getCell(rowNum, i + 1);
+      cell.value = label;
+      styleHeader(cell);
+    });
+    rowNum++;
+
+    const kindRows = appliedRowsOf(kind);
+    for (const group of gradeGroups) {
+      const groupRows = kindRows.filter(group.match);
+      const groupLabelCell = ws.getCell(rowNum, 1);
+      groupLabelCell.value = group.label;
+      styleHeader(groupLabelCell);
+
+      genderCols.forEach((g, i) => {
+        const cell = ws.getCell(rowNum, 2 + i);
+        cell.value = groupRows.filter(
+          (r) => genderKeyOf(r.gender) === g.key,
+        ).length;
+        cell.alignment = { horizontal: "center" };
+        cell.border = THIN_BORDER;
+      });
+
+      const totalCell = ws.getCell(rowNum, 2 + genderCols.length);
+      totalCell.value = groupRows.length;
+      totalCell.alignment = { horizontal: "center" };
+      totalCell.border = THIN_BORDER;
+      totalCell.font = { bold: true };
+      rowNum++;
+    }
+    rowNum++; // 표 사이 빈 행
+  }
+
+  ws.getColumn(1).width = 10;
+  for (let c = 2; c <= 2 + genderCols.length; c++) {
+    ws.getColumn(c).width = 8;
+  }
+}
+
 export async function buildStatsWorkbook(
   input: StatsExcelInput,
 ): Promise<ExcelJSType.Workbook> {
@@ -419,6 +517,7 @@ export async function buildStatsWorkbook(
   buildSheet1(workbook, input, allDates, priceMap);
   buildSheet2(workbook, input);
   buildSheet3(workbook, input);
+  buildSheet4(workbook, input);
 
   return workbook;
 }
