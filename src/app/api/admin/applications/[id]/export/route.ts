@@ -214,6 +214,7 @@ export async function GET(
             grade: true,
             classNum: true,
             number: true,
+            gender: true,
           },
         },
         meals: {
@@ -269,6 +270,7 @@ export async function GET(
         grade: u.grade ?? undefined,
         classNum: u.classNum ?? undefined,
         number: u.number ?? undefined,
+        gender: u.gender,
         exempt,
         dates,
       };
