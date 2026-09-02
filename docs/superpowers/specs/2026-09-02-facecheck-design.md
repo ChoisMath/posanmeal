@@ -91,8 +91,8 @@ QR 코드 체크인을 보완하는 안면인식 체크인을 추가한다. 사�
 
 ```prisma
 model FaceProfile {
-  id             String   @id @default(cuid())
-  userId         String   @unique
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   embeddings     Json     // number[][] — 3~5개 임베딩, 각 1024차원
   modelVersion   String   // 예: "human@3.3.6" — 모델 교체 시 재등록 판별
