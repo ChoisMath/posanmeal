@@ -6,9 +6,9 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
   const session = req.auth;
 
-  const publicExact = new Set(["/", "/check", "/admin/login"]);
+  const publicExact = new Set(["/", "/check", "/facecheck", "/admin/login"]);
   const publicPrefixes = [
-    "/api/auth", "/api/checkin", "/api/uploads",
+    "/api/auth", "/api/checkin", "/api/facecheck", "/api/uploads",
     "/api/system/settings", "/api/sync", "/api/meals",
     "/_next", "/uploads",
   ];
