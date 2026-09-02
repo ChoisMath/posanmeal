@@ -28,42 +28,52 @@ export function FaceEnroll() {
   const [message, setMessage] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const embeddingsRef = useRef<number[][]>([]);
-  const stopRef = useRef(false);
+  // 캡처 세션 번호. 취소/재시도 시 증가시켜 진행 중이던 루프가 다음 await 직후 스스로 종료되게 한다.
+  const sessionRef = useRef(0);
 
   const stopCamera = useCallback(() => {
-    stopRef.current = true;
+    sessionRef.current += 1;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
   useEffect(() => stopCamera, [stopCamera]);
 
   const startCapture = useCallback(async () => {
+    const session = ++sessionRef.current;
+    const isActive = () => sessionRef.current === session;
+    const embeddings: number[][] = [];
+
     setPhase("capturing");
     setProgress(0);
     setMessage("카메라 준비 중...");
-    embeddingsRef.current = [];
-    stopRef.current = false;
 
     try {
-      const [human, stream] = await Promise.all([
-        loadHuman(),
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }),
-      ]);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      if (!isActive()) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       const video = videoRef.current;
-      if (!video) return;
+      if (!video) throw new Error("video element not mounted");
       video.srcObject = stream;
       await video.play();
+      if (!isActive()) return;
+
+      setMessage("인식 모델 로딩 중...");
+      const human = await loadHuman();
+      if (!isActive()) return;
 
       setMessage("얼굴을 화면 중앙에 맞춰주세요");
       let lastCaptureAt = 0;
 
-      while (!stopRef.current && embeddingsRef.current.length < FACE_MIN_EMBEDDINGS) {
+      while (isActive() && embeddings.length < FACE_MIN_EMBEDDINGS) {
         await new Promise((r) => setTimeout(r, CAPTURE_INTERVAL_MS));
-        if (stopRef.current) return;
+        if (!isActive()) return;
         const face = await detectSingleFace(human, video);
+        if (!isActive()) return;
         if (!face) {
           setMessage("얼굴이 인식되지 않습니다. 혼자, 정면으로 서 주세요");
           continue;
@@ -74,28 +84,26 @@ export function FaceEnroll() {
         }
         if (Date.now() - lastCaptureAt < CAPTURE_GAP_MS) continue;
         lastCaptureAt = Date.now();
-        embeddingsRef.current.push(face.embedding);
-        setProgress(embeddingsRef.current.length);
-        setMessage(`촬영 ${embeddingsRef.current.length}/${FACE_MIN_EMBEDDINGS} — 고개를 살짝 움직여 주세요`);
+        embeddings.push(face.embedding);
+        setProgress(embeddings.length);
+        setMessage(`촬영 ${embeddings.length}/${FACE_MIN_EMBEDDINGS} — 고개를 살짝 움직여 주세요`);
       }
+      if (!isActive()) return;
 
-      if (embeddingsRef.current.length >= FACE_MIN_EMBEDDINGS) {
-        setPhase("saving");
-        setMessage("저장 중...");
-        const res = await fetch("/api/users/me/face", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            embeddings: embeddingsRef.current,
-            consentVersion: FACE_CONSENT_VERSION,
-          }),
-        });
-        if (!res.ok) throw new Error("save failed");
-        await mutate();
-        setPhase("idle");
-        setMessage(null);
-      }
+      setPhase("saving");
+      setMessage("저장 중...");
+      const res = await fetch("/api/users/me/face", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embeddings, consentVersion: FACE_CONSENT_VERSION }),
+      });
+      if (!res.ok) throw new Error(`save failed: ${res.status}`);
+      await mutate();
+      if (!isActive()) return;
+      setPhase("idle");
+      setMessage(null);
     } catch (err) {
+      if (!isActive()) return;
       console.error("Face enroll error:", err);
       setPhase("idle");
       setMessage(
@@ -104,14 +112,22 @@ export function FaceEnroll() {
           : "등록에 실패했습니다. 다시 시도해 주세요.",
       );
     } finally {
-      stopCamera();
+      // 취소→재시도로 새 세션이 시작된 경우 그 세션의 카메라를 끄지 않도록 소유권 확인
+      if (isActive()) stopCamera();
     }
   }, [mutate, stopCamera]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("등록된 안면인식 정보를 삭제(동의 철회)하시겠습니까?")) return;
-    await fetch("/api/users/me/face", { method: "DELETE" });
-    await mutate();
+    try {
+      const res = await fetch("/api/users/me/face", { method: "DELETE" });
+      if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+      await mutate();
+      setMessage(null);
+    } catch (err) {
+      console.error("Face delete error:", err);
+      setMessage("삭제에 실패했습니다. 다시 시도해 주세요.");
+    }
   }, [mutate]);
 
   const handleCancelCapture = useCallback(() => {
@@ -137,7 +153,7 @@ export function FaceEnroll() {
             </Button>
           </span>
         ) : (
-          <Button size="sm" className="rounded-xl min-h-9 whitespace-nowrap" onClick={() => { setAgreed(false); setPhase("consent"); }}>
+          <Button className="rounded-xl min-h-11 whitespace-nowrap" onClick={() => { setAgreed(false); setPhase("consent"); }}>
             <ScanFace className="h-4 w-4 mr-1" /> 얼굴 등록하기
           </Button>
         )}
@@ -146,7 +162,7 @@ export function FaceEnroll() {
 
       {/* 동의 모달 */}
       <Dialog open={phase === "consent"} onOpenChange={(open) => !open && setPhase("idle")}>
-        <DialogContent className="rounded-2xl">
+        <DialogContent className="rounded-2xl max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>안면인식정보 수집·이용 동의</DialogTitle>
           </DialogHeader>
@@ -165,7 +181,7 @@ export function FaceEnroll() {
 
       {/* 촬영 모달 */}
       <Dialog open={phase === "capturing" || phase === "saving"} onOpenChange={(open) => !open && handleCancelCapture()}>
-        <DialogContent className="rounded-2xl">
+        <DialogContent className="rounded-2xl max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>얼굴 등록 ({progress}/{FACE_MIN_EMBEDDINGS})</DialogTitle>
           </DialogHeader>
