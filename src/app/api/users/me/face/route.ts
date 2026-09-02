@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { faceEnrollSchema } from "@/lib/schemas/face";
 import { FACE_MODEL_VERSION } from "@/lib/face-constants";
+import { invalidateFaceCache } from "@/lib/face-embedding-cache";
 
 export async function GET() {
   const session = await auth();
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
       consentVersion,
     },
   });
+  invalidateFaceCache();
 
   return NextResponse.json({ ok: true });
 }
@@ -64,5 +66,6 @@ export async function DELETE() {
   }
 
   await prisma.faceProfile.deleteMany({ where: { userId: session.user.dbUserId } });
+  invalidateFaceCache();
   return NextResponse.json({ ok: true });
 }

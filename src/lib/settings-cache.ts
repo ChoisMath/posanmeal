@@ -1,10 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_MEAL_WINDOWS, type MealWindows } from "@/lib/meal-kind";
+import {
+  DEFAULT_FACE_MATCH_MARGIN,
+  DEFAULT_FACE_MATCH_THRESHOLD,
+} from "@/lib/face-constants";
 
 let cache: {
   operationMode: string;
   qrGeneration: string;
   mealWindows: MealWindows;
+  faceMatch: { threshold: number; margin: number };
 } | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL = 30_000; // 30 seconds
@@ -33,6 +38,10 @@ export async function getCachedSettings() {
         end: map.dinner_window_end || DEFAULT_MEAL_WINDOWS.dinner.end,
       },
     },
+    faceMatch: {
+      threshold: parseSetting(map.face_match_threshold, DEFAULT_FACE_MATCH_THRESHOLD),
+      margin: parseSetting(map.face_match_margin, DEFAULT_FACE_MATCH_MARGIN),
+    },
   };
   cacheTimestamp = Date.now();
   return cache;
@@ -41,4 +50,9 @@ export async function getCachedSettings() {
 export function invalidateSettingsCache() {
   cache = null;
   cacheTimestamp = 0;
+}
+
+function parseSetting(value: string | undefined, fallback: number): number {
+  const parsed = value === undefined ? NaN : parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
