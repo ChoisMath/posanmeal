@@ -1178,6 +1178,7 @@ export default function AdminPage() {
                                   <Badge variant="outline" className={`text-xs ${
                                     r.source === "ADMIN_MANUAL" ? "border-amber-300 text-amber-600 dark:text-amber-400" :
                                     r.source === "LOCAL_SYNC" ? "border-sky-300 text-sky-600 dark:text-sky-400" :
+                                    r.source === "FACE" ? "border-violet-300 text-violet-600 dark:text-violet-400" :
                                     "border-muted-foreground/40 text-muted-foreground"
                                   }`}>
                                     {sourceLabel(r.source)}
