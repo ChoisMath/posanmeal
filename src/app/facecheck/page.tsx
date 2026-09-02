@@ -38,6 +38,7 @@ interface PendingTeacher {
   user: FaceCheckUser;
   mealKind: MealKind;
   embedding: number[];
+  gen: number;
 }
 
 const DETECT_INTERVAL_MS = 300;
@@ -50,11 +51,19 @@ export default function FaceCheckPage() {
   const [pending, setPending] = useState<PendingTeacher | null>(null);
   const [countdown, setCountdown] = useState(TEACHER_TIMEOUT_S);
   const [status, setStatus] = useState("카메라 준비 중...");
-  const [modelFailed, setModelFailed] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const busyRef = useRef(false); // API 호출·결과 표시·선택 대기 중 스캔 정지
   const pendingRef = useRef<PendingTeacher | null>(null);
+  // 모드가 바뀌거나 언마운트되면 세대를 올려, 그 이전 세대에서 시작된 fetch가
+  // 뒤늦게 응답으로 돌아와도 화면(setPending/setResult 등)을 침범하지 못하게 한다.
+  const modeGenRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      modeGenRef.current += 1;
+    };
+  }, [mode]);
 
   // --- 결과 처리 (학생 성공/중복/미자격/미매칭 공용) ---
   const applyResult = useCallback((json: FaceCheckResult) => {
@@ -80,6 +89,7 @@ export default function FaceCheckPage() {
   // --- 1단계 호출 ---
   const submitEmbedding = useCallback(
     async (embedding: number[]) => {
+      const gen = modeGenRef.current;
       try {
         const res = await fetch("/api/facecheck", {
           method: "POST",
@@ -87,8 +97,13 @@ export default function FaceCheckPage() {
           body: JSON.stringify({ embedding }),
         });
         const json: FaceCheckResult = await res.json();
+        if (modeGenRef.current !== gen) {
+          // 응답 도착 전에 모드가 전환됨 — 화면을 건드리지 않고 조용히 버린다.
+          busyRef.current = false;
+          return;
+        }
         if (json.needType && json.user && json.mealKind) {
-          const p = { user: json.user, mealKind: json.mealKind, embedding };
+          const p = { user: json.user, mealKind: json.mealKind, embedding, gen };
           pendingRef.current = p;
           setPending(p);
           setCountdown(TEACHER_TIMEOUT_S);
@@ -96,6 +111,10 @@ export default function FaceCheckPage() {
         }
         applyResult(json);
       } catch {
+        if (modeGenRef.current !== gen) {
+          busyRef.current = false;
+          return;
+        }
         setStatus("서버 연결 오류 — 잠시 후 다시 시도됩니다");
         setTimeout(() => {
           busyRef.current = false;
@@ -118,8 +137,17 @@ export default function FaceCheckPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ embedding: p.embedding, type }),
         });
-        applyResult(await res.json());
+        const json = await res.json();
+        if (modeGenRef.current !== p.gen) {
+          busyRef.current = false;
+          return;
+        }
+        applyResult(json);
       } catch {
+        if (modeGenRef.current !== p.gen) {
+          busyRef.current = false;
+          return;
+        }
         setStatus("서버 연결 오류");
         setTimeout(() => {
           busyRef.current = false;
@@ -130,6 +158,7 @@ export default function FaceCheckPage() {
   );
 
   const cancelTeacher = useCallback(() => {
+    if (!pendingRef.current) return;
     pendingRef.current = null;
     setPending(null);
     busyRef.current = false;
@@ -189,11 +218,11 @@ export default function FaceCheckPage() {
       } catch (err) {
         console.error("Human load error:", err);
         if (cancelled) return;
-        setModelFailed(true);
-        setStatus("안면인식을 사용할 수 없습니다 — QR 모드를 이용하세요");
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         if (videoRef.current) videoRef.current.srcObject = null;
+        setStatus("안면인식을 사용할 수 없습니다 — QR 모드로 전환합니다");
+        setMode("qr");
         return;
       }
       if (cancelled || !human) return;
@@ -229,10 +258,19 @@ export default function FaceCheckPage() {
     async (data: string) => {
       if (busyRef.current) return;
       busyRef.current = true;
+      const gen = modeGenRef.current;
       try {
         const json = await postCheckInWithRetry(data);
+        if (modeGenRef.current !== gen) {
+          busyRef.current = false;
+          return;
+        }
         applyResult({ ...json, matched: true });
       } catch {
+        if (modeGenRef.current !== gen) {
+          busyRef.current = false;
+          return;
+        }
         applyResult({ success: false, matched: true, error: "서버 연결 오류" });
       }
     },
@@ -275,7 +313,7 @@ export default function FaceCheckPage() {
       </div>
 
       {/* Main layout */}
-      <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-16">
+      <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-20">
         {/* Camera Area */}
         <div className="bg-gray-900/95 p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto md:max-w-lg w-full">
@@ -322,7 +360,7 @@ export default function FaceCheckPage() {
                       {result.user.name}
                     </p>
                   ) : result.user ? (
-                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white">
+                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
                       {result.user.name} 선생님
                     </p>
                   ) : null}
@@ -330,7 +368,7 @@ export default function FaceCheckPage() {
                   {result.success && (
                     <p className="text-emerald-700 dark:text-emerald-300 text-fit-sm mt-1.5 font-medium">
                       {result.user?.role === "TEACHER" && result.checkedAt
-                        ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
+                        ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
                         : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
                     </p>
                   )}
