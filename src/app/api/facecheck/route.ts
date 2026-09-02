@@ -85,15 +85,34 @@ export async function POST(request: Request) {
       checkInType = "STUDENT";
     }
 
-    const checkIn = await prisma.checkIn.create({
-      data: {
-        userId: user.id,
-        date: todayDate,
-        mealKind: mealKind as MealKind,
-        type: checkInType,
-        source: "FACE",
-      },
-    });
+    let checkIn;
+    try {
+      checkIn = await prisma.checkIn.create({
+        data: {
+          userId: user.id,
+          date: todayDate,
+          mealKind: mealKind as MealKind,
+          type: checkInType,
+          source: "FACE",
+        },
+      });
+    } catch (err: unknown) {
+      if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
+        const raced = await prisma.checkIn.findFirst({
+          where: { userId: user.id, date: todayDate, mealKind: mealKind as MealKind },
+        });
+        return NextResponse.json({
+          success: false,
+          matched: true,
+          duplicate: true,
+          user,
+          mealKind,
+          checkedAt: raced?.checkedAt,
+          error: `이미 ${MEAL_LABEL[mealKind]} 체크인 하였습니다.`,
+        });
+      }
+      throw err;
+    }
 
     return NextResponse.json({
       success: true,
@@ -104,9 +123,6 @@ export async function POST(request: Request) {
       checkedAt: checkIn.checkedAt,
     });
   } catch (err: unknown) {
-    if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
-      return NextResponse.json({ success: false, matched: true, duplicate: true, error: "이미 체크인 하였습니다." });
-    }
     return NextResponse.json({ success: false, error: "서버 오류가 발생했습니다." }, { status: 500 });
   }
 }

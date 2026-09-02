@@ -158,4 +158,25 @@ describe("/api/facecheck", () => {
       expect.objectContaining({ data: expect.objectContaining({ type: "STUDENT" }) }),
     );
   });
+
+  it("P2002 레이스 → duplicate 응답에 user·mealKind·checkedAt 포함", async () => {
+    mocks.userFindUnique.mockResolvedValue(STUDENT);
+    // 첫 번째 checkInFindFirst: null (중복 아님)
+    // checkInCreate: P2002 reject
+    // 두 번째 checkInFindFirst: 레이스 checkin 반환
+    mocks.checkInFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ checkedAt: new Date("2026-09-02T11:30:00Z") });
+    mocks.checkInCreate.mockRejectedValueOnce({ code: "P2002" } as any);
+
+    const { POST } = await import("@/app/api/facecheck/route");
+    const body = await (await POST(request({ embedding: emb }))).json();
+
+    expect(body.success).toBe(false);
+    expect(body.matched).toBe(true);
+    expect(body.duplicate).toBe(true);
+    expect(body.user.name).toBe("김학생");
+    expect(body.mealKind).toBe("DINNER");
+    expect(body.checkedAt).toBeDefined();
+  });
 });
