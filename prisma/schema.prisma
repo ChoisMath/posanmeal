@@ -22,6 +22,7 @@ enum CheckInSource {
   QR
   ADMIN_MANUAL
   LOCAL_SYNC
+  FACE
 }
 
 enum MealKind {
@@ -67,6 +68,7 @@ model User {
 
   checkIns      CheckIn[]
   registrations MealRegistration[]
+  faceProfile   FaceProfile?
 
   @@index([role, grade, classNum, number])
   @@index([role, adminLevel])
@@ -184,4 +186,16 @@ model SystemSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+model FaceProfile {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  embeddings     Json
+  modelVersion   String
+  consentAt      DateTime
+  consentVersion String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
