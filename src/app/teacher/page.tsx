@@ -12,6 +12,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { FaceEnroll } from "@/components/FaceEnroll";
 import { StudentTable } from "@/components/StudentTable";
 import { TeacherApplications } from "@/components/TeacherApplications";
 import { LogOut } from "lucide-react";
@@ -170,6 +171,7 @@ export default function TeacherPage() {
             <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
               <CardContent className="pt-6 space-y-4">
                 <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={() => mutateUser()} />
+                <FaceEnroll />
                 {editing ? (
                   <div className="space-y-3">
                     <div><Label>이름</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-xl" /></div>

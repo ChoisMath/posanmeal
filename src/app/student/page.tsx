@@ -16,6 +16,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
+import { FaceEnroll } from "@/components/FaceEnroll";
 import { LogOut } from "lucide-react";
 import { MealMenu } from "@/components/MealMenu";
 import { PageLoadingSkeleton } from "@/components/PageSkeleton";
@@ -230,6 +231,7 @@ export default function StudentPage() {
                   currentPhotoUrl={user.photoUrl}
                   onPhotoChange={() => mutateUser()}
                 />
+                <FaceEnroll />
                 <div className="space-y-1">
                   {[
                     ["학년", `${user.grade}학년`],
