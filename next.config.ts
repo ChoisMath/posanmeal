@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [],
   },
-  serverExternalPackages: ["sharp"],
+  serverExternalPackages: ["sharp", "@vladmandic/human"],
 };
 
 export default nextConfig;

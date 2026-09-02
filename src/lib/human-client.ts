@@ -1,9 +1,11 @@
+import "client-only";
 import type { Human, Config, FaceResult } from "@vladmandic/human";
 
 export const FACE_QUALITY = { minScore: 0.7, minReal: 0.5, minLive: 0.5 };
 
 const FACE_CONFIG: Partial<Config> = {
   modelBasePath: "/models/",
+  backend: "webgl",
   cacheSensitivity: 0,
   filter: { enabled: true, equalization: true },
   face: {
@@ -25,12 +27,17 @@ let humanPromise: Promise<Human> | null = null;
 
 export function loadHuman(): Promise<Human> {
   if (!humanPromise) {
-    humanPromise = import("@vladmandic/human").then(async (mod) => {
-      const human = new mod.Human(FACE_CONFIG);
-      await human.load();
-      await human.warmup();
-      return human;
-    });
+    humanPromise = import("@vladmandic/human")
+      .then(async (mod) => {
+        const human = new mod.Human(FACE_CONFIG);
+        await human.load();
+        await human.warmup();
+        return human;
+      })
+      .catch((err) => {
+        humanPromise = null;
+        throw err;
+      });
   }
   return humanPromise;
 }
