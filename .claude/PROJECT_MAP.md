@@ -2,7 +2,7 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-06-17 (담임용 학생 QR 일괄 출력 — StudentQRCard/StudentQRPrintDialog + `lib/qr-card.ts`, StudentTable 체크박스 선택·QR출력 툴바, `/api/teacher/students` 학생별 `qrString` 추가)
+> 마지막 업데이트: 2026-09-02 (안면인식 체크인(facecheck) 1단계 구현 완료 — `@vladmandic/human` 클라이언트 로더(`human-client.ts`) + 모델 self-host(`public/models/`), 학생·교사 개인정보 탭 얼굴 등록 UI(`FaceEnroll`), 공개 페이지 `/facecheck`(교사 근무/개인/취소·10초 자동, QR 폴백), `src/proxy.ts` 공개 경로 등록, `next.config.ts` serverExternalPackages 대응)
 
 ## §1 개요
 
@@ -30,6 +30,8 @@
 | bcryptjs | ^3.0.3 | 관리자 패스워드 해시 |
 | jsonwebtoken | ^9.0.3 | QR JWT 토큰 |
 | @base-ui/react | ^1.3.0 | 헤드리스 UI 프리미티브 |
+| @vladmandic/human | 3.3.6 (정확 고정) | 브라우저 얼굴 검출·임베딩·안티스푸핑/라이브니스 (facecheck) |
+| @vladmandic/human-models | 3.0.4 (devDep, 정확 고정) | Human 모델 파일 원본 — `public/models/`로 복사해 self-host |
 | vitest | ^4.1.5 | 단위 테스트 (devDep) |
 
 ## §3 폴더 구조
@@ -40,6 +42,7 @@ src/
 │   ├── layout.tsx               # Root layout (SwUpdater, AuthProvider)
 │   ├── page.tsx                 # 랜딩 (Google 로그인)
 │   ├── check/page.tsx           # QR 스캐너 (공개, 태블릿용)
+│   ├── facecheck/page.tsx       # 안면인식 체크인 (공개, 태블릿용, 온라인 전용) + QR 폴백 모드
 │   ├── student/page.tsx         # 학생 4탭 (QR, 신청, 개인정보, 확인)
 │   ├── teacher/page.tsx         # 교사 탭 (담임: 6탭, 비담임: 4탭)
 │   ├── admin/
@@ -57,10 +60,12 @@ src/
 ├── hooks/                       # SWR 훅 등
 ├── types/
 ├── auth.ts                      # Auth.js 설정
-└── middleware.ts                # 라우트 보호 (runtime=nodejs)
+└── proxy.ts                     # 라우트 보호 (middleware.ts 아님, §9 참조)
 prisma/
 ├── schema.prisma
 └── migrations/
+public/
+└── models/                      # @vladmandic/human 모델 self-host (10파일 ≈10MB: blazeface/facemesh/faceres/antispoof/liveness .json+.bin)
 ```
 
 ## §4 페이지 라우트
@@ -69,6 +74,7 @@ prisma/
 |------|------|------|------|
 | `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 스캐너, 식당 태블릿용 |
+| `/facecheck` | `src/app/facecheck/page.tsx` | 공개 | 안면인식 체크인(태블릿, 온라인 전용) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"), QR 폴백 모드 전환 버튼 |
 | `/student` | `src/app/student/page.tsx` | 학생 | 4탭: QR, 신청, 개인정보, 확인 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭 |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
@@ -94,6 +100,8 @@ prisma/
 | `/api/checkins` | GET | 학생/교사 | 본인 월별 체크인 이력 |
 | `/api/users/me` | GET/PUT | 학생/교사 | 본인 프로필 조회/수정 — GET이 `todayMeals`(오늘 자격 식사 목록) 반환, 구 `registrations` 필드 제거됨 |
 | `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 — POST 저장 경로 `UPLOAD_DIR`(Railway Volume) 우선, photoUrl `/api/uploads/{id}.webp?t=...` 발급 |
+| `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 관리 — GET 등록 여부/모델버전/동의일시, POST `faceEnrollSchema`(embeddings 3~5개, consentVersion) upsert, DELETE 완전 삭제. 모두 `invalidateFaceCache()` 호출 |
+| `/api/facecheck` | POST | 공개 | 얼굴 임베딩 1:N 매칭 체크인 — `faceCheckSchema`({embedding,type?}), `findBestMatch`로 사용자 특정 후 체크인. 교사는 type 없으면 `needType:true` 응답(2단계 무상태), 학생은 `isStudentEligibleToday` 자격 검증, source="FACE" |
 | `/api/uploads/[filename]` | GET | 공개 | `runtime=nodejs`, `UPLOAD_DIR`에서 readFile 스트리밍 (없으면 `/uploads/` 정적 폴백) |
 | `/api/meals` | GET | 공개 | NEIS API 급식 메뉴 조회 (?date=YYYYMMDD) |
 | `/api/applications` | GET | 로그인 | 신청 가능한 공고 목록 (현재 OPEN, 기간 내) |
@@ -142,20 +150,21 @@ prisma/
 | 모델 | 주요 필드 | 관계 | 비고 |
 |------|----------|------|------|
 | `Admin` | id, username, passwordHash | — | 현재 미사용, 환경변수 방식 대체 |
-| `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, gender?(MALE/FEMALE), adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) — gender는 학생 필수(API 검증) / 교사 옵셔널, 컬럼은 nullable |
+| `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, gender?(MALE/FEMALE), adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations, faceProfile? | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) — gender는 학생 필수(API 검증) / 교사 옵셔널, 컬럼은 nullable |
 | `MealApplication` | id, title, description?, **applyStartAt/applyEndAt?(DateTime)**, **startYear/startMonth/monthCount?(Int)**, status(OPEN/CLOSED) | registrations, meals, mealDates | applyStartAt/EndAt(시각 단위 신청기간) + startYear/Month/monthCount(대상 월 범위) — 구 `type` 컬럼은 Wave 2b(20260611000004)에서 DROP 완료 |
 | `MealApplicationMeal` | applicationId, mealKind, price, exemptionSelectable, method(NONE/YN/WEEKDAY/DATE) | application | @@id([applicationId,mealKind]) — 공고가 제공하는 식사별 가격·신청 방식 |
 | `MealApplicationMealDate` | applicationId, mealKind, grade, date(@db.Date) | application | @@id([applicationId,mealKind,grade,date]) — 학년별 식사 개설일 |
 | `MealRegistration` | id, applicationId, userId, signature(Text), status(APPROVED/CANCELLED), cancelledAt?, cancelledBy?, addedBy? | application, user, meals, mealDates | @@unique([applicationId,userId]) — 취소 후 재신청 시 row 재활성화 |
 | `MealRegistrationMeal` | registrationId, mealKind, applied, exempt, weekdaysByMonth?(JSON `{"2026-07":[1,3,5]}`) | registration | @@id([registrationId,mealKind]) — 학생의 식사별 신청 내용 |
 | `MealRegistrationMealDate` | registrationId, mealKind, date(@db.Date) | registration | @@id([registrationId,mealKind,date]), @@index([date,mealKind]) — **신청 확정일 단일 진실, 체크인 자격 판정 기준** |
-| `CheckIn` | id, userId, date(@db.Date), **mealKind(NOT NULL)**, checkedAt, type(STUDENT/WORK/PERSONAL), source?(QR/ADMIN_MANUAL/LOCAL_SYNC) | user | @@unique([userId,date,mealKind]), @@index([date,mealKind]) |
-| `SystemSetting` | key(PK), value, updatedAt | — | operationMode, qrGeneration, breakfast/lunch/dinner_window_start/end |
+| `CheckIn` | id, userId, date(@db.Date), **mealKind(NOT NULL)**, checkedAt, type(STUDENT/WORK/PERSONAL), source?(QR/ADMIN_MANUAL/LOCAL_SYNC/FACE) | user | @@unique([userId,date,mealKind]), @@index([date,mealKind]) |
+| `SystemSetting` | key(PK), value, updatedAt | — | operationMode, qrGeneration, breakfast/lunch/dinner_window_start/end, face_match_threshold/margin |
+| `FaceProfile` | id, userId(@unique), embeddings(Json, 임베딩 배열), modelVersion, consentAt, consentVersion, createdAt, updatedAt | user(onDelete Cascade) | 안면인식 등록 프로필. 마이그레이션 `20260902000001_add_face_profile`(수기 SQL) |
 
 ### Enums
 - `Role`: STUDENT, TEACHER
 - `CheckInType`: STUDENT, WORK, PERSONAL
-- `CheckInSource`: QR, ADMIN_MANUAL, LOCAL_SYNC
+- `CheckInSource`: QR, ADMIN_MANUAL, LOCAL_SYNC, FACE
 - `AdminLevel`: NONE, SUBADMIN, ADMIN
 - `MealKind`: BREAKFAST, **LUNCH**, DINNER
 - `Gender`: MALE, FEMALE
@@ -184,6 +193,7 @@ prisma/
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
 | `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
 | `EditableCell` | `src/components/EditableCell.tsx` | 관리자 표 inline 편집 셀 — `EditableTextCell` / `EditableSelectCell` named export, `SaveResult` 타입; blur·Enter 저장, Escape 취소, committingRef 이중 fire 방지, role="button"+tabIndex 접근성 |
+| `FaceEnroll` | `src/components/FaceEnroll.tsx` | 학생·교사 개인정보 탭의 얼굴 등록/재등록/삭제 — 동의 모달(`face-consent.ts`) → 3장 자동 캡처(품질 필터, `human-client.ts`) → 임베딩만 POST `/api/users/me/face`. `/student`·`/teacher` 개인정보 탭에 연결됨 |
 
 ### 식사별 공고·신청 UI (`src/components/meal/`)
 
@@ -209,7 +219,7 @@ prisma/
 | `src/lib/timezone.ts` | KST 날짜/시간 유틸 (nowKST, todayKST, formatKST 등) |
 | `src/lib/checkin-source.ts` | CheckInSource enum → 한국어 라벨 변환 |
 | `src/lib/permissions.ts` | canWriteAdmin / canReadAdmin (AdminLevel 기반) |
-| `src/lib/settings-cache.ts` | SystemSetting 30s 인메모리 캐시 |
+| `src/lib/settings-cache.ts` | SystemSetting 30s 인메모리 캐시 (operationMode/qrGeneration/mealWindows + `faceMatch{threshold,margin}` — SystemSetting 키 face_match_threshold/margin, 기본값은 face-constants.ts) |
 | `src/lib/neis-meal.ts` | NEIS 급식 API 호출 + 1시간 캐시 |
 | `src/lib/local-db.ts` | IndexedDB 스키마 v3 (오프라인 모드용: users, eligibleUsers, checkins) |
 | `src/lib/clearClientState.ts` | SW 해제 + Cache API + IndexedDB 전체 삭제 후 signOut |
@@ -229,15 +239,24 @@ prisma/
 | `src/lib/gender.ts` | `normalizeGender` / `genderLabel` / `GENDER_LABEL` — 시트 임포트 입력 정규화 + UI 표시용 라벨, 서버·클라이언트 공용 (테스트 `__tests__/gender.test.ts`) |
 | `src/lib/meal-template-columns.ts` | 일괄신청 양식 컬럼 단일 진실 — `TemplateColumn` 타입(YN/DATE/WEEKDAY), `buildTemplateColumns`, `columnHeader`("중식-7월 5일"/"조식-월요일"), `parseColumnHeader`(months 기반 연도 복원). export/import 라우트 공유 (테스트 `__tests__/meal-template-columns.test.ts`) |
 | `src/lib/qr-card.ts` | 담임 QR 카드 출력용: `buildCardQrString(studentId, generation)`(고정 로컬 QR `posanmeal:{id}:{generation}:STUDENT` 생성) + `chunk<T>(items, size)` 페이지 분할 유틸 (테스트 `__tests__/qr-card.test.ts`) |
+| `src/lib/face-constants.ts` | 안면인식 상수: `FACE_EMBEDDING_DIM`(1024), `FACE_MIN/MAX_EMBEDDINGS`(3~5), `FACE_MODEL_VERSION`, `DEFAULT_FACE_MATCH_THRESHOLD/MARGIN` |
+| `src/lib/face-match.ts` | 순수 함수: `cosineSimilarity(a,b)`, `findBestMatch(embedding, candidates, {threshold,margin})` — 최고/차점 유사도 비교로 1:N 매칭 (테스트 `__tests__/face-match.test.ts`) |
+| `src/lib/schemas/face.ts` | zod 스키마: `faceEnrollSchema`(embeddings 3~5개×1024차원, consentVersion) / `faceCheckSchema`(embedding, type?) (테스트 `__tests__/face-schema.test.ts`) |
+| `src/lib/face-consent.ts` | `FACE_CONSENT_VERSION` + `FACE_CONSENT_TEXT`(안면인식정보 수집·이용 동의문 전문) |
+| `src/lib/face-embedding-cache.ts` | `FaceProfile` 전체 60s 인메모리 캐시: `getFaceCandidates()`(Json embeddings → Float32Array 변환), `invalidateFaceCache()` (테스트 `__tests__/face-embedding-cache.test.ts`) |
+| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman()` 싱글턴(backend webgl 고정, `modelBasePath: "/models/"`), `detectSingleFace(human, video)`, `isQualityFace(face)`, `FACE_QUALITY` 임계값 상수 |
+| `src/lib/checkin-sounds.ts` | 체크인 사운드 유틸(`playChime`/`playLongBeep`/`playDoubleBeep`/`playLockClick`, AudioContext 싱글턴) — `/facecheck` 전용, `/check` 페이지는 동일 로직을 인라인으로 별도 보유(복사본, 공용화 안 됨) |
 
 ## §9 인증 / 미들웨어
 
 - `src/auth.ts`: Auth.js v5, 전략=JWT, Google OAuth + credentials(관리자)
   - signIn 콜백: email로 User 조회 (미등록 거부), role·adminLevel 토큰 주입
   - 관리자: ADMIN_USERNAME / ADMIN_PASSWORD_HASH (bcryptjs) 환경변수 비교
-- `src/middleware.ts`: `export const runtime = "nodejs"` 필수 (Prisma Node.js 모듈)
-  - 보호 경로: `/student`, `/teacher`, `/admin` (role별 리다이렉트)
-  - `/check`는 보호 없음
+- `src/proxy.ts` (실제 파일명 — `src/middleware.ts` 아님. Next.js가 `proxy.ts`를 미들웨어로 인식): allowlist 방식(`publicExact`/`publicPrefixes`), 그 외 경로는 role 검증 후 리다이렉트/403
+  - `publicExact`: `/`, `/check`, `/facecheck`, `/admin/login`
+  - `publicPrefixes`: `/api/auth`, `/api/checkin`, `/api/facecheck`, `/api/uploads`, `/api/system/settings`, `/api/sync`, `/api/meals`, `/_next`, `/uploads`
+  - 보호 경로: `/student`(STUDENT), `/teacher`(TEACHER), `/admin`(canReadAdmin) — role별 리다이렉트. `/api/users/me/face`는 allowlist에 없어 로그인 필수
+  - matcher: `_next/`와 확장자 포함 경로 제외 전체
 
 ## §10 환경변수 (.env.example 기준)
 
@@ -292,6 +311,11 @@ prisma/
 - **관리자 대리 신청 표시**: `MealRegistration.addedBy="ADMIN"` + `updatedAt` 이 관리자 대리 신청의 근거. 관리자가 학생 신청을 생성/수정하면 `addedBy`가 ADMIN으로 기록됨(의도된 동작). `AdminApplyDialog`는 신청기간(`applyStartAt/EndAt`) 검사를 우회한다
 - **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)
 - **출력 카드 QR**: 담임이 출력하는 학생 QR 카드는 `posanmeal:{id}:{qrGeneration}:STUDENT` 형식의 고정 로컬 QR(만료 없음·식사 무관)이며 `/check`의 `parseLocalQR`/`handleLocalScan`(기존 4-part 로컬 경로)로 체크인된다. `/api/checkin`·`/check`는 비변경. 관리자 QR 강제 갱신(`PUT /api/system/settings`로 `qrGeneration` 증가)으로 출력된 카드를 일괄 무효화할 수 있음
+- **`next.config.ts` `serverExternalPackages: ["sharp", "@vladmandic/human"]` 제거 금지**: Turbopack의 Client-SSR 레이어가 이 설정 없이는 `@vladmandic/human`의 node export(`human.node.js` → `tfjs-node` 미설치로 빌드 실패)를 해석하려 시도함. 필수 설정
+- **Human 모델 캐싱**: `@vladmandic/human`은 모델을 IndexedDB에 파일명 키로 캐시함. `public/models/`의 모델 파일을 교체할 때는 경로를 버전화(예: `/models/v2/`)해야 클라이언트가 구 캐시를 계속 쓰는 문제를 피할 수 있음
+- **얼굴 원본 미저장**: 카메라로 촬영한 얼굴 이미지는 어디에도 저장·전송되지 않음 — 브라우저에서 Human으로 임베딩만 추출해 `FaceProfile.embeddings`(숫자 배열)만 서버에 저장/전송
+- **`CheckInSource` 확장 시 3곳 동시 갱신 필요** (수동 유니온, 자동 동기화 없음): `src/lib/checkin-source.ts`(`sourceLabel`) · `src/app/api/admin/export/route.ts`(Row.source 타입) · `src/app/admin/page.tsx`(배지 색상 분기)
+- **얼굴 매칭 임계값**: `SystemSetting` 키 `face_match_threshold`/`face_match_margin` (기본 0.55/0.05, `face-constants.ts` DEFAULT_* 참조), `settings-cache.ts`가 30s 캐시
 
 ## §13 Project-Map Maintenance
 
