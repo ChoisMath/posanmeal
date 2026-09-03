@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BrandMark } from "@/components/BrandMark";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, Plus, Download, Trash2, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, Settings, ChevronLeft, ChevronRight, AlertTriangle, Database, ExternalLink } from "lucide-react";
+import { LogOut, Plus, Download, Trash2, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, ScanFace, Settings, ChevronLeft, ChevronRight, AlertTriangle, Database, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { toast } from "sonner";
@@ -680,6 +680,9 @@ export default function AdminPage() {
           )}
           <Link href="/check" className="inline-flex items-center justify-center h-9 w-9 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors" aria-label="체크인 페이지" title="체크인 페이지">
             <Camera className="h-4 w-4" />
+          </Link>
+          <Link href="/facecheck" className="inline-flex items-center justify-center h-9 w-9 rounded-md text-white/80 hover:text-white hover:bg-white/10 transition-colors" aria-label="안면인식 체크인 페이지" title="안면인식 체크인 페이지">
+            <ScanFace className="h-4 w-4" />
           </Link>
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => clearClientStateAndSignOut("/")}><LogOut className="h-4 w-4" /></Button>
         </div>
