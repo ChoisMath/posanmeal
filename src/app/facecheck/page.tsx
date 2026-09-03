@@ -9,7 +9,7 @@ import type { MealKind } from "@/lib/meal-kind-local";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
 import { playChime, playDoubleBeep, playLongBeep } from "@/lib/checkin-sounds";
 import { detectFaces, loadHuman, qualityIssue } from "@/lib/human-client";
-import { QrCode, ScanFace } from "lucide-react";
+import { LoaderCircle, QrCode, ScanFace } from "lucide-react";
 
 interface FaceCheckUser {
   id: number;
@@ -42,6 +42,40 @@ interface PendingTeacher {
   gen: number;
 }
 
+// 얼굴 루프의 화면 표시용 단계. busyRef(루프 정지 플래그)와 반드시 함께 바뀐다.
+type ScanPhase = "loading" | "scanning" | "processing" | "waiting" | "blocked";
+
+const PHASE_LABEL: Record<ScanPhase, string> = {
+  loading: "준비 중",
+  scanning: "인식 준비",
+  processing: "인식 중",
+  waiting: "대기 중",
+  blocked: "중단",
+};
+
+const PHASE_HEADLINE: Record<ScanPhase, string> = {
+  loading: "준비 중...",
+  scanning: "얼굴을 카메라에 보여주세요",
+  processing: "인식 중...",
+  waiting: "잠시 후 다시 인식합니다",
+  blocked: "인식이 중단되었습니다",
+};
+
+function PhaseIndicator({ phase, className = "" }: { phase: ScanPhase; className?: string }) {
+  if (phase === "scanning") {
+    return (
+      <span className={`relative flex h-2.5 w-2.5 shrink-0 ${className}`}>
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+      </span>
+    );
+  }
+  if (phase === "blocked") {
+    return <span className={`h-2.5 w-2.5 shrink-0 rounded-full bg-red-500 ${className}`} />;
+  }
+  return <LoaderCircle className={`h-3.5 w-3.5 shrink-0 animate-spin ${className}`} />;
+}
+
 const DETECT_INTERVAL_MS = 300;
 const RESULT_DISPLAY_MS = 2000;
 const TEACHER_TIMEOUT_S = 10;
@@ -59,9 +93,10 @@ export default function FaceCheckPage() {
   const [pending, setPending] = useState<PendingTeacher | null>(null);
   const [countdown, setCountdown] = useState(TEACHER_TIMEOUT_S);
   const [status, setStatus] = useState("카메라 준비 중...");
+  const [phase, setPhase] = useState<ScanPhase>("loading");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const busyRef = useRef(false); // API 호출·결과 표시·선택 대기 중 스캔 정지
+  const busyRef = useRef(false); // API 호출·결과 표시·선택 대기 중 스캔 정지 — pauseScan/resumeScan으로만 변경
   const pendingRef = useRef<PendingTeacher | null>(null);
   const kioskKeyRef = useRef<string | null>(null);
   const kioskBlockedRef = useRef(false); // 키오스크 키 거부됨 — 카메라는 유지, POST만 중단
@@ -93,23 +128,33 @@ export default function FaceCheckPage() {
     setStatus(text);
   }, []);
 
+  const pauseScan = useCallback((next: "processing" | "waiting") => {
+    busyRef.current = true;
+    setPhase(next);
+  }, []);
+
+  const resumeScan = useCallback(() => {
+    busyRef.current = false;
+    setPhase("scanning");
+  }, []);
+
   // 키오스크 키 거부(401/503)·레이트리밋(429) 공용 처리. true를 반환하면 호출자는 더 진행하지 않는다.
   const handleGateErrors = useCallback((json: FaceCheckResult): boolean => {
     if (json.errorCode === "KIOSK_UNAUTHORIZED" || json.errorCode === "KIOSK_KEY_UNSET") {
       kioskBlockedRef.current = true;
       updateStatus("키오스크 키가 필요합니다 — /facecheck?key=<키> 로 접속하세요");
       busyRef.current = false;
+      setPhase("blocked");
       return true;
     }
     if (json.errorCode === "RATE_LIMITED") {
       updateStatus(json.error || "요청이 너무 많습니다. 잠시 후 다시 시도하세요.");
-      setTimeout(() => {
-        busyRef.current = false;
-      }, RATE_LIMIT_COOLDOWN_MS);
+      setPhase("waiting");
+      setTimeout(resumeScan, RATE_LIMIT_COOLDOWN_MS);
       return true;
     }
     return false;
-  }, [updateStatus]);
+  }, [resumeScan, updateStatus]);
 
   // --- 결과 처리 (학생 성공/중복/미자격/미매칭 공용) ---
   const applyResult = useCallback((json: FaceCheckResult) => {
@@ -118,12 +163,13 @@ export default function FaceCheckPage() {
       // 미매칭: 전체 화면 결과 대신 상태 문구만 (지나가는 사람마다 삐 소리 방지)
       const cooldown = json.errorCode === "NO_MEAL_WINDOW" ? NO_MEAL_WINDOW_COOLDOWN_MS : QUIET_COOLDOWN_MS;
       updateStatus(json.error || "인식되지 않았습니다. 다시 서 주세요.");
-      setTimeout(() => {
-        busyRef.current = false;
-      }, cooldown);
+      setPhase("waiting");
+      setTimeout(resumeScan, cooldown);
       return;
     }
     setResult(json);
+    setPhase("waiting");
+    updateStatus("잠시 후 다시 인식합니다");
     // 같은 사람이 프레임에 남아 결과/경고음이 반복되는 것을 막는다.
     if (json.user?.id) suppressRef.current.set(json.user.id, Date.now() + RESULT_SUPPRESS_MS);
     if (json.success) playChime();
@@ -131,9 +177,9 @@ export default function FaceCheckPage() {
     else playDoubleBeep();
     setTimeout(() => {
       setResult(null);
-      busyRef.current = false;
+      resumeScan();
     }, RESULT_DISPLAY_MS);
-  }, [updateStatus]);
+  }, [resumeScan, updateStatus]);
 
   // --- 1단계 호출 ---
   const submitEmbedding = useCallback(
@@ -148,7 +194,7 @@ export default function FaceCheckPage() {
         const json: FaceCheckResult = await res.json();
         if (modeGenRef.current !== gen) {
           // 응답 도착 전에 모드가 전환됨 — 화면을 건드리지 않고 조용히 버린다.
-          busyRef.current = false;
+          resumeScan();
           return;
         }
         if (handleGateErrors(json)) return;
@@ -157,7 +203,10 @@ export default function FaceCheckPage() {
           const suppressedUntil = suppressRef.current.get(uid);
           if (suppressedUntil !== undefined) {
             if (suppressedUntil > Date.now()) {
-              busyRef.current = false;
+              // 방금 처리된 사람이 프레임에 남아 있음 — 재요청을 잠시 멈추고 안내만 한다.
+              updateStatus("처리된 분입니다 — 다음 분 서 주세요");
+              setPhase("waiting");
+              setTimeout(resumeScan, QUIET_COOLDOWN_MS);
               return;
             }
             suppressRef.current.delete(uid);
@@ -168,21 +217,22 @@ export default function FaceCheckPage() {
           pendingRef.current = p;
           setPending(p);
           setCountdown(TEACHER_TIMEOUT_S);
+          setPhase("waiting");
+          updateStatus("근무/개인 선택 대기 중");
           return; // busyRef 유지 — 선택 대기
         }
         applyResult(json);
       } catch {
         if (modeGenRef.current !== gen) {
-          busyRef.current = false;
+          resumeScan();
           return;
         }
         updateStatus("서버 연결 오류 — 잠시 후 다시 시도됩니다");
-        setTimeout(() => {
-          busyRef.current = false;
-        }, 1500);
+        setPhase("waiting");
+        setTimeout(resumeScan, 1500);
       }
     },
-    [applyResult, handleGateErrors, updateStatus],
+    [applyResult, handleGateErrors, resumeScan, updateStatus],
   );
 
   // --- 2단계 호출 (교사 type 확정 / 자동 개인) ---
@@ -192,6 +242,8 @@ export default function FaceCheckPage() {
       pendingRef.current = null;
       setPending(null);
       if (!p) return;
+      setPhase("processing");
+      updateStatus("확인 중...");
       try {
         const res = await fetch("/api/facecheck", {
           method: "POST",
@@ -200,23 +252,22 @@ export default function FaceCheckPage() {
         });
         const json = await res.json();
         if (modeGenRef.current !== p.gen) {
-          busyRef.current = false;
+          resumeScan();
           return;
         }
         if (handleGateErrors(json)) return;
         applyResult(json);
       } catch {
         if (modeGenRef.current !== p.gen) {
-          busyRef.current = false;
+          resumeScan();
           return;
         }
         updateStatus("서버 연결 오류");
-        setTimeout(() => {
-          busyRef.current = false;
-        }, 1500);
+        setPhase("waiting");
+        setTimeout(resumeScan, 1500);
       }
     },
-    [applyResult, handleGateErrors, updateStatus],
+    [applyResult, handleGateErrors, resumeScan, updateStatus],
   );
 
   const cancelTeacher = useCallback(() => {
@@ -224,8 +275,8 @@ export default function FaceCheckPage() {
     suppressRef.current.set(pendingRef.current.user.id, Date.now() + TEACHER_CANCEL_SUPPRESS_MS);
     pendingRef.current = null;
     setPending(null);
-    busyRef.current = false;
-  }, []);
+    resumeScan();
+  }, [resumeScan]);
 
   // --- 교사 10초 카운트다운 → 자동 "개인" ---
   useEffect(() => {
@@ -258,6 +309,7 @@ export default function FaceCheckPage() {
             ? "카메라 권한을 허용해 주세요"
             : "카메라를 사용할 수 없습니다",
         );
+        setPhase("blocked");
         return;
       }
       if (cancelled) {
@@ -291,6 +343,7 @@ export default function FaceCheckPage() {
       if (cancelled || !human) return;
 
       updateStatus("얼굴을 화면에 보여주세요");
+      setPhase("scanning");
 
       let failures = 0;
       while (!cancelled) {
@@ -320,7 +373,7 @@ export default function FaceCheckPage() {
             updateStatus("정면을 바라봐 주세요");
             continue;
           }
-          busyRef.current = true;
+          pauseScan("processing");
           updateStatus("인식 중...");
           await submitEmbedding(outcome.face.embedding);
           if (cancelled) break;
@@ -345,30 +398,30 @@ export default function FaceCheckPage() {
       streamRef.current = null;
       if (videoRef.current) videoRef.current.srcObject = null;
     };
-  }, [mode, submitEmbedding]);
+  }, [mode, pauseScan, submitEmbedding]);
 
   // --- QR 폴백 (온라인 JWT QR 전용 — 인쇄 카드 QR은 /check 사용) ---
   const handleQrScan = useCallback(
     async (data: string) => {
       if (busyRef.current) return;
-      busyRef.current = true;
+      pauseScan("processing");
       const gen = modeGenRef.current;
       try {
         const json = await postCheckInWithRetry(data);
         if (modeGenRef.current !== gen) {
-          busyRef.current = false;
+          resumeScan();
           return;
         }
         applyResult({ ...json, matched: true });
       } catch {
         if (modeGenRef.current !== gen) {
-          busyRef.current = false;
+          resumeScan();
           return;
         }
         applyResult({ success: false, matched: true, error: "서버 연결 오류" });
       }
     },
-    [applyResult],
+    [applyResult, pauseScan, resumeScan],
   );
 
   const formatCheckedAt = (checkedAt: string) => {
@@ -401,8 +454,15 @@ export default function FaceCheckPage() {
       {/* Status Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-1.5 bg-black/60 text-white text-xs">
         <span className="font-medium whitespace-nowrap">안면인식 체크인</span>
-        <span className="text-white/70 whitespace-nowrap">
-          {mode === "face" ? "얼굴 인식 모드" : "QR 모드"}
+        <span className="flex items-center gap-1.5 text-white/70 whitespace-nowrap">
+          {mode === "face" ? (
+            <>
+              <PhaseIndicator phase={phase} />
+              얼굴 인식 · {PHASE_LABEL[phase]}
+            </>
+          ) : (
+            "QR 모드"
+          )}
         </span>
       </div>
 
@@ -420,8 +480,9 @@ export default function FaceCheckPage() {
                   className="w-full rounded-lg bg-black aspect-[3/4] object-cover"
                 />
                 <div className="absolute inset-x-2 bottom-3 flex justify-center">
-                  <span className="max-w-full truncate px-3 py-1.5 rounded-full bg-black/60 text-white text-xs sm:text-sm">
-                    {status}
+                  <span className="max-w-full flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs sm:text-sm">
+                    <PhaseIndicator phase={phase} />
+                    <span className="truncate">{status}</span>
                   </span>
                 </div>
               </div>
@@ -491,14 +552,16 @@ export default function FaceCheckPage() {
             {!result && (
               <div className="text-center text-muted-foreground">
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-4">
-                  {mode === "face" ? (
+                  {mode !== "face" ? (
+                    <QrCode className="w-8 h-8 text-primary" />
+                  ) : phase === "scanning" || phase === "blocked" ? (
                     <ScanFace className="w-8 h-8 text-primary" />
                   ) : (
-                    <QrCode className="w-8 h-8 text-primary" />
+                    <LoaderCircle className="w-8 h-8 text-primary animate-spin" />
                   )}
                 </div>
                 <p className="text-lg font-semibold whitespace-nowrap">
-                  {mode === "face" ? "얼굴을 카메라에 보여주세요" : "QR 코드를 스캔해 주세요"}
+                  {mode === "face" ? PHASE_HEADLINE[phase] : "QR 코드를 스캔해 주세요"}
                 </p>
                 <p className="text-sm mt-1 opacity-70 truncate">{status}</p>
               </div>
@@ -555,7 +618,14 @@ export default function FaceCheckPage() {
       {/* 하단 고정 모드 전환 버튼 */}
       <div className="fixed bottom-0 left-0 right-0 z-20 flex justify-center p-3 bg-gradient-to-t from-black/50 to-transparent">
         <button
-          onClick={() => setMode((m) => (m === "face" ? "qr" : "face"))}
+          onClick={() => {
+            if (mode === "face") {
+              setMode("qr");
+            } else {
+              setPhase("loading");
+              setMode("face");
+            }
+          }}
           className="min-h-11 px-5 rounded-full bg-white/90 dark:bg-black/70 text-gray-900 dark:text-white font-semibold text-sm shadow-lg flex items-center gap-2 whitespace-nowrap"
         >
           {mode === "face" ? (
