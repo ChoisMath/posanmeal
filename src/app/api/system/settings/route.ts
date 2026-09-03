@@ -11,6 +11,7 @@ export async function GET() {
       operationMode: settings.operationMode,
       qrGeneration: parseInt(settings.qrGeneration, 10),
       mealWindows: settings.mealWindows,
+      faceMatch: settings.faceMatch,
     },
     {
       headers: {
@@ -36,6 +37,28 @@ export async function PUT(request: Request) {
       where: { key: "operationMode" },
       update: { value: body.operationMode },
       create: { key: "operationMode", value: body.operationMode },
+    });
+  }
+
+  if (body.faceMatchThreshold !== undefined) {
+    if (typeof body.faceMatchThreshold !== "number" || body.faceMatchThreshold <= 0 || body.faceMatchThreshold > 1) {
+      return NextResponse.json({ error: "안면인식 임계값이 올바르지 않습니다." }, { status: 400 });
+    }
+    await prisma.systemSetting.upsert({
+      where: { key: "face_match_threshold" },
+      update: { value: String(body.faceMatchThreshold) },
+      create: { key: "face_match_threshold", value: String(body.faceMatchThreshold) },
+    });
+  }
+
+  if (body.faceMatchMargin !== undefined) {
+    if (typeof body.faceMatchMargin !== "number" || body.faceMatchMargin < 0 || body.faceMatchMargin > 0.5) {
+      return NextResponse.json({ error: "안면인식 임계값이 올바르지 않습니다." }, { status: 400 });
+    }
+    await prisma.systemSetting.upsert({
+      where: { key: "face_match_margin" },
+      update: { value: String(body.faceMatchMargin) },
+      create: { key: "face_match_margin", value: String(body.faceMatchMargin) },
     });
   }
 
@@ -147,5 +170,6 @@ export async function PUT(request: Request) {
     operationMode: settings.operationMode,
     qrGeneration: parseInt(settings.qrGeneration, 10),
     mealWindows: settings.mealWindows,
+    faceMatch: settings.faceMatch,
   });
 }

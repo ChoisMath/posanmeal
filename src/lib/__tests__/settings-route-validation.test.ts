@@ -1,4 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn(),
+  systemSettingUpsert: vi.fn(),
+  systemSettingFindMany: vi.fn(),
+}));
+
+vi.mock("@/auth", () => ({ auth: mocks.auth }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    systemSetting: { upsert: mocks.systemSettingUpsert, findMany: mocks.systemSettingFindMany },
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
+  },
+}));
 
 // 서버 route.ts의 검증 로직을 순수 함수로 추출해 테스트
 // 실제 라우트와 동일한 구현이어야 함
@@ -100,5 +115,41 @@ describe("서버 mealWindows 검증 (3윈도우)", () => {
         { start: "14:00", end: "21:00" },
       ),
     ).toBeNull();
+  });
+});
+
+function putRequest(body: unknown) {
+  return new Request("http://localhost/api/system/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("PUT /api/system/settings — faceMatchThreshold/Margin", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.auth.mockResolvedValue({ user: { role: "ADMIN" } });
+    mocks.systemSettingFindMany.mockResolvedValue([]);
+  });
+
+  it("faceMatchThreshold 1.5(범위 밖) → 400", async () => {
+    const { PUT } = await import("@/app/api/system/settings/route");
+    const res = await PUT(putRequest({ faceMatchThreshold: 1.5 }));
+    expect(res.status).toBe(400);
+    expect(mocks.systemSettingUpsert).not.toHaveBeenCalled();
+  });
+
+  it("faceMatchThreshold 0.6 → upsert(key: face_match_threshold, value: '0.6')", async () => {
+    const { PUT } = await import("@/app/api/system/settings/route");
+    const res = await PUT(putRequest({ faceMatchThreshold: 0.6 }));
+    expect(res.status).toBe(200);
+    expect(mocks.systemSettingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { key: "face_match_threshold" },
+        update: { value: "0.6" },
+        create: { key: "face_match_threshold", value: "0.6" },
+      }),
+    );
   });
 });

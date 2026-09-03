@@ -33,10 +33,10 @@ const emb = Array.from({ length: FACE_EMBEDDING_DIM }, (_, i) => (i === 0 ? 1 : 
 const STUDENT = { id: 1, name: "김학생", role: "STUDENT", grade: 2, classNum: 3, number: 7, photoUrl: null };
 const TEACHER = { id: 9, name: "박교사", role: "TEACHER", grade: null, classNum: null, number: null, photoUrl: null };
 
-function request(body: unknown) {
+function request(body: unknown, headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/facecheck", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-kiosk-key": "test-key", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -54,6 +54,7 @@ const OPEN_SETTINGS = {
 describe("/api/facecheck", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.FACECHECK_KIOSK_KEY = "test-key";
     mocks.getCachedSettings.mockResolvedValue(OPEN_SETTINGS);
     mocks.getFaceCandidates.mockResolvedValue([
       { userId: 1, embeddings: [Float32Array.from(emb)] },
@@ -178,5 +179,39 @@ describe("/api/facecheck", () => {
     expect(body.user.name).toBe("김학생");
     expect(body.mealKind).toBe("DINNER");
     expect(body.checkedAt).toBeDefined();
+  });
+
+  it("키오스크 키 헤더 없음 → 401 KIOSK_UNAUTHORIZED", async () => {
+    const { POST } = await import("@/app/api/facecheck/route");
+    const res = await POST(request({ embedding: emb }, { "x-kiosk-key": "" }));
+    const body = await res.json();
+    expect(res.status).toBe(401);
+    expect(body.errorCode).toBe("KIOSK_UNAUTHORIZED");
+  });
+
+  it("FACECHECK_KIOSK_KEY 미설정 → 503 KIOSK_KEY_UNSET", async () => {
+    const original = process.env.FACECHECK_KIOSK_KEY;
+    delete process.env.FACECHECK_KIOSK_KEY;
+    try {
+      const { POST } = await import("@/app/api/facecheck/route");
+      const res = await POST(request({ embedding: emb }));
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body.errorCode).toBe("KIOSK_KEY_UNSET");
+    } finally {
+      process.env.FACECHECK_KIOSK_KEY = original;
+    }
+  });
+
+  it("레이트리밋: 동일 IP 121회째 → 429", async () => {
+    mocks.userFindUnique.mockResolvedValue(STUDENT);
+    const { POST } = await import("@/app/api/facecheck/route");
+    const headers = { "x-forwarded-for": "10.0.0.9" };
+    let last: Response | undefined;
+    for (let i = 0; i < 121; i++) {
+      last = await POST(request({ embedding: emb }, headers));
+    }
+    expect(last?.status).toBe(429);
+    expect((await last!.json()).errorCode).toBe("RATE_LIMITED");
   });
 });

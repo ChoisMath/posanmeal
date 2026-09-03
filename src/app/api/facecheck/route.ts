@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayKST, nowKST } from "@/lib/timezone";
@@ -13,7 +14,52 @@ const USER_SELECT = {
   grade: true, classNum: true, number: true, photoUrl: true,
 } as const;
 
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 120;
+const rateHits = new Map<string, number[]>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  if (rateHits.size > 1000) {
+    for (const [k, v] of rateHits) if (!v.some((t) => now - t < RATE_WINDOW_MS)) rateHits.delete(k);
+  }
+  const recent = (rateHits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  recent.push(now);
+  rateHits.set(ip, recent);
+  return recent.length > RATE_MAX;
+}
+
+function checkKioskKey(request: Request): "ok" | "unset" | "invalid" {
+  const expected = process.env.FACECHECK_KIOSK_KEY;
+  if (!expected) return "unset";
+  const given = Buffer.from(request.headers.get("x-kiosk-key") ?? "");
+  const want = Buffer.from(expected);
+  return given.length === want.length && timingSafeEqual(given, want) ? "ok" : "invalid";
+}
+
 export async function POST(request: Request) {
+  const keyStatus = checkKioskKey(request);
+  if (keyStatus === "unset") {
+    return NextResponse.json(
+      { success: false, error: "키오스크 키가 설정되지 않았습니다.", errorCode: "KIOSK_KEY_UNSET" },
+      { status: 503 },
+    );
+  }
+  if (keyStatus === "invalid") {
+    return NextResponse.json(
+      { success: false, error: "키오스크 인증에 실패했습니다.", errorCode: "KIOSK_UNAUTHORIZED" },
+      { status: 401 },
+    );
+  }
+
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { success: false, error: "요청이 너무 많습니다. 잠시 후 다시 시도하세요.", errorCode: "RATE_LIMITED" },
+      { status: 429 },
+    );
+  }
+
   try {
     const parsed = faceCheckSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -123,6 +169,7 @@ export async function POST(request: Request) {
       checkedAt: checkIn.checkedAt,
     });
   } catch (err: unknown) {
+    console.error("facecheck error:", err);
     return NextResponse.json({ success: false, error: "서버 오류가 발생했습니다." }, { status: 500 });
   }
 }

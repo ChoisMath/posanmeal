@@ -71,6 +71,18 @@ describe("/api/users/me/face", () => {
     expect(mocks.faceProfileUpsert).not.toHaveBeenCalled();
   });
 
+  it("POST: 구버전 consentVersion 400, upsert 미호출", async () => {
+    const { POST } = await import("@/app/api/users/me/face/route");
+    const res = await POST(
+      postRequest({
+        embeddings: [validEmbedding, validEmbedding, validEmbedding],
+        consentVersion: "old",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mocks.faceProfileUpsert).not.toHaveBeenCalled();
+  });
+
   it("DELETE: 본인 프로필 삭제", async () => {
     mocks.faceProfileDeleteMany.mockResolvedValue({ count: 1 });
     const { DELETE } = await import("@/app/api/users/me/face/route");

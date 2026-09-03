@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ScanFace, Trash2 } from "lucide-react";
 import { FACE_CONSENT_TEXT, FACE_CONSENT_VERSION } from "@/lib/face-consent";
 import { FACE_MIN_EMBEDDINGS } from "@/lib/face-constants";
-import { detectSingleFace, isQualityFace, loadHuman } from "@/lib/human-client";
+import { detectFaces, loadHuman, qualityIssue } from "@/lib/human-client";
 
 interface FaceStatus {
   registered: boolean;
@@ -72,19 +72,28 @@ export function FaceEnroll() {
       while (isActive() && embeddings.length < FACE_MIN_EMBEDDINGS) {
         await new Promise((r) => setTimeout(r, CAPTURE_INTERVAL_MS));
         if (!isActive()) return;
-        const face = await detectSingleFace(human, video);
+        const outcome = await detectFaces(human, video);
         if (!isActive()) return;
-        if (!face) {
-          setMessage("얼굴이 인식되지 않습니다. 혼자, 정면으로 서 주세요");
+        if (outcome.kind === "none") {
+          setMessage("얼굴이 인식되지 않습니다. 정면으로 서 주세요");
           continue;
         }
-        if (!isQualityFace(face)) {
+        if (outcome.kind === "multiple") {
+          setMessage("혼자 촬영해 주세요 (얼굴이 여러 개 감지됨)");
+          continue;
+        }
+        const issue = qualityIssue(outcome.face);
+        if (issue === "spoof") {
+          setMessage("실제 얼굴로 인식해 주세요");
+          continue;
+        }
+        if (issue === "lowScore") {
           setMessage("조금 더 밝은 곳에서 정면을 바라봐 주세요");
           continue;
         }
         if (Date.now() - lastCaptureAt < CAPTURE_GAP_MS) continue;
         lastCaptureAt = Date.now();
-        embeddings.push(face.embedding);
+        embeddings.push(outcome.face.embedding);
         setProgress(embeddings.length);
         setMessage(`촬영 ${embeddings.length}/${FACE_MIN_EMBEDDINGS} — 고개를 살짝 움직여 주세요`);
       }

@@ -57,17 +57,3 @@ export function playDoubleBeep() {
     osc2.stop(ctx.currentTime + 0.55);
   } catch {}
 }
-
-export function playLockClick() {
-  try {
-    const ctx = getAudioCtx();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.value = 0.35;
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 280;
-    osc.connect(gain);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.08);
-  } catch {}
-}

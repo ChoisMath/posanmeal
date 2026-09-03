@@ -8,7 +8,7 @@ import { MEAL_LABEL } from "@/lib/meal-plan";
 import type { MealKind } from "@/lib/meal-kind-local";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
 import { playChime, playDoubleBeep, playLongBeep } from "@/lib/checkin-sounds";
-import { detectSingleFace, isQualityFace, loadHuman } from "@/lib/human-client";
+import { detectFaces, loadHuman, qualityIssue } from "@/lib/human-client";
 import { QrCode, ScanFace } from "lucide-react";
 
 interface FaceCheckUser {
@@ -28,6 +28,7 @@ interface FaceCheckResult {
   notApplicant?: boolean;
   needType?: boolean;
   error?: string;
+  errorCode?: string;
   user?: FaceCheckUser;
   type?: string;
   checkedAt?: string;
@@ -44,6 +45,13 @@ interface PendingTeacher {
 const DETECT_INTERVAL_MS = 300;
 const RESULT_DISPLAY_MS = 2000;
 const TEACHER_TIMEOUT_S = 10;
+const KIOSK_KEY_STORAGE = "facecheck.kioskKey";
+const MAX_LOOP_FAILURES = 3;
+const QUIET_COOLDOWN_MS = 800;
+const NO_MEAL_WINDOW_COOLDOWN_MS = 8000;
+const RATE_LIMIT_COOLDOWN_MS = 10_000;
+const RESULT_SUPPRESS_MS = 10_000;
+const TEACHER_CANCEL_SUPPRESS_MS = 15_000;
 
 export default function FaceCheckPage() {
   const [mode, setMode] = useState<"face" | "qr">("face");
@@ -55,6 +63,10 @@ export default function FaceCheckPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const busyRef = useRef(false); // API 호출·결과 표시·선택 대기 중 스캔 정지
   const pendingRef = useRef<PendingTeacher | null>(null);
+  const kioskKeyRef = useRef<string | null>(null);
+  const kioskBlockedRef = useRef(false); // 키오스크 키 거부됨 — 카메라는 유지, POST만 중단
+  const suppressRef = useRef<Map<number, number>>(new Map()); // userId → 억제 만료 시각(ms)
+  const lastStatusRef = useRef("카메라 준비 중...");
   // 모드가 바뀌거나 언마운트되면 세대를 올려, 그 이전 세대에서 시작된 fetch가
   // 뒤늦게 응답으로 돌아와도 화면(setPending/setResult 등)을 침범하지 못하게 한다.
   const modeGenRef = useRef(0);
@@ -65,18 +77,55 @@ export default function FaceCheckPage() {
     };
   }, [mode]);
 
+  // 키오스크 키: URL ?key=로 최초 접속 시 localStorage에 저장하고 주소창에서 지운다.
+  useEffect(() => {
+    const key = new URLSearchParams(window.location.search).get("key");
+    if (key) {
+      localStorage.setItem(KIOSK_KEY_STORAGE, key);
+      history.replaceState(null, "", "/facecheck");
+    }
+    kioskKeyRef.current = localStorage.getItem(KIOSK_KEY_STORAGE);
+  }, []);
+
+  const updateStatus = useCallback((text: string) => {
+    if (lastStatusRef.current === text) return;
+    lastStatusRef.current = text;
+    setStatus(text);
+  }, []);
+
+  // 키오스크 키 거부(401/503)·레이트리밋(429) 공용 처리. true를 반환하면 호출자는 더 진행하지 않는다.
+  const handleGateErrors = useCallback((json: FaceCheckResult): boolean => {
+    if (json.errorCode === "KIOSK_UNAUTHORIZED" || json.errorCode === "KIOSK_KEY_UNSET") {
+      kioskBlockedRef.current = true;
+      updateStatus("키오스크 키가 필요합니다 — /facecheck?key=<키> 로 접속하세요");
+      busyRef.current = false;
+      return true;
+    }
+    if (json.errorCode === "RATE_LIMITED") {
+      updateStatus(json.error || "요청이 너무 많습니다. 잠시 후 다시 시도하세요.");
+      setTimeout(() => {
+        busyRef.current = false;
+      }, RATE_LIMIT_COOLDOWN_MS);
+      return true;
+    }
+    return false;
+  }, [updateStatus]);
+
   // --- 결과 처리 (학생 성공/중복/미자격/미매칭 공용) ---
   const applyResult = useCallback((json: FaceCheckResult) => {
     if (json.needType && json.user && json.mealKind) return; // 교사 분기에서 별도 처리
     if (!json.matched && !json.success) {
       // 미매칭: 전체 화면 결과 대신 상태 문구만 (지나가는 사람마다 삐 소리 방지)
-      setStatus(json.error || "인식되지 않았습니다. 다시 서 주세요.");
+      const cooldown = json.errorCode === "NO_MEAL_WINDOW" ? NO_MEAL_WINDOW_COOLDOWN_MS : QUIET_COOLDOWN_MS;
+      updateStatus(json.error || "인식되지 않았습니다. 다시 서 주세요.");
       setTimeout(() => {
         busyRef.current = false;
-      }, 800);
+      }, cooldown);
       return;
     }
     setResult(json);
+    // 같은 사람이 프레임에 남아 결과/경고음이 반복되는 것을 막는다.
+    if (json.user?.id) suppressRef.current.set(json.user.id, Date.now() + RESULT_SUPPRESS_MS);
     if (json.success) playChime();
     else if (json.duplicate || json.notApplicant) playLongBeep();
     else playDoubleBeep();
@@ -84,7 +133,7 @@ export default function FaceCheckPage() {
       setResult(null);
       busyRef.current = false;
     }, RESULT_DISPLAY_MS);
-  }, []);
+  }, [updateStatus]);
 
   // --- 1단계 호출 ---
   const submitEmbedding = useCallback(
@@ -93,7 +142,7 @@ export default function FaceCheckPage() {
       try {
         const res = await fetch("/api/facecheck", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-kiosk-key": kioskKeyRef.current ?? "" },
           body: JSON.stringify({ embedding }),
         });
         const json: FaceCheckResult = await res.json();
@@ -101,6 +150,18 @@ export default function FaceCheckPage() {
           // 응답 도착 전에 모드가 전환됨 — 화면을 건드리지 않고 조용히 버린다.
           busyRef.current = false;
           return;
+        }
+        if (handleGateErrors(json)) return;
+        const uid = json.user?.id;
+        if (uid !== undefined) {
+          const suppressedUntil = suppressRef.current.get(uid);
+          if (suppressedUntil !== undefined) {
+            if (suppressedUntil > Date.now()) {
+              busyRef.current = false;
+              return;
+            }
+            suppressRef.current.delete(uid);
+          }
         }
         if (json.needType && json.user && json.mealKind) {
           const p = { user: json.user, mealKind: json.mealKind, embedding, gen };
@@ -115,13 +176,13 @@ export default function FaceCheckPage() {
           busyRef.current = false;
           return;
         }
-        setStatus("서버 연결 오류 — 잠시 후 다시 시도됩니다");
+        updateStatus("서버 연결 오류 — 잠시 후 다시 시도됩니다");
         setTimeout(() => {
           busyRef.current = false;
         }, 1500);
       }
     },
-    [applyResult],
+    [applyResult, handleGateErrors, updateStatus],
   );
 
   // --- 2단계 호출 (교사 type 확정 / 자동 개인) ---
@@ -134,7 +195,7 @@ export default function FaceCheckPage() {
       try {
         const res = await fetch("/api/facecheck", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-kiosk-key": kioskKeyRef.current ?? "" },
           body: JSON.stringify({ embedding: p.embedding, type }),
         });
         const json = await res.json();
@@ -142,23 +203,25 @@ export default function FaceCheckPage() {
           busyRef.current = false;
           return;
         }
+        if (handleGateErrors(json)) return;
         applyResult(json);
       } catch {
         if (modeGenRef.current !== p.gen) {
           busyRef.current = false;
           return;
         }
-        setStatus("서버 연결 오류");
+        updateStatus("서버 연결 오류");
         setTimeout(() => {
           busyRef.current = false;
         }, 1500);
       }
     },
-    [applyResult],
+    [applyResult, handleGateErrors, updateStatus],
   );
 
   const cancelTeacher = useCallback(() => {
     if (!pendingRef.current) return;
+    suppressRef.current.set(pendingRef.current.user.id, Date.now() + TEACHER_CANCEL_SUPPRESS_MS);
     pendingRef.current = null;
     setPending(null);
     busyRef.current = false;
@@ -190,7 +253,7 @@ export default function FaceCheckPage() {
       } catch (err) {
         if (cancelled) return;
         console.error("Camera access error:", err);
-        setStatus(
+        updateStatus(
           err instanceof DOMException && err.name === "NotAllowedError"
             ? "카메라 권한을 허용해 주세요"
             : "카메라를 사용할 수 없습니다",
@@ -211,7 +274,7 @@ export default function FaceCheckPage() {
       }
       if (cancelled) return;
 
-      setStatus("인식 모델 로딩 중...");
+      updateStatus("인식 모델 로딩 중...");
       let human: Human | undefined;
       try {
         human = await loadHuman();
@@ -221,27 +284,58 @@ export default function FaceCheckPage() {
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         if (videoRef.current) videoRef.current.srcObject = null;
-        setStatus("안면인식을 사용할 수 없습니다 — QR 모드로 전환합니다");
+        updateStatus("안면인식을 사용할 수 없습니다 — QR 모드로 전환합니다");
         setMode("qr");
         return;
       }
       if (cancelled || !human) return;
 
-      setStatus("얼굴을 화면에 보여주세요");
+      updateStatus("얼굴을 화면에 보여주세요");
 
+      let failures = 0;
       while (!cancelled) {
         await new Promise((r) => setTimeout(r, DETECT_INTERVAL_MS));
         if (cancelled) break;
-        if (busyRef.current) continue;
+        if (busyRef.current || kioskBlockedRef.current) continue;
         const currentVideo = videoRef.current;
         if (!currentVideo) continue;
-        const face = await detectSingleFace(human, currentVideo);
-        if (cancelled) break;
-        if (!face || !isQualityFace(face)) continue;
-        busyRef.current = true;
-        setStatus("인식 중...");
-        await submitEmbedding(face.embedding);
-        if (cancelled) break;
+        try {
+          const outcome = await detectFaces(human, currentVideo);
+          if (cancelled) break;
+          failures = 0;
+          if (outcome.kind === "none") {
+            updateStatus("얼굴을 화면에 보여주세요");
+            continue;
+          }
+          if (outcome.kind === "multiple") {
+            updateStatus("한 분씩 서 주세요");
+            continue;
+          }
+          const issue = qualityIssue(outcome.face);
+          if (issue === "spoof") {
+            updateStatus("실제 얼굴로 인식해 주세요");
+            continue;
+          }
+          if (issue === "lowScore") {
+            updateStatus("정면을 바라봐 주세요");
+            continue;
+          }
+          busyRef.current = true;
+          updateStatus("인식 중...");
+          await submitEmbedding(outcome.face.embedding);
+          if (cancelled) break;
+        } catch (err) {
+          failures += 1;
+          if (failures === 1) console.error("face loop error:", err);
+          if (failures >= MAX_LOOP_FAILURES) {
+            streamRef.current?.getTracks().forEach((t) => t.stop());
+            streamRef.current = null;
+            if (videoRef.current) videoRef.current.srcObject = null;
+            updateStatus("안면인식 오류가 반복되어 QR 모드로 전환합니다");
+            setMode("qr");
+            break;
+          }
+        }
       }
     })();
 

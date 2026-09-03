@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { faceEnrollSchema } from "@/lib/schemas/face";
 import { FACE_MODEL_VERSION } from "@/lib/face-constants";
+import { FACE_CONSENT_VERSION } from "@/lib/face-consent";
 import { invalidateFaceCache } from "@/lib/face-embedding-cache";
 
 export async function GET() {
@@ -37,6 +38,9 @@ export async function POST(request: Request) {
   }
 
   const { embeddings, consentVersion } = parsed.data;
+  if (consentVersion !== FACE_CONSENT_VERSION) {
+    return NextResponse.json({ error: "동의문이 갱신되었습니다. 다시 동의해 주세요." }, { status: 400 });
+  }
   const now = new Date();
   await prisma.faceProfile.upsert({
     where: { userId: session.user.dbUserId },
