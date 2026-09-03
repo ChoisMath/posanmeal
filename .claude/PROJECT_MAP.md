@@ -74,7 +74,7 @@ public/
 |------|------|------|------|
 | `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 스캐너, 식당 태블릿용 |
-| `/facecheck` | `src/app/facecheck/page.tsx` | 공개 | 안면인식 체크인(태블릿, 온라인 전용) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"), QR 폴백 모드 전환 버튼 |
+| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요) | 안면인식 체크인(태블릿, 온라인 전용) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"), QR 폴백 모드 전환 버튼. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송 |
 | `/student` | `src/app/student/page.tsx` | 학생 | 4탭: QR, 신청, 개인정보, 확인 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭 |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
@@ -101,7 +101,7 @@ public/
 | `/api/users/me` | GET/PUT | 학생/교사 | 본인 프로필 조회/수정 — GET이 `todayMeals`(오늘 자격 식사 목록) 반환, 구 `registrations` 필드 제거됨 |
 | `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 — POST 저장 경로 `UPLOAD_DIR`(Railway Volume) 우선, photoUrl `/api/uploads/{id}.webp?t=...` 발급 |
 | `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 관리 — GET 등록 여부/모델버전/동의일시, POST `faceEnrollSchema`(embeddings 3~5개, consentVersion) upsert, DELETE 완전 삭제. 모두 `invalidateFaceCache()` 호출 |
-| `/api/facecheck` | POST | 공개 | 얼굴 임베딩 1:N 매칭 체크인 — `faceCheckSchema`({embedding,type?}), `findBestMatch`로 사용자 특정 후 체크인. 교사는 type 없으면 `needType:true` 응답(2단계 무상태), 학생은 `isStudentEligibleToday` 자격 검증, source="FACE" |
+| `/api/facecheck` | POST | 공개(키오스크 키) | 얼굴 임베딩 1:N 매칭 체크인 — `faceCheckSchema`({embedding,type?}), `findBestMatch`로 사용자 특정 후 체크인. 헤더 `x-kiosk-key`가 `FACECHECK_KIOSK_KEY`와 일치해야 함(불일치 401, 미설정 503), IP당 분당 120회 레이트리밋(429). 교사는 type 없으면 `needType:true` 응답(2단계 무상태), 학생은 `isStudentEligibleToday` 자격 검증, source="FACE" |
 | `/api/uploads/[filename]` | GET | 공개 | `runtime=nodejs`, `UPLOAD_DIR`에서 readFile 스트리밍 (없으면 `/uploads/` 정적 폴백) |
 | `/api/meals` | GET | 공개 | NEIS API 급식 메뉴 조회 (?date=YYYYMMDD) |
 | `/api/applications` | GET | 로그인 | 신청 가능한 공고 목록 (현재 OPEN, 기간 내) |
@@ -140,8 +140,8 @@ public/
 
 | API | 메서드 | 인증 | 설명 |
 |-----|--------|------|------|
-| `/api/system/settings` | GET | 공개 | 운영 모드·QR 생성 번호 조회 (30s 캐시) |
-| `/api/system/settings` | PUT | 관리자 | 운영 모드 변경 / QR 강제 갱신 |
+| `/api/system/settings` | GET | 공개 | 운영 모드·QR 생성 번호·faceMatch 조회 (30s 캐시) |
+| `/api/system/settings` | PUT | 관리자 | 운영 모드 변경 / QR 강제 갱신 / `faceMatchThreshold`·`faceMatchMargin` 조정 |
 | `/api/sync/download` | GET | 관리자 | 오프라인 모드용 초기 데이터 다운로드 (사용자 목록, 신청 자격자) |
 | `/api/sync/upload` | POST | 관리자 | 오프라인에서 쌓인 체크인 서버 업로드 |
 
@@ -244,8 +244,8 @@ public/
 | `src/lib/schemas/face.ts` | zod 스키마: `faceEnrollSchema`(embeddings 3~5개×1024차원, consentVersion) / `faceCheckSchema`(embedding, type?) (테스트 `__tests__/face-schema.test.ts`) |
 | `src/lib/face-consent.ts` | `FACE_CONSENT_VERSION` + `FACE_CONSENT_TEXT`(안면인식정보 수집·이용 동의문 전문) |
 | `src/lib/face-embedding-cache.ts` | `FaceProfile` 전체 60s 인메모리 캐시: `getFaceCandidates()`(Json embeddings → Float32Array 변환), `invalidateFaceCache()` (테스트 `__tests__/face-embedding-cache.test.ts`) |
-| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman()` 싱글턴(backend webgl 고정, `modelBasePath: "/models/"`), `detectSingleFace(human, video)`, `isQualityFace(face)`, `FACE_QUALITY` 임계값 상수 |
-| `src/lib/checkin-sounds.ts` | 체크인 사운드 유틸(`playChime`/`playLongBeep`/`playDoubleBeep`/`playLockClick`, AudioContext 싱글턴) — `/facecheck` 전용, `/check` 페이지는 동일 로직을 인라인으로 별도 보유(복사본, 공용화 안 됨) |
+| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman()` 싱글턴(backend webgl 고정, `modelBasePath: "/models/"`, load/warmup 90s 타임아웃 + `human.models.loaded()`로 필수 모델(blazeface/facemesh/faceres/antispoof/liveness) 검증), `detectFaces(human, video)`(5s 타임아웃, none/multiple/face 판별), `qualityIssue(face)`(spoof/lowScore/null), `FACE_QUALITY` 임계값 상수, `withTimeout()` |
+| `src/lib/checkin-sounds.ts` | 체크인 사운드 유틸(`playChime`/`playLongBeep`/`playDoubleBeep`, AudioContext 싱글턴) — `/facecheck` 전용, `/check` 페이지는 동일 로직을 인라인으로 별도 보유(복사본, 공용화 안 됨) |
 
 ## §9 인증 / 미들웨어
 
@@ -269,6 +269,7 @@ public/
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | 관리자 계정 (bcryptjs 해시) |
 | `QR_JWT_SECRET` | QR 토큰 서명 키 |
 | `QR_TOKEN_EXPIRY_SECONDS` | QR 만료 시간 (기본 180) |
+| `FACECHECK_KIOSK_KEY` | `/api/facecheck` 헤더 `x-kiosk-key` 검증용 공유 키. 미설정 시 503 |
 | `UPLOAD_DIR` | 사진 저장 경로 (Railway: `/app/uploads`) |
 | `MAX_FILE_SIZE_MB` | 사진 최대 크기 (기본 5) |
 | `TZ` | 타임존 (Asia/Seoul) |
@@ -315,7 +316,7 @@ public/
 - **Human 모델 캐싱**: `@vladmandic/human`은 모델을 IndexedDB에 파일명 키로 캐시함. `public/models/`의 모델 파일을 교체할 때는 경로를 버전화(예: `/models/v2/`)해야 클라이언트가 구 캐시를 계속 쓰는 문제를 피할 수 있음
 - **얼굴 원본 미저장**: 카메라로 촬영한 얼굴 이미지는 어디에도 저장·전송되지 않음 — 브라우저에서 Human으로 임베딩만 추출해 `FaceProfile.embeddings`(숫자 배열)만 서버에 저장/전송
 - **`CheckInSource` 확장 시 3곳 동시 갱신 필요** (수동 유니온, 자동 동기화 없음): `src/lib/checkin-source.ts`(`sourceLabel`) · `src/app/api/admin/export/route.ts`(Row.source 타입) · `src/app/admin/page.tsx`(배지 색상 분기)
-- **얼굴 매칭 임계값**: `SystemSetting` 키 `face_match_threshold`/`face_match_margin` (기본 0.55/0.05, `face-constants.ts` DEFAULT_* 참조), `settings-cache.ts`가 30s 캐시
+- **얼굴 매칭 임계값**: `SystemSetting` 키 `face_match_threshold`/`face_match_margin` (기본 0.55/0.05, `face-constants.ts` DEFAULT_* 참조), `settings-cache.ts`가 30s 캐시. 임계값/마진은 `PUT /api/system/settings` `{faceMatchThreshold, faceMatchMargin}`로 조정(관리자, threshold는 0<x≤1, margin은 0≤x≤0.5)
 
 ## §13 Project-Map Maintenance
 

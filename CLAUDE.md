@@ -23,6 +23,7 @@
 | 테마 | next-themes (다크/라이트 모드) |
 | 이미지 | sharp (300x300 WebP 변환) |
 | 엑셀 | exceljs |
+| 안면인식 | @vladmandic/human 3.3.6 (브라우저 추론, 모델 self-host /models) |
 | 배포 | Railway (단일 서비스 + PostgreSQL + Volume) |
 
 ## 핵심 아키텍처 결정사항
@@ -86,6 +87,7 @@
 | `/student` | 학생 | 3탭: QR, 개인정보, 확인 |
 | `/teacher` | 교사 | 담임 5탭(개인석식,근무,확인,학생관리,개인정보) / 비담임 4탭 |
 | `/check` | 공개 | QR 스캐너 (태블릿, 좌우 분할 레이아웃) |
+| `/facecheck` | 공개(키오스크 키) | 안면인식 체크인 (태블릿) |
 | `/admin/login` | 공개 | 관리자 로그인 |
 | `/admin` | 관리자 | 3탭: 사용자관리(Sheet연결 모달), 석식확인(교사/학년별), 당일현황 |
 
@@ -99,6 +101,8 @@
 | `/api/checkins` | GET | 학생/교사 | 본인 월별 체크인 이력 |
 | `/api/users/me` | GET/PUT | 학생/교사 | 본인 프로필 조회/수정 |
 | `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 |
+| `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 조회/등록/삭제 |
+| `/api/facecheck` | POST | 공개(키오스크 키) | 안면인식 체크인 (임베딩 1:N 매칭) |
 | `/api/uploads/[filename]` | GET | 공개 | 사진 파일 서빙 |
 | `/api/teacher/students` | GET | 교사 | 담임 학급 학생 목록 |
 | `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 가져오기 |
@@ -113,7 +117,8 @@
 - `Admin` — 관리자 (현재 미사용, 환경변수 방식으로 대체)
 - `User` — 학생/교사 통합 (role: STUDENT/TEACHER)
 - `MealPeriod` — 학생 석식 신청 기간 (userId unique, 단일 기간)
-- `CheckIn` — 체크인 기록 (userId+date unique, type: STUDENT/WORK/PERSONAL)
+- `CheckIn` — 체크인 기록 (userId+date unique, type: STUDENT/WORK/PERSONAL, source: QR/ADMIN_MANUAL/LOCAL_SYNC/FACE)
+- `FaceProfile` — 안면인식 등록 프로필 (userId unique, embeddings, consentAt/consentVersion)
 - 인덱스: `User(role,grade,classNum,number)`, `CheckIn(date)`, `CheckIn(userId)`
 
 ## 환경변수 (.env.example 참조)
@@ -123,6 +128,7 @@ DATABASE_URL, DATABASE_PUBLIC_URL
 AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, AUTH_URL
 ADMIN_USERNAME, ADMIN_PASSWORD
 QR_JWT_SECRET, QR_TOKEN_EXPIRY_SECONDS (180)
+FACECHECK_KIOSK_KEY
 UPLOAD_DIR (/app/uploads on Railway)
 MAX_FILE_SIZE_MB (5)
 TZ (Asia/Seoul)
@@ -181,6 +187,5 @@ npm run build                 # 프로덕션 빌드
 ## 주의사항
 
 - Tailwind v4는 CSS 기반 설정 (`src/app/globals.css`에 `@custom-variant dark`). tailwind.config.ts 없음
-- Next.js 16은 middleware 대신 "proxy" 권장하지만 현재 middleware 사용 중 (동작에 문제 없음)
-- `src/middleware.ts`에 `export const runtime = "nodejs"` 필수 (Prisma가 Node.js 모듈 사용)
+- Next.js 16의 "proxy" 컨벤션에 따라 미들웨어는 `src/proxy.ts`(파일명 `middleware.ts` 아님)에 위치, allowlist 방식(publicExact/publicPrefixes)으로 공개 경로 관리
 - shadcn/ui의 toast는 sonner로 대체됨 (`src/components/ui/sonner.tsx`)
