@@ -2,7 +2,9 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-02 (안면인식 체크인(facecheck) 1단계 구현 완료 — `@vladmandic/human` 클라이언트 로더(`human-client.ts`) + 모델 self-host(`public/models/`), 학생·교사 개인정보 탭 얼굴 등록 UI(`FaceEnroll`), 공개 페이지 `/facecheck`(교사 근무/개인/취소·10초 자동, QR 폴백), `src/proxy.ts` 공개 경로 등록, `next.config.ts` serverExternalPackages 대응)
+> 마지막 업데이트: 2026-09-05 (안면인식 2단계 — `/facecheck` WebGPU 우선 로딩·적응형 페이싱·성능 표시·결과 중 스캔 재개, 로컬 모드(브라우저 매칭 `facecheck-local.ts` + `kiosk-sync.ts` + IDB v5 `faceProfiles`, `GET /api/sync/download?faces=1`), `/check`·`/facecheck` 결과 4색(`checkin-result-style.ts`)·4사운드(`checkin-sounds.ts` 공용화). 설계 `docs/superpowers/specs/2026-09-05-facecheck-perf-local-design.md`)
+>
+> 이전 업데이트: 2026-09-02 (안면인식 체크인(facecheck) 1단계 구현 완료 — `@vladmandic/human` 클라이언트 로더(`human-client.ts`) + 모델 self-host(`public/models/`), 학생·교사 개인정보 탭 얼굴 등록 UI(`FaceEnroll`), 공개 페이지 `/facecheck`(교사 근무/개인/취소·10초 자동, QR 폴백), `src/proxy.ts` 공개 경로 등록, `next.config.ts` serverExternalPackages 대응)
 
 ## §1 개요
 
@@ -74,7 +76,7 @@ public/
 |------|------|------|------|
 | `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 스캐너, 식당 태블릿용 |
-| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요) | 안면인식 체크인(태블릿, 온라인 전용) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"), QR 폴백 모드 전환 버튼. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송 |
+| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인(태블릿·노트북) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"). 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과 카드(2초)가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·IDB 저장, 하단 [동기화](`performKioskSync`)·미전송 건수, QR 버튼은 `/check`로 이동 |
 | `/student` | `src/app/student/page.tsx` | 학생 | 4탭: QR, 신청, 개인정보, 확인 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭 |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
@@ -142,7 +144,7 @@ public/
 |-----|--------|------|------|
 | `/api/system/settings` | GET | 공개 | 운영 모드·QR 생성 번호·faceMatch 조회 (30s 캐시) |
 | `/api/system/settings` | PUT | 관리자 | 운영 모드 변경 / QR 강제 갱신 / `faceMatchThreshold`·`faceMatchMargin` 조정 |
-| `/api/sync/download` | GET | 관리자 | 오프라인 모드용 초기 데이터 다운로드 (사용자 목록, 신청 자격자) |
+| `/api/sync/download` | GET | 관리자 | 오프라인 모드용 초기 데이터 다운로드 (사용자 목록, 신청 자격자). `?faces=1`이면 `faceProfiles[{userId,embeddings}]`·`faceMatch{threshold,margin}` 추가(로컬 모드 안면인식용, 없으면 기존 페이로드 불변; 테스트 `__tests__/sync-download.test.ts`) |
 | `/api/sync/upload` | POST | 관리자 | 오프라인에서 쌓인 체크인 서버 업로드 |
 
 ## §6 데이터 모델 (Prisma)
@@ -221,7 +223,7 @@ public/
 | `src/lib/permissions.ts` | canWriteAdmin / canReadAdmin (AdminLevel 기반) |
 | `src/lib/settings-cache.ts` | SystemSetting 30s 인메모리 캐시 (operationMode/qrGeneration/mealWindows + `faceMatch{threshold,margin}` — SystemSetting 키 face_match_threshold/margin, 기본값은 face-constants.ts) |
 | `src/lib/neis-meal.ts` | NEIS 급식 API 호출 + 1시간 캐시 |
-| `src/lib/local-db.ts` | IndexedDB 스키마 v3 (오프라인 모드용: users, eligibleUsers, checkins) |
+| `src/lib/local-db.ts` | IndexedDB 스키마 v5 (오프라인 모드용: settings, users, eligibleEntries, checkins, faceProfiles). v5에서 `faceProfiles`(keyPath userId, `{userId, embeddings:number[][]}`) 추가 — `replaceAllFaceProfiles/getAllFaceProfiles/clearFaceProfiles`, `clearAllData`에 포함 |
 | `src/lib/clearClientState.ts` | SW 해제 + Cache API + IndexedDB 전체 삭제 후 signOut |
 | `src/lib/fetcher.ts` | SWR 전용 fetch 래퍼 |
 | `src/lib/utils.ts` | 공통 유틸 (clsx/tailwind-merge 등) |
@@ -244,8 +246,12 @@ public/
 | `src/lib/schemas/face.ts` | zod 스키마: `faceEnrollSchema`(embeddings 3~5개×1024차원, consentVersion) / `faceCheckSchema`(embedding, type?) (테스트 `__tests__/face-schema.test.ts`) |
 | `src/lib/face-consent.ts` | `FACE_CONSENT_VERSION` + `FACE_CONSENT_TEXT`(안면인식정보 수집·이용 동의문 전문) |
 | `src/lib/face-embedding-cache.ts` | `FaceProfile` 전체 60s 인메모리 캐시: `getFaceCandidates()`(Json embeddings → Float32Array 변환), `invalidateFaceCache()` (테스트 `__tests__/face-embedding-cache.test.ts`) |
-| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman()` 싱글턴(backend webgl 고정, `modelBasePath: "/models/"`, load/warmup 90s 타임아웃 + `human.models.loaded()`로 필수 모델(blazeface/facemesh/faceres/antispoof/liveness) 검증), `detectFaces(human, video)`(5s 타임아웃, none/multiple/face 판별), `qualityIssue(face)`(spoof/lowScore/null), `FACE_QUALITY` 임계값 상수, `withTimeout()` |
-| `src/lib/checkin-sounds.ts` | 체크인 사운드 유틸(`playChime`/`playLongBeep`/`playDoubleBeep`, AudioContext 싱글턴) — `/facecheck` 전용, `/check` 페이지는 동일 로직을 인라인으로 별도 보유(복사본, 공용화 안 됨) |
+| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman(candidates: FaceBackend[] = ["webgl"])`: 후보를 순서대로 새 Human 인스턴스로 load+warmup(`warmup:"face"`)까지 시도해 첫 성공을 채택(실제 백엔드는 `human.tf.getBackend()`로 확인, `getActiveFaceBackend()`). 임베딩에 영향 주는 단계(detector/mesh/rotation/equalization/cacheSensitivity 0)는 백엔드와 무관하게 고정(`modelBasePath: "/models/"`, load/warmup 90s 타임아웃 + `human.models.loaded()`로 필수 모델(blazeface/facemesh/faceres/antispoof/liveness) 검증), `detectFaces(human, video)`(5s 타임아웃, none/multiple/face 판별), `qualityIssue(face)`(spoof/lowScore/null), `FACE_QUALITY` 임계값 상수, `withTimeout()` |
+| `src/lib/checkin-sounds.ts` | 체크인 사운드 4종 + 클릭(`playSuccess` 상승 2음 / `playDuplicate` 하강 2음 사각파 / `playDenied` 저음 버저 / `playError` 고음 3연타 / `playLockClick`), 어택·릴리즈 램프로 최대 음량 — `/check`·`/facecheck` 공용 |
+| `src/lib/checkin-result-style.ts` | 결과 분류 `resultCategory(r)`(success/duplicate/notApplicant/error)와 배경·문구 색 매핑 `RESULT_BG_CLASS`/`RESULT_TEXT_CLASS`(초록/파랑/빨강/주황) — `/check`·`/facecheck` 공용 (테스트 `__tests__/checkin-result-style.test.ts`) |
+| `src/lib/face-pacing.ts` | 순수 함수: `resolveFaceBackends(override, hasWebGpu)`(webgpu→webgl 후보 순서), `nextDetectDelay(lastDetectMs)`(직전 검출/3, 30~200ms 클램프) (테스트 `__tests__/face-pacing.test.ts`) |
+| `src/lib/facecheck-local.ts` | 로컬 모드 판정 엔진 `runLocalFaceCheckIn(input, repo)` — `/api/facecheck`와 같은 순서(식사시간→`findBestMatch`→IDB 사용자→중복→교사 needType→학생 자격→`addCheckIn(synced:0)`)로 API와 같은 모양의 `FaceCheckResult` 반환(저장소 주입으로 테스트 가능). `toFaceCandidates`, `localDateKey`, `FaceCheckResult`/`FaceCheckUser` 타입 (테스트 `__tests__/facecheck-local.test.ts`) |
+| `src/lib/kiosk-sync.ts` | `/facecheck` 로컬 모드 동기화: `fetchKioskSettings()`(`/api/system/settings`→IDB settings; 서버 모드 online이면 `clearFaceProfiles`), `loadSavedKioskSettings()`, `performKioskSync()`(미전송 업로드 `/api/sync/upload` → `/api/sync/download?faces=1` → users/eligibleEntries/faceProfiles/settings/lastSyncAt 갱신; 401/403이면 관리자 로그인 안내) |
 
 ## §9 인증 / 미들웨어
 
@@ -315,6 +321,8 @@ public/
 - **`next.config.ts` `serverExternalPackages: ["sharp", "@vladmandic/human"]` 제거 금지**: Turbopack의 Client-SSR 레이어가 이 설정 없이는 `@vladmandic/human`의 node export(`human.node.js` → `tfjs-node` 미설치로 빌드 실패)를 해석하려 시도함. 필수 설정
 - **Human 모델 캐싱**: `@vladmandic/human`은 모델을 IndexedDB에 파일명 키로 캐시함. `public/models/`의 모델 파일을 교체할 때는 경로를 버전화(예: `/models/v2/`)해야 클라이언트가 구 캐시를 계속 쓰는 문제를 피할 수 있음
 - **얼굴 원본 미저장**: 카메라로 촬영한 얼굴 이미지는 어디에도 저장·전송되지 않음 — 브라우저에서 Human으로 임베딩만 추출해 `FaceProfile.embeddings`(숫자 배열)만 서버에 저장/전송
+- **임베딩 모델·입력 단계 고정**: FaceRes(1024차원)와 그 앞단(detector/mesh/rotation/equalization, `cacheSensitivity:0`)은 등록·인식 일관성 때문에 기기·백엔드와 무관하게 동일해야 함. 속도 튜닝은 백엔드(webgpu/webgl)와 검출 간격(`face-pacing.ts`)에서만. 모델을 바꾸면 `FACE_MODEL_VERSION` 상승 + 전원 재등록 필요
+- **로컬 모드 임베딩 보관 정책**: 서버 운영 모드가 `local`일 때 동기화로 등록자 전원의 임베딩이 키오스크 IndexedDB `faceProfiles`에 내려감. 서버 모드가 `online`으로 확인되면(`fetchKioskSettings`/`performKioskSync`) 자동 삭제, `/check` [초기화](`clearAllData`)로도 삭제. 로컬 저장 체크인은 업로드 시 `source: LOCAL_SYNC`(얼굴/QR 구분 없음)
 - **`CheckInSource` 확장 시 3곳 동시 갱신 필요** (수동 유니온, 자동 동기화 없음): `src/lib/checkin-source.ts`(`sourceLabel`) · `src/app/api/admin/export/route.ts`(Row.source 타입) · `src/app/admin/page.tsx`(배지 색상 분기)
 - **얼굴 매칭 임계값**: `SystemSetting` 키 `face_match_threshold`/`face_match_margin` (기본 0.55/0.05, `face-constants.ts` DEFAULT_* 참조), `settings-cache.ts`가 30s 캐시. 임계값/마진은 `PUT /api/system/settings` `{faceMatchThreshold, faceMatchMargin}`로 조정(관리자, threshold는 0<x≤1, margin은 0≤x≤0.5)
 

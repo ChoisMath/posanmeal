@@ -87,7 +87,7 @@
 | `/student` | 학생 | 3탭: QR, 개인정보, 확인 |
 | `/teacher` | 교사 | 담임 5탭(개인석식,근무,확인,학생관리,개인정보) / 비담임 4탭 |
 | `/check` | 공개 | QR 스캐너 (태블릿, 좌우 분할 레이아웃) |
-| `/facecheck` | 공개(키오스크 키) | 안면인식 체크인 (태블릿) |
+| `/facecheck` | 공개(키오스크 키; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인 (태블릿·노트북). WebGPU 우선→WebGL 폴백, `?backend=webgl\|webgpu\|auto` 고정, 상태바에 백엔드·검출ms 표시. 운영 모드 `local`이면 브라우저 매칭(`facecheck-local.ts`)+IDB 저장, 하단 [동기화] |
 | `/admin/login` | 공개 | 관리자 로그인 |
 | `/admin` | 관리자 | 3탭: 사용자관리(Sheet연결 모달), 석식확인(교사/학년별), 당일현황 |
 
@@ -103,6 +103,8 @@
 | `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 |
 | `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 조회/등록/삭제 |
 | `/api/facecheck` | POST | 공개(키오스크 키) | 안면인식 체크인 (임베딩 1:N 매칭) |
+| `/api/sync/download` | GET | 관리자 | 오프라인 모드 초기 데이터. `?faces=1`이면 `faceProfiles`·`faceMatch`(로컬 안면인식용) 포함 |
+| `/api/sync/upload` | POST | 관리자 | 오프라인 체크인 업로드 (`/check`·`/facecheck` 공용) |
 | `/api/uploads/[filename]` | GET | 공개 | 사진 파일 서빙 |
 | `/api/teacher/students` | GET | 교사 | 담임 학급 학생 목록 |
 | `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 가져오기 |
@@ -183,9 +185,13 @@ npm run build                 # 프로덕션 빌드
 | `StudentTable` | 담임교사용 학생 석식 테이블 (틀고정, 합계행, 주말 하이라이트) |
 | `AdminMealTable` | 관리자 석식 확인 (교사/1~3학년 탭, 월 이동, 합계행) |
 | `PhotoUpload` | 프로필 사진 업로드/삭제 |
+| `checkin-sounds.ts` | 체크인 사운드 4종(`playSuccess`/`playDuplicate`/`playDenied`/`playError`) + `playLockClick` — `/check`·`/facecheck` 공용 |
+| `checkin-result-style.ts` | 결과 분류(`resultCategory`)와 4색 매핑: 정상 초록 / 중복 파랑 / 미신청 빨강 / 기타 오류 주황 |
 
 ## 주의사항
 
 - Tailwind v4는 CSS 기반 설정 (`src/app/globals.css`에 `@custom-variant dark`). tailwind.config.ts 없음
 - Next.js 16의 "proxy" 컨벤션에 따라 미들웨어는 `src/proxy.ts`(파일명 `middleware.ts` 아님)에 위치, allowlist 방식(publicExact/publicPrefixes)으로 공개 경로 관리
 - shadcn/ui의 toast는 sonner로 대체됨 (`src/components/ui/sonner.tsx`)
+- 안면인식 임베딩 모델(FaceRes 1024차원)과 그 입력 단계(detector/mesh/rotation/equalization)는 등록·인식 일관성 때문에 백엔드와 무관하게 고정. 속도 튜닝은 백엔드(webgpu/webgl)·검출 간격(`face-pacing.ts`)에서만
+- 로컬 모드 안면인식: 등록자 임베딩이 키오스크 IndexedDB(`faceProfiles`)에 내려가며, 서버 운영 모드가 `online`으로 확인되면 자동 삭제(`kiosk-sync.ts`)
