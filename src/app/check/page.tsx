@@ -29,6 +29,8 @@ import {
 } from "@/lib/meal-kind-local";
 import { MEAL_LABEL } from "@/lib/meal-plan";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
+import { playDenied, playDuplicate, playError, playLockClick, playSuccess } from "@/lib/checkin-sounds";
+import { RESULT_BG_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
 
 interface CheckInResult {
   success: boolean;
@@ -49,79 +51,6 @@ interface CheckInResult {
   mealKind?: MealKind;
 }
 
-// AudioContext singleton
-let _audioCtx: AudioContext | null = null;
-function getAudioCtx() {
-  if (!_audioCtx || _audioCtx.state === "closed") _audioCtx = new AudioContext();
-  if (_audioCtx.state === "suspended") _audioCtx.resume();
-  return _audioCtx;
-}
-
-function playChime() {
-  try {
-    const ctx = getAudioCtx();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.value = 0.4;
-    const osc1 = ctx.createOscillator();
-    osc1.frequency.value = 523;
-    osc1.connect(gain);
-    osc1.start(ctx.currentTime);
-    osc1.stop(ctx.currentTime + 0.15);
-    const osc2 = ctx.createOscillator();
-    osc2.frequency.value = 659;
-    osc2.connect(gain);
-    osc2.start(ctx.currentTime + 0.18);
-    osc2.stop(ctx.currentTime + 0.38);
-  } catch {}
-}
-
-function playLongBeep() {
-  try {
-    const ctx = getAudioCtx();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.value = 0.6;
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 400;
-    osc.connect(gain);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.8);
-  } catch {}
-}
-
-function playDoubleBeep() {
-  try {
-    const ctx = getAudioCtx();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.value = 0.5;
-    const osc1 = ctx.createOscillator();
-    osc1.frequency.value = 500;
-    osc1.connect(gain);
-    osc1.start(ctx.currentTime);
-    osc1.stop(ctx.currentTime + 0.2);
-    const osc2 = ctx.createOscillator();
-    osc2.frequency.value = 500;
-    osc2.connect(gain);
-    osc2.start(ctx.currentTime + 0.35);
-    osc2.stop(ctx.currentTime + 0.55);
-  } catch {}
-}
-
-function playLockClick() {
-  try {
-    const ctx = getAudioCtx();
-    const gain = ctx.createGain();
-    gain.connect(ctx.destination);
-    gain.gain.value = 0.35;
-    const osc = ctx.createOscillator();
-    osc.frequency.value = 280;
-    osc.connect(gain);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.08);
-  } catch {}
-}
 
 function todayLocal(): string {
   const now = new Date();
@@ -366,12 +295,13 @@ export default function CheckPage() {
       const json = await postCheckInWithRetry(data);
       setResult(json);
 
-      if (json.success) playChime();
-      else if (json.duplicate) playLongBeep();
-      else playDoubleBeep();
+      if (json.success) playSuccess();
+      else if (json.duplicate) playDuplicate();
+      else if (json.notApplicant) playDenied();
+      else playError();
     } catch {
       setResult({ success: false, error: "서버 연결 오류" });
-      playDoubleBeep();
+      playError();
     }
 
     setTimeout(() => {
@@ -395,7 +325,7 @@ export default function CheckPage() {
       const parsed = parseLocalQR(data);
       if (!parsed) {
         setResult({ success: false, error: "잘못된 QR코드입니다." });
-        playDoubleBeep();
+        playError();
         return;
       }
 
@@ -403,7 +333,7 @@ export default function CheckPage() {
       const storedGen = await getSetting("qrGeneration");
       if (storedGen && parsed.generation !== storedGen) {
         setResult({ success: false, error: "QR코드가 만료되었습니다. 학생 앱에서 새 QR을 확인하세요." });
-        playDoubleBeep();
+        playError();
         return;
       }
 
@@ -411,7 +341,7 @@ export default function CheckPage() {
       const user = await getUser(parsed.userId);
       if (!user) {
         setResult({ success: false, error: "미등록 사용자입니다." });
-        playDoubleBeep();
+        playError();
         return;
       }
 
@@ -422,7 +352,7 @@ export default function CheckPage() {
       };
       if (!validTypes[user.role]?.includes(parsed.type)) {
         setResult({ success: false, error: "잘못된 QR 유형입니다." });
-        playDoubleBeep();
+        playError();
         return;
       }
 
@@ -430,7 +360,7 @@ export default function CheckPage() {
       const currentMealKind = parsed.mealKind ?? resolveMealKindLocal(new Date(), mealWindows);
       if (!currentMealKind) {
         setResult({ success: false, error: "현재 식사 시간이 아닙니다." });
-        playDoubleBeep();
+        playError();
         return;
       }
 
@@ -445,7 +375,7 @@ export default function CheckPage() {
             mealKind: currentMealKind,
             error: "신청자가 아닙니다.",
           });
-          playLongBeep();
+          playDenied();
           return;
         }
       }
@@ -464,7 +394,7 @@ export default function CheckPage() {
           checkedAt: existing.checkedAt,
           error: `이미 ${MEAL_LABEL[currentMealKind]} 체크인 하였습니다 (${hh}:${mm})`,
         });
-        playLongBeep();
+        playDuplicate();
         return;
       }
 
@@ -486,12 +416,12 @@ export default function CheckPage() {
         mealKind: currentMealKind,
         checkedAt,
       });
-      playChime();
+      playSuccess();
 
       getUnsyncedCount().then(setUnsyncedCount);
     } catch {
       setResult({ success: false, error: "저장 오류가 발생했습니다. 다시 스캔해 주세요." });
-      playDoubleBeep();
+      playError();
     } finally {
       setTimeout(() => {
         processingRef.current = false;
@@ -548,13 +478,7 @@ export default function CheckPage() {
     return "";
   };
 
-  const bgClass = result
-    ? result.duplicate || result.notApplicant
-      ? "bg-red-500"
-      : result.success
-        ? "bg-emerald-500"
-        : "bg-amber-500"
-    : "bg-background";
+  const bgClass = result ? RESULT_BG_CLASS[resultCategory(result)] : "bg-background";
 
   return (
     <div className={`min-h-screen transition-colors duration-300 ${bgClass}`}>
@@ -624,7 +548,7 @@ export default function CheckPage() {
                   ) : null}
 
                   {result.success && (
-                    <p className="text-emerald-700 dark:text-emerald-300 text-fit-sm mt-1.5 font-medium">
+                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium`}>
                       {result.user?.role === "TEACHER" && result.checkedAt
                         ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
                         : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
@@ -632,19 +556,19 @@ export default function CheckPage() {
                   )}
 
                   {result.duplicate && (
-                    <p className="text-red-700 dark:text-red-300 text-fit-sm mt-1.5 font-semibold">
+                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold`}>
                       {result.error || "이미 체크인 되었습니다."}
                     </p>
                   )}
 
                   {result.notApplicant && (
-                    <p className="text-red-700 dark:text-red-300 text-fit-sm mt-1.5 font-semibold">
+                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold`}>
                       {result.error || "신청자가 아닙니다."}
                     </p>
                   )}
 
                   {!result.success && !result.duplicate && !result.notApplicant && (
-                    <p className="text-amber-800 dark:text-amber-200 text-fit-sm mt-1.5 font-medium">
+                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium`}>
                       {result.error || "인정되지 않는 QR입니다."}
                     </p>
                   )}

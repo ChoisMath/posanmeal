@@ -1,6 +1,7 @@
 export interface CheckInResult {
   success: boolean;
   duplicate?: boolean;
+  notApplicant?: boolean;
   error?: string;
   user?: {
     id: number;
