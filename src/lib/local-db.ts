@@ -1,5 +1,5 @@
 const DB_NAME = "posanmeal-local";
-const DB_VERSION = 4; // v4: mealKind-aware eligibility and check-ins
+const DB_VERSION = 5; // v5: faceProfiles (로컬 모드 안면인식 후보)
 
 export interface LocalUser {
   id: number;
@@ -92,6 +92,10 @@ function openDB(): Promise<IDBDatabase> {
             cursor.continue();
           };
         }
+      }
+
+      if (!db.objectStoreNames.contains("faceProfiles")) {
+        db.createObjectStore("faceProfiles", { keyPath: "userId" });
       }
     };
 
@@ -273,10 +277,49 @@ export async function clearSyncedCheckIns(): Promise<number> {
   });
 }
 
+// --- Face Profiles (로컬 모드 안면인식 후보) ---
+
+export interface LocalFaceProfile {
+  userId: number;
+  embeddings: number[][];
+}
+
+export async function replaceAllFaceProfiles(profiles: LocalFaceProfile[]): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("faceProfiles", "readwrite");
+    const store = tx.objectStore("faceProfiles");
+    store.clear();
+    for (const profile of profiles) store.put(profile);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function getAllFaceProfiles(): Promise<LocalFaceProfile[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("faceProfiles", "readonly");
+    const req = tx.objectStore("faceProfiles").getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function clearFaceProfiles(): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("faceProfiles", "readwrite");
+    tx.objectStore("faceProfiles").clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function clearAllData(): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const storeNames = ["settings", "users", "eligibleEntries", "checkins"] as const;
+    const storeNames = ["settings", "users", "eligibleEntries", "checkins", "faceProfiles"] as const;
     const tx = db.transaction([...storeNames], "readwrite");
     for (const name of storeNames) {
       tx.objectStore(name).clear();
