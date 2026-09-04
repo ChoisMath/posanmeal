@@ -111,6 +111,7 @@ describe("/api/facecheck", () => {
     const { POST } = await import("@/app/api/facecheck/route");
     const body = await (await POST(request({ embedding: emb }))).json();
     expect(body.notApplicant).toBe(true);
+    expect(body.error).toBe("오늘 석식 신청자가 아닙니다.");
     expect(body.user.name).toBe("김학생");
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });

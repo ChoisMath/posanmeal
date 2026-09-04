@@ -125,7 +125,7 @@ export async function POST(request: Request) {
           notApplicant: true,
           user,
           mealKind,
-          error: "식사 신청 기간이 아닙니다.",
+          error: `오늘 ${MEAL_LABEL[mealKind]} 신청자가 아닙니다.`,
         });
       }
       checkInType = "STUDENT";
