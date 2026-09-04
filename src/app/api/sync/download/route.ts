@@ -4,8 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { todayKST } from "@/lib/timezone";
 import { canWriteAdmin } from "@/lib/permissions";
 import type { MealKind } from "@/lib/meal-kind";
+import { DEFAULT_FACE_MATCH_MARGIN, DEFAULT_FACE_MATCH_THRESHOLD } from "@/lib/face-constants";
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   if (!canWriteAdmin(session)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -15,7 +16,9 @@ export async function GET() {
   const through = new Date(today);
   through.setDate(through.getDate() + 13);
 
-  const [settings, users, mealDateEntries] = await Promise.all([
+  const includeFaces = new URL(request.url).searchParams.get("faces") === "1";
+
+  const [settings, users, mealDateEntries, faceProfiles] = await Promise.all([
     prisma.systemSetting.findMany(),
     prisma.user.findMany({
       select: { id: true, name: true, role: true, grade: true, classNum: true, number: true },
@@ -31,6 +34,9 @@ export async function GET() {
         registration: { select: { userId: true } },
       },
     }),
+    includeFaces
+      ? prisma.faceProfile.findMany({ select: { userId: true, embeddings: true } })
+      : Promise.resolve(null),
   ]);
 
   const settingsMap: Record<string, string> = {};
@@ -79,5 +85,19 @@ export async function GET() {
       },
     },
     serverTime: new Date().toISOString(),
+    ...(includeFaces && faceProfiles
+      ? {
+          faceProfiles: faceProfiles.map((p) => ({ userId: p.userId, embeddings: p.embeddings as number[][] })),
+          faceMatch: {
+            threshold: parseFloatOr(settingsMap.face_match_threshold, DEFAULT_FACE_MATCH_THRESHOLD),
+            margin: parseFloatOr(settingsMap.face_match_margin, DEFAULT_FACE_MATCH_MARGIN),
+          },
+        }
+      : {}),
   });
+}
+
+function parseFloatOr(value: string | undefined, fallback: number): number {
+  const parsed = value === undefined ? NaN : parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
