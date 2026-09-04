@@ -1,12 +1,15 @@
 import "client-only";
 import type { Human, Config, FaceResult } from "@vladmandic/human";
+import type { FaceBackend } from "@/lib/face-pacing";
 
 export const FACE_QUALITY = { minScore: 0.7, minReal: 0.5, minLive: 0.5 };
 
-const FACE_CONFIG: Partial<Config> = {
+// 임베딩에 영향을 주는 단계(detector/mesh/rotation/equalization/cacheSensitivity)는
+// 등록·인식 일관성을 위해 백엔드와 무관하게 고정한다.
+const BASE_CONFIG: Partial<Config> = {
   modelBasePath: "/models/",
-  backend: "webgl",
   cacheSensitivity: 0,
+  warmup: "face",
   filter: { enabled: true, equalization: true },
   face: {
     enabled: true,
@@ -51,22 +54,51 @@ async function loadAndVerify(human: Human): Promise<void> {
   await human.warmup();
 }
 
-let humanPromise: Promise<Human> | null = null;
+interface LoadedHuman {
+  human: Human;
+  backend: FaceBackend;
+}
 
-export function loadHuman(): Promise<Human> {
-  if (!humanPromise) {
-    humanPromise = import("@vladmandic/human")
-      .then(async (mod) => {
-        const human = new mod.Human(FACE_CONFIG);
-        await withTimeout(loadAndVerify(human), LOAD_TIMEOUT_MS, "human load");
-        return human;
-      })
-      .catch((err) => {
-        humanPromise = null;
-        throw err;
-      });
-  }
-  return humanPromise;
+let active: LoadedHuman | null = null;
+let loading: { key: string; promise: Promise<LoadedHuman> } | null = null;
+
+// Human은 webgpu 요청이라도 미지원 환경이면 내부에서 webgl로 내리므로 실제 백엔드는 tf에서 읽는다.
+function actualBackend(human: Human): FaceBackend {
+  return human.tf.getBackend() === "webgpu" ? "webgpu" : "webgl";
+}
+
+// 후보를 순서대로 시도해 load+warmup까지 성공한 첫 백엔드를 채택한다.
+// 이미 채택된 백엔드가 후보에 포함되면 재사용한다(기본 후보는 등록 화면 호환용 webgl).
+export function loadHuman(candidates: FaceBackend[] = ["webgl"]): Promise<Human> {
+  if (active && candidates.includes(active.backend)) return Promise.resolve(active.human);
+  const key = candidates.join(">");
+  if (loading && loading.key === key) return loading.promise.then((l) => l.human);
+
+  const promise = import("@vladmandic/human")
+    .then(async (mod) => {
+      let lastError: unknown = null;
+      for (const backend of candidates) {
+        try {
+          const human = new mod.Human({ ...BASE_CONFIG, backend });
+          await withTimeout(loadAndVerify(human), LOAD_TIMEOUT_MS, `human load (${backend})`);
+          active = { human, backend: actualBackend(human) };
+          return active;
+        } catch (err) {
+          lastError = err;
+          console.error(`human load failed on ${backend}:`, err);
+        }
+      }
+      throw lastError ?? new Error("no face backend available");
+    })
+    .finally(() => {
+      if (loading?.key === key) loading = null;
+    });
+  loading = { key, promise };
+  return promise.then((l) => l.human);
+}
+
+export function getActiveFaceBackend(): FaceBackend | null {
+  return active?.backend ?? null;
 }
 
 export interface DetectedFace {
