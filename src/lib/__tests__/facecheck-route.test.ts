@@ -109,6 +109,7 @@ describe("/api/facecheck", () => {
 
     const unmatched = await (await POST(request({ embedding: axis2 }))).json();
     expect(unmatched.matched).toBe(false);
+    expect(unmatched.errorCode).toBe("UNMATCHED");
     expect(unmatched.similarity).toBeCloseTo(0);
     expect(mocks.checkInCreate).toHaveBeenCalledTimes(1);
   });

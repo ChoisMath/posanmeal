@@ -68,7 +68,7 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
   const ranked = rankCandidates(input.embedding, input.candidates);
   const match = decideMatch(ranked, input.faceMatch);
   const score = scoreSummary(ranked);
-  if (!match) return { success: false, matched: false, ...score, error: "인식되지 않았습니다. 다시 서 주세요." };
+  if (!match) return { success: false, matched: false, ...score, error: "등록된 사용자가 아닙니다.", errorCode: "UNMATCHED" };
 
   const user = await repo.getUser(match.userId);
   if (!user) return { success: false, matched: false, ...score, error: "명단에 없는 사용자입니다. 동기화가 필요합니다." };

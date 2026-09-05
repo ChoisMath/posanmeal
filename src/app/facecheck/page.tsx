@@ -9,6 +9,7 @@ import type { MealKind } from "@/lib/meal-kind-local";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
 import { playDenied, playDuplicate, playError, playSuccess } from "@/lib/checkin-sounds";
 import { RESULT_BG_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
+import { UnmatchedTracker } from "@/lib/unmatched-tracker";
 import { detectFaces, getActiveFaceBackend, loadHuman, qualityIssue } from "@/lib/human-client";
 import { nextDetectDelay, resolveFaceBackends } from "@/lib/face-pacing";
 import {
@@ -86,6 +87,9 @@ const SUPPRESSED_COOLDOWN_MS = 1500;
 const NO_MEAL_WINDOW_COOLDOWN_MS = 8000;
 const RATE_LIMIT_COOLDOWN_MS = 10_000;
 const RESULT_SUPPRESS_MS = 10_000;
+const UNMATCHED_SAME_FACE_SIM = 0.6;
+const UNMATCHED_CONFIRM_WINDOW_MS = 3000;
+const UNMATCHED_PENDING_COOLDOWN_MS = 300;
 const TEACHER_CANCEL_SUPPRESS_MS = 15_000;
 const BUSY_POLL_MS = 100;
 const PERF_UPDATE_MS = 500;
@@ -120,6 +124,7 @@ export default function FaceCheckPage() {
   const kioskKeyRef = useRef<string | null>(null);
   const kioskBlockedRef = useRef(false); // 키오스크 키 거부됨 — 카메라는 유지, POST만 중단
   const suppressRef = useRef<Map<number, number>>(new Map()); // userId → 억제 만료 시각(ms)
+  const unmatchedRef = useRef<UnmatchedTracker | null>(null);
   const lastStatusRef = useRef("카메라 준비 중...");
   const settingsRef = useRef<KioskSettings | null>(null);
   const candidatesRef = useRef<FaceCandidate[]>([]);
@@ -246,15 +251,37 @@ export default function FaceCheckPage() {
   }, [resumeScan, updateStatus]);
 
   // --- 결과 처리 (학생 성공/중복/미자격/미매칭 공용) ---
-  const applyResult = useCallback((json: FaceCheckResult) => {
+  const applyResult = useCallback((json: FaceCheckResult, embedding?: ArrayLike<number>) => {
     if (json.needType && json.user && json.mealKind) return; // 교사 분기에서 별도 처리
     if (!json.matched && !json.success) {
-      // 미매칭: 전체 화면 결과 대신 상태 문구만 (지나가는 사람마다 경고음 방지)
-      const cooldown = json.errorCode === "NO_MEAL_WINDOW" ? NO_MEAL_WINDOW_COOLDOWN_MS : QUIET_COOLDOWN_MS;
-      updateStatus(json.error || "인식되지 않았습니다. 다시 서 주세요.");
-      setPhase("waiting");
-      setTimeout(resumeScan, cooldown);
-      return;
+      if (json.errorCode === "UNMATCHED" && embedding) {
+        const tracker = (unmatchedRef.current ??= new UnmatchedTracker({
+          sameFaceSimilarity: UNMATCHED_SAME_FACE_SIM,
+          confirmWindowMs: UNMATCHED_CONFIRM_WINDOW_MS,
+          suppressMs: RESULT_SUPPRESS_MS,
+        }));
+        const verdict = tracker.observe(embedding, Date.now());
+        if (verdict === "pending") {
+          updateStatus("확인 중...");
+          setPhase("waiting");
+          setTimeout(resumeScan, UNMATCHED_PENDING_COOLDOWN_MS);
+          return;
+        }
+        if (verdict === "suppressed") {
+          updateStatus("미등록 사용자 — 다음 분 서 주세요");
+          setPhase("waiting");
+          setTimeout(resumeScan, SUPPRESSED_COOLDOWN_MS);
+          return;
+        }
+        // confirm: 아래 공용 경로에서 주황 카드 + 오류음
+      } else {
+        // 식사 시간 아님·명단 없음 등은 전체 화면 결과 대신 상태 문구만
+        const cooldown = json.errorCode === "NO_MEAL_WINDOW" ? NO_MEAL_WINDOW_COOLDOWN_MS : QUIET_COOLDOWN_MS;
+        updateStatus(json.error || "인식되지 않았습니다. 다시 서 주세요.");
+        setPhase("waiting");
+        setTimeout(resumeScan, cooldown);
+        return;
+      }
     }
     const gen = ++resultGenRef.current;
     setResult(json);
@@ -299,7 +326,7 @@ export default function FaceCheckPage() {
         updateStatus("근무/개인 선택 대기 중");
         return; // busyRef 유지 — 선택 대기
       }
-      applyResult(json);
+      applyResult(json, embedding);
     },
     [applyResult, resumeScan, updateStatus],
   );
@@ -397,7 +424,7 @@ export default function FaceCheckPage() {
           return;
         }
         if (!local && handleGateErrors(json)) return;
-        applyResult(json);
+        applyResult(json, p.embedding);
         if (local && json.success) setUnsyncedCount(await getUnsyncedCount());
       } catch (err) {
         console.error("teacher type submit error:", err);
@@ -754,6 +781,12 @@ export default function FaceCheckPage() {
                   {!result.success && !result.duplicate && !result.notApplicant && (
                     <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium`}>
                       {result.error || "인식되지 않았습니다."}
+                    </p>
+                  )}
+
+                  {result.errorCode === "UNMATCHED" && (
+                    <p className="text-fit-sm mt-1 text-gray-600 dark:text-gray-300 truncate">
+                      등록했다면 정면을 봐 주세요
                     </p>
                   )}
                 </div>

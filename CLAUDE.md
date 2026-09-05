@@ -186,6 +186,7 @@ npm run build                 # 프로덕션 빌드
 | `AdminMealTable` | 관리자 석식 확인 (교사/1~3학년 탭, 월 이동, 합계행) |
 | `PhotoUpload` | 프로필 사진 업로드/삭제 |
 | `checkin-sounds.ts` | 체크인 사운드 4종(`playSuccess`/`playDuplicate`/`playDenied`/`playError`) + `playLockClick` — `/check`·`/facecheck` 공용 |
+| `unmatched-tracker.ts` | 미등록 얼굴 거부 판정: 같은 얼굴(cos≥0.6)이 3초 안에 두 번 보이면 확정(주황 카드 "등록된 사용자가 아닙니다"+오류음), 이후 10초 억제 — 스쳐 가는 사람에게 경고하지 않기 위함 |
 | `checkin-result-style.ts` | 결과 분류(`resultCategory`)와 4색 매핑: 정상 초록 / 중복 파랑 / 미신청 빨강 / 기타 오류 주황 |
 
 ## 주의사항

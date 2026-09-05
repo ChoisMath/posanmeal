@@ -61,7 +61,7 @@ describe("runLocalFaceCheckIn", () => {
       { embedding: axis(3), candidates: CANDIDATES, faceMatch: FACE_MATCH, now: NOW, mealWindows: WINDOWS },
       ctx.repo,
     );
-    expect(r).toMatchObject({ success: false, matched: false });
+    expect(r).toMatchObject({ success: false, matched: false, errorCode: "UNMATCHED" });
     expect(ctx.checkins).toHaveLength(0);
   });
 

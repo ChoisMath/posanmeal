@@ -2,7 +2,7 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-06 (기본 threshold 0.45→0.55: 부자 간 0.48 오인식 관측; 2026-09-05 안면인식 식별 모델 교체 — FaceRes(1024)→insightface-mobilenet-emore(256), `FACE_MODEL_VERSION` 상승·현재 버전 프로필만 후보, `rankCandidates/decideMatch/scoreSummary`, `/api/facecheck`·로컬 결과에 `similarity/runnerUp`, `/facecheck` 상태바 유사도 표시, `FaceEnroll` 재등록 안내)
+> 마지막 업데이트: 2026-09-06 (미등록 얼굴 거부 카드·오류음 `unmatched-tracker.ts`, `/api/facecheck`·로컬 결과 `errorCode: UNMATCHED`; 기본 threshold 0.45→0.55: 부자 간 0.48 오인식 관측; 2026-09-05 안면인식 식별 모델 교체 — FaceRes(1024)→insightface-mobilenet-emore(256), `FACE_MODEL_VERSION` 상승·현재 버전 프로필만 후보, `rankCandidates/decideMatch/scoreSummary`, `/api/facecheck`·로컬 결과에 `similarity/runnerUp`, `/facecheck` 상태바 유사도 표시, `FaceEnroll` 재등록 안내)
 >
 > 이전 업데이트: 2026-09-05 (안면인식 2단계 — `/facecheck` WebGPU 우선 로딩·적응형 페이싱·성능 표시·결과 중 스캔 재개, 로컬 모드(브라우저 매칭 `facecheck-local.ts` + `kiosk-sync.ts` + IDB v5 `faceProfiles`, `GET /api/sync/download?faces=1`), `/check`·`/facecheck` 결과 4색(`checkin-result-style.ts`)·4사운드(`checkin-sounds.ts` 공용화). 설계 `docs/superpowers/specs/2026-09-05-facecheck-perf-local-design.md`)
 >
@@ -245,6 +245,7 @@ public/
 | `src/lib/qr-card.ts` | 담임 QR 카드 출력용: `buildCardQrString(studentId, generation)`(고정 로컬 QR `posanmeal:{id}:{generation}:STUDENT` 생성) + `chunk<T>(items, size)` 페이지 분할 유틸 (테스트 `__tests__/qr-card.test.ts`) |
 | `src/lib/face-constants.ts` | 안면인식 상수: `FACE_EMBEDDING_DIM`(256), `FACE_MIN/MAX_EMBEDDINGS`(3~5), `FACE_MODEL_VERSION`(insightface-mobilenet-emore@human3.3.6), `FACE_MODEL_PATH`, `DEFAULT_FACE_MATCH_THRESHOLD/MARGIN`(0.55/0.05) |
 | `src/lib/face-match.ts` | 순수 함수: `cosineSimilarity(a,b)`, `rankCandidates(embedding, candidates)`(사용자별 최고 유사도 내림차순, 차원이 다른 구 모델 임베딩 제외), `decideMatch(ranked,{threshold,margin})`, `findBestMatch`(둘의 합성), `scoreSummary(ranked)`(1·2위 소수 3자리 `MatchScore`) (테스트 `__tests__/face-match.test.ts`) |
+| `src/lib/unmatched-tracker.ts` | `UnmatchedTracker.observe(embedding, now)` → `pending`/`confirm`/`suppressed`. 미등록 얼굴은 같은 얼굴(cos≥0.6)이 3초 안에 두 번 보여야 확정(주황 카드+오류음), 확정 후 10초 억제. `/facecheck` `applyResult`가 `errorCode: "UNMATCHED"`일 때 사용 |
 | `src/lib/schemas/face.ts` | zod 스키마: `faceEnrollSchema`(embeddings 3~5개×1024차원, consentVersion) / `faceCheckSchema`(embedding, type?) (테스트 `__tests__/face-schema.test.ts`) |
 | `src/lib/face-consent.ts` | `FACE_CONSENT_VERSION` + `FACE_CONSENT_TEXT`(안면인식정보 수집·이용 동의문 전문) |
 | `src/lib/face-embedding-cache.ts` | `FaceProfile` 60s 인메모리 캐시: `getFaceCandidates()`(`modelVersion = FACE_MODEL_VERSION`인 프로필만, Json embeddings → Float32Array 변환), `invalidateFaceCache()` (테스트 `__tests__/face-embedding-cache.test.ts`) |

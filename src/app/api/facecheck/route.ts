@@ -85,7 +85,8 @@ export async function POST(request: Request) {
         success: false,
         matched: false,
         ...score,
-        error: "인식되지 않았습니다. 다시 서 주세요.",
+        error: "등록된 사용자가 아닙니다.",
+        errorCode: "UNMATCHED",
       });
     }
 
