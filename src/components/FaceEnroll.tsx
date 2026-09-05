@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScanFace, Trash2 } from "lucide-react";
 import { FACE_CONSENT_TEXT, FACE_CONSENT_VERSION } from "@/lib/face-consent";
-import { FACE_MIN_EMBEDDINGS } from "@/lib/face-constants";
+import { FACE_MIN_EMBEDDINGS, FACE_MODEL_VERSION } from "@/lib/face-constants";
 import { detectFaces, loadHuman, qualityIssue } from "@/lib/human-client";
 
 interface FaceStatus {
   registered: boolean;
   consentAt?: string;
+  modelVersion?: string;
 }
 
 type Phase = "idle" | "consent" | "capturing" | "saving";
@@ -22,6 +23,8 @@ const CAPTURE_GAP_MS = 700;
 
 export function FaceEnroll() {
   const { data, mutate } = useSWR<FaceStatus>("/api/users/me/face", fetcher);
+  // 인식 모델이 바뀌면 서버가 구 버전 프로필을 후보에서 제외하므로 재등록을 안내한다
+  const needsReenroll = !!data?.registered && data.modelVersion !== FACE_MODEL_VERSION;
   const [phase, setPhase] = useState<Phase>("idle");
   const [agreed, setAgreed] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -150,14 +153,20 @@ export function FaceEnroll() {
       <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
         <span className="text-muted-foreground whitespace-nowrap">안면인식</span>
         {data?.registered ? (
-          <span className="flex items-center gap-2">
-            <span className="font-medium text-emerald-600 whitespace-nowrap">
-              등록됨 ({data.consentAt ? new Date(data.consentAt).toLocaleDateString("ko-KR") : ""})
-            </span>
-            <Button size="sm" variant="outline" className="rounded-xl min-h-9" onClick={() => { setAgreed(false); setPhase("consent"); }}>
+          <span className="flex items-center gap-2 min-w-0">
+            {needsReenroll ? (
+              <span className="font-medium text-amber-600 truncate min-w-0" title="인식 모델이 바뀌어 다시 등록해야 합니다">
+                재등록 필요
+              </span>
+            ) : (
+              <span className="font-medium text-emerald-600 whitespace-nowrap">
+                등록됨 ({data.consentAt ? new Date(data.consentAt).toLocaleDateString("ko-KR") : ""})
+              </span>
+            )}
+            <Button size="sm" variant="outline" className="rounded-xl min-h-9 shrink-0" onClick={() => { setAgreed(false); setPhase("consent"); }}>
               재등록
             </Button>
-            <Button size="sm" variant="outline" className="rounded-xl min-h-9 text-red-600" onClick={handleDelete}>
+            <Button size="sm" variant="outline" className="rounded-xl min-h-9 text-red-600 shrink-0" onClick={handleDelete}>
               <Trash2 className="h-4 w-4" />
             </Button>
           </span>

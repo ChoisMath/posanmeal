@@ -32,7 +32,7 @@ import {
   getUser,
   isEligible,
 } from "@/lib/local-db";
-import type { FaceCandidate } from "@/lib/face-match";
+import type { FaceCandidate, MatchScore } from "@/lib/face-match";
 import { LoaderCircle, QrCode, RefreshCw, ScanFace, Wifi, WifiOff } from "lucide-react";
 
 interface PendingTeacher {
@@ -111,6 +111,8 @@ export default function FaceCheckPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [perf, setPerf] = useState<{ backend: string | null; detectMs: number | null }>({ backend: null, detectMs: null });
+  // 직전 판정의 1·2위 유사도 — 현장에서 임계값을 조정할 때 참고한다
+  const [lastScore, setLastScore] = useState<MatchScore | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const busyRef = useRef(false); // API 호출·선택 대기 중 스캔 정지 — pauseScan/resumeScan으로만 변경
@@ -273,6 +275,7 @@ export default function FaceCheckPage() {
   // 매칭 응답 공용 처리(온라인·로컬): 억제 확인 → 교사 선택 대기 → 결과 표시
   const handleMatchedResponse = useCallback(
     (json: FaceCheckResult, embedding: number[], gen: number) => {
+      setLastScore(json.similarity === undefined ? null : { similarity: json.similarity, runnerUp: json.runnerUp });
       const uid = json.user?.id;
       if (uid !== undefined) {
         const suppressedUntil = suppressRef.current.get(uid);
@@ -659,6 +662,12 @@ export default function FaceCheckPage() {
                 <span className="text-white/50">
                   · {perf.backend}
                   {perf.detectMs !== null ? ` ${perf.detectMs}ms` : ""}
+                </span>
+              )}
+              {lastScore?.similarity !== undefined && (
+                <span className="hidden sm:inline text-white/50">
+                  · 유사도 {lastScore.similarity.toFixed(2)}
+                  {lastScore.runnerUp !== undefined ? `/${lastScore.runnerUp.toFixed(2)}` : ""}
                 </span>
               )}
             </>

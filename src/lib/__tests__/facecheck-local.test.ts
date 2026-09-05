@@ -74,6 +74,8 @@ describe("runLocalFaceCheckIn", () => {
       success: true, matched: true, type: "STUDENT", mealKind: "DINNER", user: { id: 1, name: "김학생" },
     });
     expect(ctx.checkins[0]).toMatchObject({ userId: 1, date: "2026-09-05", mealKind: "DINNER", type: "STUDENT", synced: 0 });
+    expect(r.similarity).toBeCloseTo(1);
+    expect(r.runnerUp).toBeCloseTo(0);
   });
 
   it("학생 두 번째 → duplicate (서버와 같은 문구)", async () => {

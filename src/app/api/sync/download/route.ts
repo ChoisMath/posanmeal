@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { todayKST } from "@/lib/timezone";
 import { canWriteAdmin } from "@/lib/permissions";
 import type { MealKind } from "@/lib/meal-kind";
-import { DEFAULT_FACE_MATCH_MARGIN, DEFAULT_FACE_MATCH_THRESHOLD } from "@/lib/face-constants";
+import { DEFAULT_FACE_MATCH_MARGIN, DEFAULT_FACE_MATCH_THRESHOLD, FACE_MODEL_VERSION } from "@/lib/face-constants";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
       },
     }),
     includeFaces
-      ? prisma.faceProfile.findMany({ select: { userId: true, embeddings: true } })
+      ? prisma.faceProfile.findMany({ where: { modelVersion: FACE_MODEL_VERSION }, select: { userId: true, embeddings: true } })
       : Promise.resolve(null),
   ]);
 

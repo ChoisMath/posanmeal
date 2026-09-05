@@ -93,6 +93,26 @@ describe("/api/facecheck", () => {
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
 
+  it("응답에 1·2위 유사도(similarity/runnerUp) 포함 — 미매칭도 동일", async () => {
+    const axis1 = Array.from({ length: FACE_EMBEDDING_DIM }, (_, i) => (i === 1 ? 1 : 0));
+    const axis2 = Array.from({ length: FACE_EMBEDDING_DIM }, (_, i) => (i === 2 ? 1 : 0));
+    mocks.getFaceCandidates.mockResolvedValue([
+      { userId: 1, embeddings: [Float32Array.from(emb)] },
+      { userId: 9, embeddings: [Float32Array.from(axis1)] },
+    ]);
+    mocks.userFindUnique.mockResolvedValue(STUDENT);
+    const { POST } = await import("@/app/api/facecheck/route");
+    const matched = await (await POST(request({ embedding: emb }))).json();
+    expect(matched.success).toBe(true);
+    expect(matched.similarity).toBeCloseTo(1);
+    expect(matched.runnerUp).toBeCloseTo(0);
+
+    const unmatched = await (await POST(request({ embedding: axis2 }))).json();
+    expect(unmatched.matched).toBe(false);
+    expect(unmatched.similarity).toBeCloseTo(0);
+    expect(mocks.checkInCreate).toHaveBeenCalledTimes(1);
+  });
+
   it("학생 매칭 → source FACE, type STUDENT로 즉시 체크인", async () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
     const { POST } = await import("@/app/api/facecheck/route");

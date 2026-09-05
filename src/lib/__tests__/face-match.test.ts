@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cosineSimilarity, findBestMatch, type FaceCandidate } from "@/lib/face-match";
+import { cosineSimilarity, decideMatch, findBestMatch, rankCandidates, scoreSummary, type FaceCandidate } from "@/lib/face-match";
 
 function unitVec(dim: number, axis: number): Float32Array {
   const v = new Float32Array(dim);
@@ -67,5 +67,38 @@ describe("findBestMatch", () => {
 
   it("후보가 없으면 null", () => {
     expect(findBestMatch(A, [], opts)).toBeNull();
+  });
+});
+
+describe("rankCandidates / decideMatch / scoreSummary", () => {
+  it("사용자별 최고 유사도로 내림차순 정렬", () => {
+    const ranked = rankCandidates(NEAR_A, candidates);
+    expect(ranked.map((r) => r.userId)).toEqual([1, 2]);
+    expect(ranked[0].similarity).toBeGreaterThan(ranked[1].similarity);
+  });
+
+  it("차원이 다른(구 모델) 임베딩은 비교에서 제외", () => {
+    const legacy: FaceCandidate[] = [
+      { userId: 1, embeddings: [Float32Array.from([1, 0, 0, 0, 0, 0])] },
+      { userId: 2, embeddings: [B] },
+    ];
+    const ranked = rankCandidates(NEAR_A, legacy);
+    expect(ranked.map((r) => r.userId)).toEqual([2]);
+    // 비교 가능한 후보가 1명뿐이면 마진 조건도 생략된다
+    expect(decideMatch(ranked, { threshold: 0, margin: 0.99 })?.userId).toBe(2);
+  });
+
+  it("전 후보가 구 모델이면 매칭 없음", () => {
+    const legacyOnly: FaceCandidate[] = [{ userId: 1, embeddings: [Float32Array.from([1, 0, 0, 0, 0, 0])] }];
+    expect(rankCandidates(NEAR_A, legacyOnly)).toEqual([]);
+    expect(findBestMatch(NEAR_A, legacyOnly, { threshold: 0, margin: 0 })).toBeNull();
+  });
+
+  it("scoreSummary는 1·2위를 소수 3자리로", () => {
+    expect(scoreSummary([{ userId: 1, similarity: 0.98765 }, { userId: 2, similarity: 0.12344 }])).toEqual({
+      similarity: 0.988,
+      runnerUp: 0.123,
+    });
+    expect(scoreSummary([])).toEqual({});
   });
 });

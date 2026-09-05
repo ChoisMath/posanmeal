@@ -1,6 +1,7 @@
 import "client-only";
 import type { Human, Config, FaceResult } from "@vladmandic/human";
 import type { FaceBackend } from "@/lib/face-pacing";
+import { FACE_MODEL_PATH } from "@/lib/face-constants";
 
 export const FACE_QUALITY = { minScore: 0.7, minReal: 0.5, minLive: 0.5 };
 
@@ -16,11 +17,13 @@ const BASE_CONFIG: Partial<Config> = {
     detector: { rotation: true, maxDetected: 2 },
     mesh: { enabled: true },
     iris: { enabled: false },
-    description: { enabled: true },
+    // FaceRes(description)는 나이·성별 헤드와 특징을 공유해 타인 간 유사도가 높다 → 식별은 insightface 전용
+    description: { enabled: false },
+    insightface: { enabled: true, modelPath: FACE_MODEL_PATH },
     emotion: { enabled: false },
     antispoof: { enabled: true },
     liveness: { enabled: true },
-  },
+  } as Partial<Config["face"]>,
   body: { enabled: false },
   hand: { enabled: false },
   gesture: { enabled: false },
@@ -29,10 +32,10 @@ const BASE_CONFIG: Partial<Config> = {
 const LOAD_TIMEOUT_MS = 90_000;
 const DETECT_TIMEOUT_MS = 5_000;
 
-// FACE_CONFIG에서 켠 파이프라인이 실제로 로드하는 Models 프로퍼티 이름
+// BASE_CONFIG에서 켠 파이프라인이 실제로 로드하는 Models 프로퍼티 이름
 // (node_modules/@vladmandic/human/dist/human.esm.js Models.load() 기준 — 파일명(blazeface.json 등)과는
-// 별개의 내부 키라 다를 수 있음. detector→blazeface, mesh→facemesh, description→faceres)
-const REQUIRED_FACE_MODELS = ["blazeface", "facemesh", "faceres", "antispoof", "liveness"] as const;
+// 별개의 내부 키라 다를 수 있음. detector→blazeface, mesh→facemesh, insightface→insightface)
+const REQUIRED_FACE_MODELS = ["blazeface", "facemesh", "insightface", "antispoof", "liveness"] as const;
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {

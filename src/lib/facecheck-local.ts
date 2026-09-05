@@ -1,4 +1,4 @@
-import { findBestMatch, type FaceCandidate } from "@/lib/face-match";
+import { decideMatch, rankCandidates, scoreSummary, type FaceCandidate, type MatchScore } from "@/lib/face-match";
 import { resolveMealKindLocal, type MealKind, type MealWindows } from "@/lib/meal-kind-local";
 import { MEAL_LABEL } from "@/lib/meal-plan";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
@@ -14,7 +14,7 @@ export interface FaceCheckUser {
 }
 
 // /api/facecheck 응답과 같은 모양 — 페이지가 온라인/로컬 결과를 동일하게 처리한다.
-export interface FaceCheckResult {
+export interface FaceCheckResult extends MatchScore {
   success: boolean;
   matched?: boolean;
   duplicate?: boolean;
@@ -65,11 +65,13 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
   if (!mealKind) {
     return { success: false, error: "현재 식사 시간이 아닙니다.", errorCode: "NO_MEAL_WINDOW" };
   }
-  const match = findBestMatch(input.embedding, input.candidates, input.faceMatch);
-  if (!match) return { success: false, matched: false, error: "인식되지 않았습니다. 다시 서 주세요." };
+  const ranked = rankCandidates(input.embedding, input.candidates);
+  const match = decideMatch(ranked, input.faceMatch);
+  const score = scoreSummary(ranked);
+  if (!match) return { success: false, matched: false, ...score, error: "인식되지 않았습니다. 다시 서 주세요." };
 
   const user = await repo.getUser(match.userId);
-  if (!user) return { success: false, matched: false, error: "명단에 없는 사용자입니다. 동기화가 필요합니다." };
+  if (!user) return { success: false, matched: false, ...score, error: "명단에 없는 사용자입니다. 동기화가 필요합니다." };
 
   const date = localDateKey(input.now);
   const faceUser = toFaceUser(user);
@@ -78,6 +80,7 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
     return {
       success: false,
       matched: true,
+      ...score,
       duplicate: true,
       user: faceUser,
       mealKind,
@@ -88,7 +91,7 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
 
   let type: LocalCheckIn["type"];
   if (user.role === "TEACHER") {
-    if (!input.type) return { success: false, matched: true, needType: true, user: faceUser, mealKind };
+    if (!input.type) return { success: false, matched: true, needType: true, user: faceUser, mealKind, ...score };
     type = input.type;
   } else {
     const eligible = await repo.isEligible(user.id, date, mealKind);
@@ -96,6 +99,7 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
       return {
         success: false,
         matched: true,
+        ...score,
         notApplicant: true,
         user: faceUser,
         mealKind,
@@ -107,5 +111,5 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
 
   const checkedAt = input.now.toISOString();
   await repo.addCheckIn({ userId: user.id, date, mealKind, checkedAt, type, synced: 0 });
-  return { success: true, matched: true, user: faceUser, type, mealKind, checkedAt };
+  return { success: true, matched: true, user: faceUser, type, mealKind, checkedAt, ...score };
 }

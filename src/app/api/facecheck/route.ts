@@ -6,7 +6,7 @@ import { getCachedSettings } from "@/lib/settings-cache";
 import { isStudentEligibleToday, resolveMealKind, type MealKind } from "@/lib/meal-kind";
 import { MEAL_LABEL } from "@/lib/meal-plan";
 import { getFaceCandidates } from "@/lib/face-embedding-cache";
-import { findBestMatch } from "@/lib/face-match";
+import { decideMatch, rankCandidates, scoreSummary } from "@/lib/face-match";
 import { faceCheckSchema } from "@/lib/schemas/face";
 
 const USER_SELECT = {
@@ -77,11 +77,14 @@ export async function POST(request: Request) {
     }
 
     const candidates = await getFaceCandidates();
-    const match = findBestMatch(embedding, candidates, settings.faceMatch);
+    const ranked = rankCandidates(embedding, candidates);
+    const match = decideMatch(ranked, settings.faceMatch);
+    const score = scoreSummary(ranked);
     if (!match) {
       return NextResponse.json({
         success: false,
         matched: false,
+        ...score,
         error: "인식되지 않았습니다. 다시 서 주세요.",
       });
     }
@@ -102,6 +105,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: false,
         matched: true,
+        ...score,
         duplicate: true,
         user,
         mealKind,
@@ -113,7 +117,7 @@ export async function POST(request: Request) {
     let checkInType: "STUDENT" | "WORK" | "PERSONAL";
     if (user.role === "TEACHER") {
       if (!type) {
-        return NextResponse.json({ success: false, matched: true, needType: true, user, mealKind });
+        return NextResponse.json({ success: false, matched: true, needType: true, user, mealKind, ...score });
       }
       checkInType = type;
     } else {
@@ -122,6 +126,7 @@ export async function POST(request: Request) {
         return NextResponse.json({
           success: false,
           matched: true,
+          ...score,
           notApplicant: true,
           user,
           mealKind,
@@ -150,6 +155,7 @@ export async function POST(request: Request) {
         return NextResponse.json({
           success: false,
           matched: true,
+          ...score,
           duplicate: true,
           user,
           mealKind,
@@ -163,6 +169,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       matched: true,
+      ...score,
       user,
       type: checkInType,
       mealKind,

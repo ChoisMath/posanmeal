@@ -5,7 +5,7 @@ import { FACE_EMBEDDING_DIM } from "@/lib/face-constants";
 const validEmbedding = Array.from({ length: FACE_EMBEDDING_DIM }, () => 0.1);
 
 describe("faceEnrollSchema", () => {
-  it("3~5개의 1024차원 임베딩 + consentVersion 허용", () => {
+  it("3~5개의 FACE_EMBEDDING_DIM차원 임베딩 + consentVersion 허용", () => {
     const r = faceEnrollSchema.safeParse({
       embeddings: [validEmbedding, validEmbedding, validEmbedding],
       consentVersion: "2026-09-v1",

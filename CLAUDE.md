@@ -23,7 +23,7 @@
 | 테마 | next-themes (다크/라이트 모드) |
 | 이미지 | sharp (300x300 WebP 변환) |
 | 엑셀 | exceljs |
-| 안면인식 | @vladmandic/human 3.3.6 (브라우저 추론, 모델 self-host /models) |
+| 안면인식 | @vladmandic/human 3.3.6 (브라우저 추론, 모델 self-host /models). 식별 임베딩은 insightface-mobilenet-emore(256차원, https://github.com/vladmandic/insightface) — 출처 `public/models/README.md` |
 | 배포 | Railway (단일 서비스 + PostgreSQL + Volume) |
 
 ## 핵심 아키텍처 결정사항
@@ -102,7 +102,7 @@
 | `/api/users/me` | GET/PUT | 학생/교사 | 본인 프로필 조회/수정 |
 | `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 |
 | `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 조회/등록/삭제 |
-| `/api/facecheck` | POST | 공개(키오스크 키) | 안면인식 체크인 (임베딩 1:N 매칭) |
+| `/api/facecheck` | POST | 공개(키오스크 키) | 안면인식 체크인 (임베딩 1:N 매칭, 응답에 1·2위 유사도 `similarity`/`runnerUp` 포함) |
 | `/api/sync/download` | GET | 관리자 | 오프라인 모드 초기 데이터. `?faces=1`이면 `faceProfiles`·`faceMatch`(로컬 안면인식용) 포함 |
 | `/api/sync/upload` | POST | 관리자 | 오프라인 체크인 업로드 (`/check`·`/facecheck` 공용) |
 | `/api/uploads/[filename]` | GET | 공개 | 사진 파일 서빙 |
@@ -193,5 +193,5 @@ npm run build                 # 프로덕션 빌드
 - Tailwind v4는 CSS 기반 설정 (`src/app/globals.css`에 `@custom-variant dark`). tailwind.config.ts 없음
 - Next.js 16의 "proxy" 컨벤션에 따라 미들웨어는 `src/proxy.ts`(파일명 `middleware.ts` 아님)에 위치, allowlist 방식(publicExact/publicPrefixes)으로 공개 경로 관리
 - shadcn/ui의 toast는 sonner로 대체됨 (`src/components/ui/sonner.tsx`)
-- 안면인식 임베딩 모델(FaceRes 1024차원)과 그 입력 단계(detector/mesh/rotation/equalization)는 등록·인식 일관성 때문에 백엔드와 무관하게 고정. 속도 튜닝은 백엔드(webgpu/webgl)·검출 간격(`face-pacing.ts`)에서만
+- 안면인식 임베딩 모델(insightface-mobilenet-emore 256차원, 코사인 매칭 기본 threshold 0.45/margin 0.05)과 그 입력 단계(detector/mesh/rotation/equalization)는 등록·인식 일관성 때문에 백엔드와 무관하게 고정. 속도 튜닝은 백엔드(webgpu/webgl)·검출 간격(`face-pacing.ts`)에서만. 이전 FaceRes(1024차원)는 나이·성별 특징이 지배적이라 타인도 코사인 0.5~0.7로 매칭돼 폐기(2026-09-05). 모델을 바꾸면 `FACE_MODEL_VERSION`을 올린다 — 서버 후보 캐시·`sync/download`는 현재 버전 프로필만 쓰고, 구 버전 등록자는 개인정보 탭에 "재등록 필요"가 표시된다. `/facecheck` 상태바의 `유사도 1위/2위`로 현장에서 임계값을 조정
 - 로컬 모드 안면인식: 등록자 임베딩이 키오스크 IndexedDB(`faceProfiles`)에 내려가며, 서버 운영 모드가 `online`으로 확인되면 자동 삭제(`kiosk-sync.ts`)

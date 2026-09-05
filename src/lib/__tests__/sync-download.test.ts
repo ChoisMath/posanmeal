@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { FACE_MODEL_VERSION } from "@/lib/face-constants";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
@@ -43,6 +44,9 @@ describe("/api/sync/download — faces=1", () => {
     expect(body.faceProfiles).toEqual([{ userId: 1, embeddings: [[0.1, 0.2]] }]);
     expect(body.faceMatch).toEqual({ threshold: 0.6, margin: 0.05 });
     expect(mocks.faceProfileFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.faceProfileFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { modelVersion: FACE_MODEL_VERSION } }),
+    );
   });
 
   it("faces 없음 → faceProfiles 조회·포함 안 함 (기존 /check 페이로드 불변)", async () => {

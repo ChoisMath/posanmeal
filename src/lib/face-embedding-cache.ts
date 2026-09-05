@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { FaceCandidate } from "@/lib/face-match";
+import { FACE_MODEL_VERSION } from "@/lib/face-constants";
 
 let cache: FaceCandidate[] | null = null;
 let cacheTimestamp = 0;
@@ -9,6 +10,7 @@ export async function getFaceCandidates(): Promise<FaceCandidate[]> {
   if (cache && Date.now() - cacheTimestamp < CACHE_TTL) return cache;
 
   const rows = await prisma.faceProfile.findMany({
+    where: { modelVersion: FACE_MODEL_VERSION },
     select: { userId: true, embeddings: true },
   });
   cache = rows.map((row) => ({
