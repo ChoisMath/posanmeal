@@ -5,5 +5,6 @@ export const FACE_MAX_EMBEDDINGS = 5;
 // FaceRes(1024차원)는 나이·성별 헤드와 특징을 공유해 타인 간 유사도가 0.5~0.7까지 올라가 식별용으로 부적합했다.
 export const FACE_MODEL_VERSION = "insightface-mobilenet-emore@human3.3.6";
 export const FACE_MODEL_PATH = "insightface-mobilenet-emore.json";
-export const DEFAULT_FACE_MATCH_THRESHOLD = 0.45;
+// 타인은 대개 0.3 이하지만 부자(父子)처럼 닮은 가족은 0.48로 관측돼(2026-09-06) 그 위에 둔다.
+export const DEFAULT_FACE_MATCH_THRESHOLD = 0.55;
 export const DEFAULT_FACE_MATCH_MARGIN = 0.05;
