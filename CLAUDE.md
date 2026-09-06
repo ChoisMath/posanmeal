@@ -89,7 +89,7 @@
 | `/check` | 공개 | QR 스캐너 (태블릿, 좌우 분할 레이아웃) |
 | `/facecheck` | 공개(키오스크 키; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인 (태블릿·노트북). WebGPU 우선→WebGL 폴백, `?backend=webgl\|webgpu\|auto` 고정, 상태바에 백엔드·검출ms 표시. 운영 모드 `local`이면 브라우저 매칭(`facecheck-local.ts`)+IDB 저장, 하단 [동기화] |
 | `/admin/login` | 공개 | 관리자 로그인 |
-| `/admin` | 관리자 | 3탭: 사용자관리(Sheet연결 모달), 석식확인(교사/학년별), 당일현황 |
+| `/admin` | 관리자 | 탭: 사용자관리(Sheet연결 모달), 신청관리, 급식확인(교사/학년별), 당일현황, 설정(운영 모드·QR 세대·태블릿 동기화·식사 시간·안면인식 임계값) |
 
 ## API Routes
 
@@ -194,5 +194,5 @@ npm run build                 # 프로덕션 빌드
 - Tailwind v4는 CSS 기반 설정 (`src/app/globals.css`에 `@custom-variant dark`). tailwind.config.ts 없음
 - Next.js 16의 "proxy" 컨벤션에 따라 미들웨어는 `src/proxy.ts`(파일명 `middleware.ts` 아님)에 위치, allowlist 방식(publicExact/publicPrefixes)으로 공개 경로 관리
 - shadcn/ui의 toast는 sonner로 대체됨 (`src/components/ui/sonner.tsx`)
-- 안면인식 임베딩 모델(insightface-mobilenet-emore 256차원, 코사인 매칭 기본 threshold 0.55/margin 0.05 — 타인 ≤0.3, 닮은 가족 0.48 관측)과 그 입력 단계(detector/mesh/rotation/equalization)는 등록·인식 일관성 때문에 백엔드와 무관하게 고정. 속도 튜닝은 백엔드(webgpu/webgl)·검출 간격(`face-pacing.ts`)에서만. 이전 FaceRes(1024차원)는 나이·성별 특징이 지배적이라 타인도 코사인 0.5~0.7로 매칭돼 폐기(2026-09-05). 모델을 바꾸면 `FACE_MODEL_VERSION`을 올린다 — 서버 후보 캐시·`sync/download`는 현재 버전 프로필만 쓰고, 구 버전 등록자는 개인정보 탭에 "재등록 필요"가 표시된다. `/facecheck` 상태바의 `유사도 1위/2위`로 현장에서 임계값을 조정
+- 안면인식 임베딩 모델(insightface-mobilenet-emore 256차원, 코사인 매칭 기본 threshold 0.55/margin 0.05 — 타인 ≤0.3, 닮은 가족 0.48 관측)과 그 입력 단계(detector/mesh/rotation/equalization)는 등록·인식 일관성 때문에 백엔드와 무관하게 고정. 속도 튜닝은 백엔드(webgpu/webgl)·검출 간격(`face-pacing.ts`)에서만. 이전 FaceRes(1024차원)는 나이·성별 특징이 지배적이라 타인도 코사인 0.5~0.7로 매칭돼 폐기(2026-09-05). 모델을 바꾸면 `FACE_MODEL_VERSION`을 올린다 — 서버 후보 캐시·`sync/download`는 현재 버전 프로필만 쓰고, 구 버전 등록자는 개인정보 탭에 "재등록 필요"가 표시된다. `/facecheck` 상태바의 `유사도 1위/2위`를 보고 관리자 설정 탭 "안면인식 임계값" 카드에서 조정(키오스크 새로고침 후 적용)
 - 로컬 모드 안면인식: 등록자 임베딩이 키오스크 IndexedDB(`faceProfiles`)에 내려가며, 서버 운영 모드가 `online`으로 확인되면 자동 삭제(`kiosk-sync.ts`)

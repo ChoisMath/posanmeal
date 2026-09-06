@@ -27,6 +27,12 @@ import {
   mapServerError,
   type MealWindowsForm,
 } from "@/lib/meal-windows-validation";
+import {
+  parseFaceMatchForm,
+  toFaceMatchForm,
+  type FaceMatchForm,
+  type FaceMatchValues,
+} from "@/lib/face-match-validation";
 
 interface User {
   id: number; email: string; name: string; role: string;
@@ -129,6 +135,9 @@ export default function AdminPage() {
   const [windowsForm, setWindowsForm] = useState<MealWindowsForm | null>(null);
   const [windowsError, setWindowsError] = useState<string | null>(null);
   const [windowsLoadFailed, setWindowsLoadFailed] = useState(false);
+  const [sysFaceMatch, setSysFaceMatch] = useState<FaceMatchValues | null>(null);
+  const [faceMatchForm, setFaceMatchForm] = useState<FaceMatchForm | null>(null);
+  const [faceMatchError, setFaceMatchError] = useState<string | null>(null);
   const [localDataDialogOpen, setLocalDataDialogOpen] = useState(false);
   const [localRows, setLocalRows] = useState<LocalCheckInRow[]>([]);
   const [localLoading, setLocalLoading] = useState(false);
@@ -146,6 +155,11 @@ export default function AdminPage() {
       const data = await res.json();
       setSysMode(data.operationMode);
       setSysGeneration(data.qrGeneration);
+      if (data.faceMatch) {
+        setSysFaceMatch(data.faceMatch);
+        setFaceMatchForm(toFaceMatchForm(data.faceMatch));
+        setFaceMatchError(null);
+      }
       if (data.mealWindows) {
         const windows: MealWindowsForm = {
           breakfast: {
@@ -244,6 +258,45 @@ export default function AdminPage() {
       const refreshed = await fetchSystemSettings();
       if (refreshed) {
         toast.success("식사 시간이 저장되었습니다 · 새 QR부터 적용");
+      } else {
+        toast.warning("저장되었으나 설정을 다시 불러오지 못했습니다. 새로고침 해주세요");
+      }
+    } finally {
+      setSysLoading(false);
+    }
+  }
+
+  function handleFaceMatchChange(field: keyof FaceMatchForm, value: string) {
+    if (!faceMatchForm) return;
+    const next = { ...faceMatchForm, [field]: value };
+    setFaceMatchForm(next);
+    const parsed = parseFaceMatchForm(next);
+    setFaceMatchError("error" in parsed ? parsed.error : null);
+  }
+
+  async function handleSaveFaceMatch() {
+    if (!faceMatchForm) return;
+    const parsed = parseFaceMatchForm(faceMatchForm);
+    if ("error" in parsed) {
+      setFaceMatchError(parsed.error);
+      return;
+    }
+    setSysLoading(true);
+    try {
+      const res = await fetch("/api/system/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ faceMatchThreshold: parsed.values.threshold, faceMatchMargin: parsed.values.margin }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setFaceMatchError(data?.error ?? "저장에 실패했습니다");
+        toast.error("안면인식 임계값 저장 실패");
+        return;
+      }
+      const refreshed = await fetchSystemSettings();
+      if (refreshed) {
+        toast.success("안면인식 임계값이 저장되었습니다 · 키오스크 새로고침 후 적용");
       } else {
         toast.warning("저장되었으나 설정을 다시 불러오지 못했습니다. 새로고침 해주세요");
       }
@@ -1377,6 +1430,80 @@ export default function AdminPage() {
                               !sysWindows ||
                               !!windowsError ||
                               JSON.stringify(windowsForm) === JSON.stringify(sysWindows)
+                            }
+                          >
+                            저장
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Face Match Threshold */}
+                  <div className="p-4 border rounded-xl mt-3">
+                    <p className="font-medium">안면인식 임계값</p>
+                    <p className="text-sm text-muted-foreground">
+                      유사도가 임계값 이상이면 본인으로 판정합니다. 높일수록 타인 통과는 줄고 본인 거부는 늘어납니다.
+                      2위와 차이는 1위 후보가 2위보다 앞서야 하는 최소 유사도 차이입니다.
+                    </p>
+
+                    {faceMatchForm && sysFaceMatch && (
+                      <>
+                        <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="face-threshold" className="text-sm whitespace-nowrap">
+                              임계값
+                            </Label>
+                            <Input
+                              id="face-threshold"
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0.3"
+                              max="0.9"
+                              value={faceMatchForm.threshold}
+                              onChange={(e) => handleFaceMatchChange("threshold", e.target.value)}
+                              disabled={sysLoading}
+                              className="w-24"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="face-margin" className="text-sm whitespace-nowrap">
+                              2위와 차이
+                            </Label>
+                            <Input
+                              id="face-margin"
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min="0"
+                              max="0.3"
+                              value={faceMatchForm.margin}
+                              onChange={(e) => handleFaceMatchChange("margin", e.target.value)}
+                              disabled={sysLoading}
+                              className="w-24"
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            현재 {sysFaceMatch.threshold.toFixed(2)} / {sysFaceMatch.margin.toFixed(2)} · 권장 0.50~0.60
+                          </span>
+                        </div>
+
+                        {faceMatchError && (
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-center gap-1">
+                            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            {faceMatchError}
+                          </p>
+                        )}
+
+                        <div className="flex justify-end mt-3">
+                          <Button
+                            size="sm"
+                            onClick={handleSaveFaceMatch}
+                            disabled={
+                              sysLoading ||
+                              !!faceMatchError ||
+                              JSON.stringify(faceMatchForm) === JSON.stringify(toFaceMatchForm(sysFaceMatch))
                             }
                           >
                             저장
