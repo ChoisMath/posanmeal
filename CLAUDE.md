@@ -86,8 +86,8 @@
 | `/` | 공개 | 랜딩 (Google 로그인) |
 | `/student` | 학생 | 3탭: QR, 개인정보, 확인 |
 | `/teacher` | 교사 | 담임 5탭(개인석식,근무,확인,학생관리,개인정보) / 비담임 4탭 |
-| `/check` | 공개 | QR 스캐너 (태블릿, 좌우 분할 레이아웃) |
-| `/facecheck` | 공개(키오스크 키; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인 (태블릿·노트북). WebGPU 우선→WebGL 폴백, `?backend=webgl\|webgpu\|auto` 고정, 상태바에 백엔드·검출ms 표시. 운영 모드 `local`이면 브라우저 매칭(`facecheck-local.ts`)+IDB 저장, 하단 [동기화] |
+| `/check` | 공개 | QR 스캐너 (태블릿, 좌우 분할 레이아웃). 우측 하단 [얼굴로 체크인]은 `/facecheck`로 전체 이동(`<a href>`, 오프라인에서도 SW 캐시로 열림) |
+| `/facecheck` | 공개(키오스크 키; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인 (태블릿·노트북). WebGPU 우선→WebGL 폴백, `?backend=webgl\|webgpu\|auto` 고정, 상태바에 백엔드·검출ms 표시. 운영 모드 `local`이면 브라우저 매칭(`facecheck-local.ts`)+IDB 저장, 하단 [동기화]. 우측 하단 [QR로 체크인]↔[얼굴로 체크인]은 온라인·로컬 모두 페이지 내 전환(QR 모드에서 `posanmeal:` 카드 QR·로컬 모드는 `qr-checkin-local.ts`, 그 외 JWT는 `/api/checkin`) |
 | `/admin/login` | 공개 | 관리자 로그인 |
 | `/admin` | 관리자 | 탭: 사용자관리(Sheet연결 모달), 신청관리, 급식확인(교사/학년별), 당일현황, 설정(운영 모드·QR 세대·태블릿 동기화·식사 시간·안면인식 임계값) |
 
@@ -188,6 +188,7 @@ npm run build                 # 프로덕션 빌드
 | `checkin-sounds.ts` | 체크인 사운드 4종(`playSuccess`/`playDuplicate`/`playDenied`/`playError`) + `playLockClick` — `/check`·`/facecheck` 공용 |
 | `unmatched-tracker.ts` | 미등록 얼굴 거부 판정: 같은 얼굴(cos≥0.6)이 3초 안에 두 번 보이면 확정(주황 카드 "등록된 사용자가 아닙니다"+오류음), 이후 10초 억제 — 스쳐 가는 사람에게 경고하지 않기 위함 |
 | `checkin-result-style.ts` | 결과 분류(`resultCategory`)와 4색 매핑: 정상 초록 / 중복 파랑 / 미신청 빨강 / 기타 오류 주황 |
+| `qr-checkin-local.ts` | 인쇄 카드/로컬 QR(`posanmeal:{id}:{gen}:{type}[:{mealKind}]`) 판정 `runLocalQrCheckIn(input, repo)` — 세대→명단→유형→식사시간→학생 자격→중복→IDB 저장. `/check`·`/facecheck` QR 모드 공용 |
 
 ## 주의사항
 
@@ -196,3 +197,4 @@ npm run build                 # 프로덕션 빌드
 - shadcn/ui의 toast는 sonner로 대체됨 (`src/components/ui/sonner.tsx`)
 - 안면인식 임베딩 모델(insightface-mobilenet-emore 256차원, 코사인 매칭 기본 threshold 0.55/margin 0.05 — 타인 ≤0.3, 닮은 가족 0.48 관측)과 그 입력 단계(detector/mesh/rotation/equalization)는 등록·인식 일관성 때문에 백엔드와 무관하게 고정. 속도 튜닝은 백엔드(webgpu/webgl)·검출 간격(`face-pacing.ts`)에서만. 이전 FaceRes(1024차원)는 나이·성별 특징이 지배적이라 타인도 코사인 0.5~0.7로 매칭돼 폐기(2026-09-05). 모델을 바꾸면 `FACE_MODEL_VERSION`을 올린다 — 서버 후보 캐시·`sync/download`는 현재 버전 프로필만 쓰고, 구 버전 등록자는 개인정보 탭에 "재등록 필요"가 표시된다. `/facecheck` 상태바의 `유사도 1위/2위`를 보고 관리자 설정 탭 "안면인식 임계값" 카드에서 조정(키오스크 새로고침 후 적용)
 - 로컬 모드 안면인식: 등록자 임베딩이 키오스크 IndexedDB(`faceProfiles`)에 내려가며, 서버 운영 모드가 `online`으로 확인되면 자동 삭제(`kiosk-sync.ts`)
+- 키오스크 오프라인(`public/sw.js`, `CACHE_VERSION` posanmeal-v7): `/check`·`/facecheck` 내비게이션은 **network-first(5초 타임아웃) → 캐시 폴백 → 503 오프라인 안내**로 응답해 배포는 온라인 시 즉시 반영되고 오프라인에서도 열린다(예전 cache-first는 배포 후 옛 HTML이 고정돼 청크 404로 하이드레이션이 안 되고 "모드 확인 중"에 갇혔음). `/_next/static/`·`/models/`(안면인식 모델 ≈10MB)·아이콘은 cache-first(`response.ok`만 저장). 캐시 정책을 바꾸면 `CACHE_VERSION`을 올린다. 페이지 간 이동은 `<Link>` 대신 `<a href>` 전체 이동이어야 SW가 캐시로 응답한다

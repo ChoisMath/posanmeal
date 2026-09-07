@@ -19,55 +19,16 @@ import {
   clearSyncedCheckIns,
   clearAllData,
 } from "@/lib/local-db";
-import type { LocalUser } from "@/lib/local-db";
-import { RefreshCw, Wifi, WifiOff, Trash2 } from "lucide-react";
-import {
-  DEFAULT_MEAL_WINDOWS,
-  resolveMealKindLocal,
-  type MealKind,
-  type MealWindows,
-} from "@/lib/meal-kind-local";
+import { RefreshCw, ScanFace, Wifi, WifiOff, Trash2 } from "lucide-react";
+import { DEFAULT_MEAL_WINDOWS, type MealWindows } from "@/lib/meal-kind-local";
 import { MEAL_LABEL } from "@/lib/meal-plan";
-import { postCheckInWithRetry } from "@/lib/checkin-client";
+import { postCheckInWithRetry, type CheckInResult } from "@/lib/checkin-client";
 import { playDenied, playDuplicate, playError, playLockClick, playSuccess } from "@/lib/checkin-sounds";
 import { RESULT_BG_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
+import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
+import { fetchKioskSettings, loadSavedKioskSettings } from "@/lib/kiosk-sync";
 
-interface CheckInResult {
-  success: boolean;
-  duplicate?: boolean;
-  notApplicant?: boolean;
-  error?: string;
-  user?: {
-    id: number;
-    name: string;
-    role: string;
-    grade?: number;
-    classNum?: number;
-    number?: number;
-    photoUrl?: string;
-  };
-  type?: string;
-  checkedAt?: string;
-  mealKind?: MealKind;
-}
-
-
-function todayLocal(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function parseLocalQR(data: string): { userId: number; generation: string; type: string; mealKind?: MealKind } | null {
-  const parts = data.split(":");
-  if ((parts.length !== 4 && parts.length !== 5) || parts[0] !== "posanmeal") return null;
-  const userId = parseInt(parts[1], 10);
-  if (isNaN(userId)) return null;
-  const mealKind = parts[4] === "BREAKFAST" || parts[4] === "DINNER" ? parts[4] : undefined;
-  return { userId, generation: parts[2], type: parts[3], mealKind };
-}
+const localQrRepo = { getSetting, getUser, isEligible, getCheckIn, addCheckIn };
 
 export default function CheckPage() {
   const [result, setResult] = useState<CheckInResult | null>(null);
@@ -192,27 +153,13 @@ export default function CheckPage() {
     setSyncing(false);
   }, []);
 
-  // Fetch mode from server, update state + IndexedDB, return mode or null
+  // Fetch mode from server (fetchKioskSettings also persists it to IndexedDB), return mode or null
   const fetchMode = useCallback(async (): Promise<"online" | "local" | null> => {
-    if (!navigator.onLine) return null;
-    try {
-      const res = await fetch("/api/system/settings");
-      if (res.ok) {
-        const data = await res.json();
-        const serverMode: "online" | "local" = data.operationMode === "local" ? "local" : "online";
-        setOperationMode(serverMode);
-        await setSetting("operationMode", serverMode);
-        if (data.qrGeneration) {
-          await setSetting("qrGeneration", data.qrGeneration.toString());
-        }
-        if (data.mealWindows) {
-          setMealWindows(data.mealWindows);
-          await setSetting("mealWindows", JSON.stringify(data.mealWindows));
-        }
-        return serverMode;
-      }
-    } catch {}
-    return null;
+    const fetched = await fetchKioskSettings();
+    if (!fetched) return null;
+    setOperationMode(fetched.operationMode);
+    setMealWindows(fetched.mealWindows);
+    return fetched.operationMode;
   }, []);
 
   // Initialize mode and online status
@@ -236,13 +183,10 @@ export default function CheckPage() {
       } else {
         // Offline or server unreachable: use IndexedDB
         try {
-          const savedMode = await getSetting("operationMode");
-          if (savedMode === "local" || savedMode === "online") {
-            setOperationMode(savedMode);
-            prevModeRef.current = savedMode;
-          }
-          const savedWindows = await getSetting("mealWindows");
-          if (savedWindows) setMealWindows(JSON.parse(savedWindows));
+          const saved = await loadSavedKioskSettings();
+          setOperationMode(saved.operationMode);
+          prevModeRef.current = saved.operationMode;
+          setMealWindows(saved.mealWindows);
         } catch {}
       }
       setModeLoaded(true);
@@ -312,7 +256,7 @@ export default function CheckPage() {
     }, 2000);
   }, []);
 
-  // --- Local mode: IndexedDB-based check-in ---
+  // --- Local mode: IndexedDB-based check-in (판정 로직은 /facecheck QR 모드와 공용) ---
   const handleLocalScan = useCallback(async (data: string) => {
     if (processingRef.current) {
       playLockClick();
@@ -321,104 +265,14 @@ export default function CheckPage() {
     processingRef.current = true;
 
     try {
-      // 1. Parse QR
-      const parsed = parseLocalQR(data);
-      if (!parsed) {
-        setResult({ success: false, error: "잘못된 QR코드입니다." });
-        playError();
-        return;
-      }
-
-      // 2. Generation check
-      const storedGen = await getSetting("qrGeneration");
-      if (storedGen && parsed.generation !== storedGen) {
-        setResult({ success: false, error: "QR코드가 만료되었습니다. 학생 앱에서 새 QR을 확인하세요." });
-        playError();
-        return;
-      }
-
-      // 3. User lookup
-      const user = await getUser(parsed.userId);
-      if (!user) {
-        setResult({ success: false, error: "미등록 사용자입니다." });
-        playError();
-        return;
-      }
-
-      // 4. Role/type validation
-      const validTypes: Record<string, string[]> = {
-        STUDENT: ["STUDENT"],
-        TEACHER: ["WORK", "PERSONAL"],
-      };
-      if (!validTypes[user.role]?.includes(parsed.type)) {
-        setResult({ success: false, error: "잘못된 QR 유형입니다." });
-        playError();
-        return;
-      }
-
-      const today = todayLocal();
-      const currentMealKind = parsed.mealKind ?? resolveMealKindLocal(new Date(), mealWindows);
-      if (!currentMealKind) {
-        setResult({ success: false, error: "현재 식사 시간이 아닙니다." });
-        playError();
-        return;
-      }
-
-      // 5. Eligibility check (students only)
-      if (user.role === "STUDENT") {
-        const eligible = await isEligible(parsed.userId, today, currentMealKind);
-        if (!eligible) {
-          setResult({
-            success: false,
-            notApplicant: true,
-            user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
-            mealKind: currentMealKind,
-            error: "신청자가 아닙니다.",
-          });
-          playDenied();
-          return;
-        }
-      }
-
-      // 6. Duplicate check
-      const existing = await getCheckIn(parsed.userId, today, currentMealKind);
-      if (existing) {
-        const time = new Date(existing.checkedAt);
-        const hh = String(time.getHours()).padStart(2, "0");
-        const mm = String(time.getMinutes()).padStart(2, "0");
-        setResult({
-          success: false,
-          duplicate: true,
-          user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
-          mealKind: currentMealKind,
-          checkedAt: existing.checkedAt,
-          error: `이미 ${MEAL_LABEL[currentMealKind]} 체크인 하였습니다 (${hh}:${mm})`,
-        });
-        playDuplicate();
-        return;
-      }
-
-      // 7. Save check-in
-      const checkedAt = new Date().toISOString();
-      await addCheckIn({
-        userId: parsed.userId,
-        date: today,
-        mealKind: currentMealKind,
-        checkedAt,
-        type: parsed.type as "STUDENT" | "WORK" | "PERSONAL",
-        synced: 0,
-      });
-
-      setResult({
-        success: true,
-        user: { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number },
-        type: parsed.type,
-        mealKind: currentMealKind,
-        checkedAt,
-      });
-      playSuccess();
-
-      getUnsyncedCount().then(setUnsyncedCount);
+      const json = await runLocalQrCheckIn({ data, now: new Date(), mealWindows }, localQrRepo);
+      setResult(json);
+      const category = resultCategory(json);
+      if (category === "success") playSuccess();
+      else if (category === "duplicate") playDuplicate();
+      else if (category === "notApplicant") playDenied();
+      else playError();
+      if (json.success) getUnsyncedCount().then(setUnsyncedCount);
     } catch {
       setResult({ success: false, error: "저장 오류가 발생했습니다. 다시 스캔해 주세요." });
       playError();
@@ -434,8 +288,8 @@ export default function CheckPage() {
 
   const handleScan = useCallback(
     (data: string) => {
-      // Auto-detect: if QR starts with "posanmeal:", always use local handler
-      if (data.startsWith("posanmeal:")) {
+      // Auto-detect: printed-card/local QR always goes through the local handler
+      if (isLocalQR(data)) {
         handleLocalScan(data);
       } else if (operationMode === "local") {
         // Local mode but got a non-posanmeal QR (e.g. JWT) — reject
@@ -481,18 +335,18 @@ export default function CheckPage() {
   const bgClass = result ? RESULT_BG_CLASS[resultCategory(result)] : "bg-background";
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${bgClass}`}>
+    <div className={`min-h-dvh transition-colors duration-300 ${bgClass}`}>
       <BrandMark variant="overlay" href="/" label="홈으로" />
 
       {/* Status Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-1.5 bg-black/60 text-white text-xs">
         <div className="flex items-center gap-3">
           {isOnline ? (
-            <span className="flex items-center gap-1 text-emerald-400"><Wifi className="h-3 w-3" /> 온라인</span>
+            <span className="flex items-center gap-1 text-emerald-400 whitespace-nowrap"><Wifi className="h-3 w-3" /> 온라인</span>
           ) : (
-            <span className="flex items-center gap-1 text-red-400"><WifiOff className="h-3 w-3" /> 오프라인</span>
+            <span className="flex items-center gap-1 text-red-400 whitespace-nowrap"><WifiOff className="h-3 w-3" /> 오프라인</span>
           )}
-          <span className={operationMode === "local" ? "text-amber-400" : "text-white/70"}>
+          <span className={`whitespace-nowrap ${operationMode === "local" ? "text-amber-400" : "text-white/70"}`}>
             {operationMode === "local" ? "로컬 모드" : "온라인 모드"}
           </span>
         </div>
@@ -502,9 +356,9 @@ export default function CheckPage() {
       </div>
 
       {/* Main layout */}
-      <div className="min-h-screen flex flex-col md:flex-row pt-8">
+      <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-20">
         {/* Camera Area */}
-        <div className="bg-gray-900/95 p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
+        <div className="bg-gray-900/95 p-2 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto md:max-w-lg w-full">
             {modeLoaded ? (
               <QRScanner onScan={handleScan} />
@@ -520,7 +374,7 @@ export default function CheckPage() {
         </div>
 
         {/* Result Area */}
-        <div className="p-6 md:flex-1 md:flex md:items-center md:justify-center">
+        <div className="p-2 sm:p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto w-full">
             {result && (
               <div className="flex items-center gap-4 glass rounded-2xl p-5 card-elevated animate-in fade-in duration-200">
@@ -535,7 +389,7 @@ export default function CheckPage() {
                     {result.user?.name?.charAt(0) || "?"}
                   </div>
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 overflow-hidden">
                   {result.user?.role === "STUDENT" ? (
                     <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
                       {result.user.grade}-{result.user.classNum}{" "}
@@ -548,7 +402,7 @@ export default function CheckPage() {
                   ) : null}
 
                   {result.success && (
-                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium`}>
+                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium truncate`}>
                       {result.user?.role === "TEACHER" && result.checkedAt
                         ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
                         : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
@@ -556,19 +410,19 @@ export default function CheckPage() {
                   )}
 
                   {result.duplicate && (
-                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold`}>
+                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold truncate`}>
                       {result.error || "이미 체크인 되었습니다."}
                     </p>
                   )}
 
                   {result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold`}>
+                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold truncate`}>
                       {result.error || "신청자가 아닙니다."}
                     </p>
                   )}
 
                   {!result.success && !result.duplicate && !result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium`}>
+                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium truncate`}>
                       {result.error || "인정되지 않는 QR입니다."}
                     </p>
                   )}
@@ -583,19 +437,41 @@ export default function CheckPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
                   </svg>
                 </div>
-                <p className="text-lg font-semibold">QR 코드를 스캔해 주세요</p>
-                <p className="text-sm mt-1 opacity-70">카메라에 QR 코드를 보여주세요</p>
+                <p className="text-lg font-semibold whitespace-nowrap">QR 코드를 스캔해 주세요</p>
+                <p className="text-sm mt-1 opacity-70 whitespace-nowrap">카메라에 QR 코드를 보여주세요</p>
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Sync Footer */}
-      {(operationMode === "local" || unsyncedCount > 0 || syncRejectedCount > 0) && (
-        <div className="fixed bottom-0 left-0 right-0 bg-black/80 text-white text-xs px-4 py-2 flex items-center justify-between z-20">
-          <div className="flex items-center gap-4 flex-wrap">
-            <span className="text-white/60 whitespace-nowrap">
+      {/* 하단 고정 바: 로컬 동기화 + 얼굴 체크인 이동 (/facecheck 하단 바와 같은 위치·모양) */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 flex items-center justify-end gap-2 p-3 bg-gradient-to-t from-black/60 to-transparent text-white text-xs">
+        {(operationMode === "local" || unsyncedCount > 0 || syncRejectedCount > 0) && (
+          <div className="mr-auto flex items-center gap-2 min-w-0 overflow-x-auto">
+            <button
+              onClick={() => performSync()}
+              disabled={syncing || !isOnline}
+              className="min-h-11 flex items-center gap-1 px-4 rounded-full bg-blue-500/90 hover:bg-blue-500 disabled:opacity-40 transition-colors text-sm font-semibold whitespace-nowrap shrink-0"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "동기화 중..." : "동기화"}
+            </button>
+            <button
+              onClick={handleClearSynced}
+              className="min-h-11 flex items-center gap-1 px-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors whitespace-nowrap shrink-0"
+              title="동기화된 체크인 정리"
+            >
+              <Trash2 className="h-3 w-3" /> 정리
+            </button>
+            <button
+              onClick={handleClearAll}
+              className="min-h-11 flex items-center gap-1 px-3 rounded-full bg-red-500/30 hover:bg-red-500/50 transition-colors whitespace-nowrap shrink-0"
+              title="전체 초기화"
+            >
+              <Trash2 className="h-3 w-3" /> 초기화
+            </button>
+            <span className="text-white/80 whitespace-nowrap">
               마지막 동기화: {lastSyncAt ? new Date(lastSyncAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "없음"}
             </span>
             {syncRejectedCount > 0 && (
@@ -603,34 +479,21 @@ export default function CheckPage() {
                 서버 미반영 {syncRejectedCount}건 — 재시도 대기
               </span>
             )}
-            {syncMessage && <span className="text-amber-400">{syncMessage}</span>}
+            {syncMessage && (
+              <span className="text-amber-300 whitespace-nowrap" title={syncMessage}>
+                {syncMessage}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleClearSynced}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors"
-              title="동기화된 체크인 정리"
-            >
-              <Trash2 className="h-3 w-3" /> 정리
-            </button>
-            <button
-              onClick={handleClearAll}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-red-500/30 hover:bg-red-500/50 transition-colors"
-              title="전체 초기화"
-            >
-              <Trash2 className="h-3 w-3" /> 초기화
-            </button>
-            <button
-              onClick={() => performSync()}
-              disabled={syncing || !isOnline}
-              className="flex items-center gap-1 px-3 py-1 rounded bg-blue-500/80 hover:bg-blue-500 disabled:opacity-40 transition-colors"
-            >
-              <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-              {syncing ? "동기화 중..." : "동기화"}
-            </button>
-          </div>
-        </div>
-      )}
+        )}
+        {/* 오프라인에서도 열리도록 <Link> 대신 전체 이동 — SW가 /facecheck 내비게이션을 캐시로 응답한다 */}
+        <a
+          href="/facecheck"
+          className="min-h-11 px-5 rounded-full bg-white/90 dark:bg-black/70 text-gray-900 dark:text-white font-semibold text-sm shadow-lg flex items-center gap-2 whitespace-nowrap shrink-0"
+        >
+          <ScanFace className="h-4 w-4" /> 얼굴로 체크인
+        </a>
+      </div>
     </div>
   );
 }

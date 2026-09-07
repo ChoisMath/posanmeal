@@ -5,8 +5,9 @@ import type { Human } from "@vladmandic/human";
 import { QRScanner } from "@/components/QRScanner";
 import { BrandMark } from "@/components/BrandMark";
 import { MEAL_LABEL } from "@/lib/meal-plan";
-import type { MealKind } from "@/lib/meal-kind-local";
+import { DEFAULT_MEAL_WINDOWS, type MealKind } from "@/lib/meal-kind-local";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
+import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
 import { playDenied, playDuplicate, playError, playSuccess } from "@/lib/checkin-sounds";
 import { RESULT_BG_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
 import { UnmatchedTracker } from "@/lib/unmatched-tracker";
@@ -95,6 +96,7 @@ const BUSY_POLL_MS = 100;
 const PERF_UPDATE_MS = 500;
 
 const localRepo = { getUser, getCheckIn, isEligible, addCheckIn };
+const localQrRepo = { getSetting, getUser, isEligible, getCheckIn, addCheckIn };
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return "없음";
@@ -470,16 +472,11 @@ export default function FaceCheckPage() {
       if (videoRef.current) videoRef.current.srcObject = null;
     };
 
-    // 안면인식을 더 쓸 수 없을 때: 온라인은 이 페이지의 QR 모드로, 로컬은 /check(로컬 QR) 안내
+    // 안면인식을 더 쓸 수 없을 때는 온라인·로컬 모두 이 페이지의 QR 모드로 전환한다.
     const giveUpFace = (reason: string) => {
       stopCamera();
-      if (settingsRef.current?.operationMode === "local") {
-        updateStatus(`${reason} — QR은 /check에서 이용하세요`);
-        setPhase("blocked");
-      } else {
-        updateStatus(`${reason} — QR 모드로 전환합니다`);
-        setMode("qr");
-      }
+      updateStatus(`${reason} — QR 모드로 전환합니다`);
+      setMode("qr");
     };
 
     (async () => {
@@ -604,25 +601,35 @@ export default function FaceCheckPage() {
     };
   }, [mode, pauseScan, submitEmbedding, updateStatus]);
 
-  // --- QR 폴백 (온라인 JWT QR 전용 — 인쇄 카드 QR·로컬 모드는 /check 사용) ---
+  // --- QR 모드: 인쇄 카드 QR·로컬 모드는 기기 IndexedDB(/check와 같은 판정), 그 외는 서버 JWT 검증 ---
   const handleQrScan = useCallback(
     async (data: string) => {
       if (busyRef.current) return;
       pauseScan("processing");
       const gen = modeGenRef.current;
+      const s = settingsRef.current;
+      const useLocal = isLocalQR(data) || s?.operationMode === "local";
       try {
-        const json = await postCheckInWithRetry(data);
+        const json = useLocal
+          ? await runLocalQrCheckIn({ data, now: new Date(), mealWindows: s?.mealWindows ?? DEFAULT_MEAL_WINDOWS }, localQrRepo)
+          : await postCheckInWithRetry(data);
         if (modeGenRef.current !== gen) {
           resumeScan();
           return;
         }
         applyResult({ ...json, matched: true });
-      } catch {
+        if (useLocal && json.success) setUnsyncedCount(await getUnsyncedCount());
+      } catch (err) {
+        console.error("qr checkin error:", err);
         if (modeGenRef.current !== gen) {
           resumeScan();
           return;
         }
-        applyResult({ success: false, matched: true, error: "서버 연결 오류" });
+        applyResult({
+          success: false,
+          matched: true,
+          error: useLocal ? "저장 오류가 발생했습니다. 다시 스캔해 주세요." : "서버 연결 오류",
+        });
       }
     },
     [applyResult, pauseScan, resumeScan],
@@ -645,10 +652,7 @@ export default function FaceCheckPage() {
 
   const switchMode = () => {
     if (mode === "face") {
-      if (isLocal) {
-        window.location.href = "/check";
-        return;
-      }
+      updateStatus("카메라에 QR 코드를 보여주세요");
       setMode("qr");
     } else {
       setPhase("loading");
@@ -686,7 +690,7 @@ export default function FaceCheckPage() {
               <PhaseIndicator phase={phase} />
               얼굴 인식 · {PHASE_LABEL[phase]}
               {perf.backend && (
-                <span className="text-white/50">
+                <span className="hidden sm:inline text-white/50">
                   · {perf.backend}
                   {perf.detectMs !== null ? ` ${perf.detectMs}ms` : ""}
                 </span>
@@ -707,7 +711,7 @@ export default function FaceCheckPage() {
       {/* Main layout */}
       <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-20">
         {/* Camera Area */}
-        <div className="bg-gray-900/95 p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
+        <div className="bg-gray-900/95 p-2 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto md:max-w-lg w-full">
             {mode === "face" ? (
               <div className="relative w-full max-w-md mx-auto">
@@ -731,7 +735,7 @@ export default function FaceCheckPage() {
         </div>
 
         {/* Result Area */}
-        <div className="p-6 md:flex-1 md:flex md:items-center md:justify-center">
+        <div className="p-2 sm:p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto w-full">
             {result && (
               <div className="flex items-center gap-4 glass rounded-2xl p-5 card-elevated animate-in fade-in duration-200">
@@ -746,7 +750,7 @@ export default function FaceCheckPage() {
                     {result.user?.name?.charAt(0) || "?"}
                   </div>
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 overflow-hidden">
                   {result.user?.role === "STUDENT" ? (
                     <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
                       {result.user.grade}-{result.user.classNum} {result.user.number}번{" "}
@@ -759,7 +763,7 @@ export default function FaceCheckPage() {
                   ) : null}
 
                   {result.success && (
-                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium`}>
+                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium truncate`}>
                       {result.user?.role === "TEACHER" && result.checkedAt
                         ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
                         : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
@@ -767,19 +771,19 @@ export default function FaceCheckPage() {
                   )}
 
                   {result.duplicate && (
-                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold`}>
+                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold truncate`}>
                       {result.error || "이미 체크인 되었습니다."}
                     </p>
                   )}
 
                   {result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold`}>
+                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold truncate`}>
                       {result.error || "신청자가 아닙니다."}
                     </p>
                   )}
 
                   {!result.success && !result.duplicate && !result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium`}>
+                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium truncate`}>
                       {result.error || "인식되지 않았습니다."}
                     </p>
                   )}
@@ -816,8 +820,8 @@ export default function FaceCheckPage() {
 
       {/* 교사 근무/개인/취소 선택 오버레이 */}
       {pending && (
-        <div className="fixed inset-0 z-30 bg-black/70 flex items-center justify-center p-4">
-          <div className="glass card-elevated rounded-2xl p-6 w-full max-w-md text-center space-y-4">
+        <div className="fixed inset-0 z-30 bg-black/70 flex items-center justify-center p-2 sm:p-4">
+          <div className="glass card-elevated rounded-2xl p-4 sm:p-6 w-full max-w-md text-center space-y-4">
             {pending.user.photoUrl ? (
               <img
                 src={pending.user.photoUrl}
@@ -860,23 +864,23 @@ export default function FaceCheckPage() {
       )}
 
       {/* 하단 고정 바: 로컬 동기화 + 모드 전환 */}
-      <div
-        className={`fixed bottom-0 left-0 right-0 z-20 flex items-center gap-2 p-3 bg-gradient-to-t from-black/60 to-transparent ${
-          isLocal ? "justify-between" : "justify-center"
-        }`}
-      >
+      <div className="fixed bottom-0 left-0 right-0 z-20 flex items-center justify-end gap-2 p-3 bg-gradient-to-t from-black/60 to-transparent">
         {isLocal && (
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="mr-auto flex items-center gap-2 min-w-0 overflow-x-auto">
             <button
               onClick={runSync}
               disabled={syncing || !isOnline}
-              className="min-h-11 px-4 rounded-full bg-blue-500/90 text-white text-sm font-semibold shadow-lg flex items-center gap-1 whitespace-nowrap disabled:opacity-40"
+              className="min-h-11 px-4 rounded-full bg-blue-500/90 text-white text-sm font-semibold shadow-lg flex items-center gap-1 whitespace-nowrap shrink-0 disabled:opacity-40"
             >
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "동기화 중..." : "동기화"}
             </button>
             <span className="text-white/80 text-xs whitespace-nowrap">마지막 동기화: {formatSyncTime(lastSyncAt)}</span>
-            {syncMessage && <span className="text-amber-300 text-xs truncate min-w-0">{syncMessage}</span>}
+            {syncMessage && (
+              <span className="text-amber-300 text-xs whitespace-nowrap" title={syncMessage}>
+                {syncMessage}
+              </span>
+            )}
           </div>
         )}
         <button
@@ -885,7 +889,7 @@ export default function FaceCheckPage() {
         >
           {mode === "face" ? (
             <>
-              <QrCode className="h-4 w-4" /> {isLocal ? "QR로 체크인 (/check)" : "QR로 체크인"}
+              <QrCode className="h-4 w-4" /> QR로 체크인
             </>
           ) : (
             <>

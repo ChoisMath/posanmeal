@@ -2,7 +2,9 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-06 (관리자 설정 탭 안면인식 임계값 카드 `face-match-validation.ts`; 미등록 얼굴 거부 카드·오류음 `unmatched-tracker.ts`, `/api/facecheck`·로컬 결과 `errorCode: UNMATCHED`; 기본 threshold 0.45→0.55: 부자 간 0.48 오인식 관측; 2026-09-05 안면인식 식별 모델 교체 — FaceRes(1024)→insightface-mobilenet-emore(256), `FACE_MODEL_VERSION` 상승·현재 버전 프로필만 후보, `rankCandidates/decideMatch/scoreSummary`, `/api/facecheck`·로컬 결과에 `similarity/runnerUp`, `/facecheck` 상태바 유사도 표시, `FaceEnroll` 재등록 안내)
+> 마지막 업데이트: 2026-09-07 (키오스크 QR 판정 공용화 `qr-checkin-local.ts`(`isLocalQR/parseLocalQR/runLocalQrCheckIn`, `/check`에서 분리) — `/facecheck` QR 모드가 온라인·로컬 모두 페이지 안에서 동작(더 이상 `/check`로 이동하지 않음, 하단 오른쪽 [QR로 체크인]↔[얼굴로 체크인] 토글), `/check`는 `kiosk-sync.ts`로 모드 해석 + 하단 바 [얼굴로 체크인] `<a href="/facecheck">`; `fetchKioskSettings` 5s 타임아웃; `CheckInResult.mealKind`를 `MealKind`로 확장; `public/sw.js` 재작성 `posanmeal-v7` — `/check`·`/facecheck` 네트워크 우선(5s)→캐시→오프라인 HTML, `/models/` 캐시 우선)
+>
+> 이전 업데이트: 2026-09-06 (관리자 설정 탭 안면인식 임계값 카드 `face-match-validation.ts`; 미등록 얼굴 거부 카드·오류음 `unmatched-tracker.ts`, `/api/facecheck`·로컬 결과 `errorCode: UNMATCHED`; 기본 threshold 0.45→0.55: 부자 간 0.48 오인식 관측; 2026-09-05 안면인식 식별 모델 교체 — FaceRes(1024)→insightface-mobilenet-emore(256), `FACE_MODEL_VERSION` 상승·현재 버전 프로필만 후보, `rankCandidates/decideMatch/scoreSummary`, `/api/facecheck`·로컬 결과에 `similarity/runnerUp`, `/facecheck` 상태바 유사도 표시, `FaceEnroll` 재등록 안내)
 >
 > 이전 업데이트: 2026-09-05 (안면인식 2단계 — `/facecheck` WebGPU 우선 로딩·적응형 페이싱·성능 표시·결과 중 스캔 재개, 로컬 모드(브라우저 매칭 `facecheck-local.ts` + `kiosk-sync.ts` + IDB v5 `faceProfiles`, `GET /api/sync/download?faces=1`), `/check`·`/facecheck` 결과 4색(`checkin-result-style.ts`)·4사운드(`checkin-sounds.ts` 공용화). 설계 `docs/superpowers/specs/2026-09-05-facecheck-perf-local-design.md`)
 >
@@ -45,8 +47,8 @@ src/
 ├── app/
 │   ├── layout.tsx               # Root layout (SwUpdater, AuthProvider)
 │   ├── page.tsx                 # 랜딩 (Google 로그인)
-│   ├── check/page.tsx           # QR 스캐너 (공개, 태블릿용)
-│   ├── facecheck/page.tsx       # 안면인식 체크인 (공개, 태블릿용, 온라인 전용) + QR 폴백 모드
+│   ├── check/page.tsx           # QR 스캐너 (공개, 태블릿용) — 모드 해석 kiosk-sync.ts, 로컬 판정 qr-checkin-local.ts, 하단 바 [얼굴로 체크인]→/facecheck
+│   ├── facecheck/page.tsx       # 안면인식 체크인 (공개, 태블릿용, 온라인·로컬) + 페이지 내 QR 모드(온라인·로컬 공통, 하단 바 토글)
 │   ├── student/page.tsx         # 학생 4탭 (QR, 신청, 개인정보, 확인)
 │   ├── teacher/page.tsx         # 교사 탭 (담임: 6탭, 비담임: 4탭)
 │   ├── admin/
@@ -69,6 +71,7 @@ prisma/
 ├── schema.prisma
 └── migrations/
 public/
+├── sw.js                        # Service Worker (posanmeal-v7) — /check·/facecheck 네트워크 우선(5s)→캐시→오프라인 HTML, /_next/static·/models 캐시 우선 (§12)
 └── models/                      # @vladmandic/human 모델 self-host (blazeface/facemesh/antispoof/liveness + insightface-mobilenet-emore .json+.bin; faceres는 미사용 잔존. 출처·해시: public/models/README.md)
 ```
 
@@ -77,8 +80,8 @@ public/
 | 경로 | 파일 | 접근 | 설명 |
 |------|------|------|------|
 | `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
-| `/check` | `src/app/check/page.tsx` | 공개 | QR 스캐너, 식당 태블릿용 |
-| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인(태블릿·노트북) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"). 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과 카드(2초)가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·IDB 저장, 하단 [동기화](`performKioskSync`)·미전송 건수, QR 버튼은 `/check`로 이동 |
+| `/check` | `src/app/check/page.tsx` | 공개 | QR 스캐너, 식당 태블릿용 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). 하단 고정 바(`/facecheck`와 같은 위치·모양): 왼쪽(`mr-auto`) 동기화 그룹(마지막 동기화·미반영 건수·정리·초기화·동기화 — 로컬 모드이거나 미전송 건이 있을 때만), 오른쪽 [얼굴로 체크인] `<a href="/facecheck">`(SW가 오프라인에서도 응답하도록 `<Link>` 대신 의도적 전체 이동). 루트 `min-h-dvh`, 본문 `pb-20` |
+| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 체크인(태블릿·노트북) — 학생은 즉시 체크인, 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"). 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과 카드(2초)가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·IDB 저장, 하단 바 왼쪽(`mr-auto`)에 [동기화](`performKioskSync`)·미전송 건수. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽(`justify-end`) 버튼이 항상 [QR로 체크인]↔[얼굴로 체크인] 토글이며 `giveUpFace`(모델 로딩 실패·루프 반복 오류)도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
 | `/student` | `src/app/student/page.tsx` | 학생 | 4탭: QR, 신청, 개인정보, 확인 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭 |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
@@ -191,7 +194,7 @@ public/
 | `PhotoUpload` | `src/components/PhotoUpload.tsx` | 프로필 사진 업로드/삭제 |
 | `SignaturePad` | `src/components/SignaturePad.tsx` | 석식 신청 시 서명 입력 |
 | `MealMenu` | `src/components/MealMenu.tsx` | NEIS API 급식 메뉴 표시 |
-| `SwUpdater` | `src/components/SwUpdater.tsx` | Service Worker 등록·갱신 (SKIP_WAITING 트리거) |
+| `SwUpdater` | `src/components/SwUpdater.tsx` | Service Worker 등록·갱신 (SKIP_WAITING 트리거) — SW 본체는 `public/sw.js`(`posanmeal-v7`, 캐시 전략은 §12) |
 | `ResetOnQuery` | `src/components/ResetOnQuery.tsx` | ?reset=1 쿼리 시 브라우저 캐시·IDB·SW 전체 초기화 |
 | `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 |
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
@@ -233,7 +236,7 @@ public/
 | `src/lib/meal-kind-local.ts` | 클라이언트 헬퍼 (오프라인 모드 태블릿용 mealKind 결정) |
 | `src/lib/meal-windows-validation.ts` | 클라이언트 검증 + 서버 에러 한국어 매핑 (관리자 설정 UI 전용) |
 | `src/lib/local-checkins-export.ts` | 로컬 미동기 체크인 → .xlsx Blob (관리자 설정 모달 전용, exceljs dynamic import) |
-| `src/lib/checkin-client.ts` | `/check` 페이지의 `/api/checkin` POST 재시도 클라이언트 (네트워크/5xx 3회) |
+| `src/lib/checkin-client.ts` | `/check`·`/facecheck` QR 모드의 `/api/checkin` POST 재시도 클라이언트 `postCheckInWithRetry`(네트워크/5xx 3회) + 결과 타입 `CheckInResult`(`mealKind?: MealKind` = BREAKFAST/LUNCH/DINNER — `runLocalQrCheckIn` 반환 타입으로도 공용) |
 | `src/lib/meal-columns.ts` | `MealKind`/`MealColumn` 타입 + `buildMonthlyMealColumns(year, month, activeDates)` — activeDates 객체 인자(식사별 운영일)로 컬럼 삽입 (관리자 표·엑셀 헤더 생성용) |
 | `src/lib/meal-plan.ts` | 식사별 공고 공용 유틸: `MEAL_LABEL`/`METHOD_LABEL`/`monthsOf`/`expandWeekdays`/`calcMealFee`/`buildAppTitle`/`studentNumberOf` (서버·클라이언트 공용) |
 | `src/lib/meal-plan-server.ts` | 서버 전용: `saveApplication`(공고 생성/수정 트랜잭션)/`resyncRegistrations`(공고 수정 시 확정일 재계산)/`resolveRegistrationSelections`/`writeRegistration` |
@@ -255,7 +258,8 @@ public/
 | `src/lib/checkin-result-style.ts` | 결과 분류 `resultCategory(r)`(success/duplicate/notApplicant/error)와 배경·문구 색 매핑 `RESULT_BG_CLASS`/`RESULT_TEXT_CLASS`(초록/파랑/빨강/주황) — `/check`·`/facecheck` 공용 (테스트 `__tests__/checkin-result-style.test.ts`) |
 | `src/lib/face-pacing.ts` | 순수 함수: `resolveFaceBackends(override, hasWebGpu)`(webgpu→webgl 후보 순서), `nextDetectDelay(lastDetectMs)`(직전 검출/3, 30~200ms 클램프) (테스트 `__tests__/face-pacing.test.ts`) |
 | `src/lib/facecheck-local.ts` | 로컬 모드 판정 엔진 `runLocalFaceCheckIn(input, repo)` — `/api/facecheck`와 같은 순서(식사시간→`findBestMatch`→IDB 사용자→중복→교사 needType→학생 자격→`addCheckIn(synced:0)`)로 API와 같은 모양의 `FaceCheckResult` 반환(저장소 주입으로 테스트 가능). `toFaceCandidates`, `localDateKey`, `FaceCheckResult`/`FaceCheckUser` 타입 (테스트 `__tests__/facecheck-local.test.ts`) |
-| `src/lib/kiosk-sync.ts` | `/facecheck` 로컬 모드 동기화: `fetchKioskSettings()`(`/api/system/settings`→IDB settings; 서버 모드 online이면 `clearFaceProfiles`), `loadSavedKioskSettings()`, `performKioskSync()`(미전송 업로드 `/api/sync/upload` → `/api/sync/download?faces=1` → users/eligibleEntries/faceProfiles/settings/lastSyncAt 갱신; 401/403이면 관리자 로그인 안내) |
+| `src/lib/qr-checkin-local.ts` | 인쇄 카드·로컬 QR(`posanmeal:{id}:{gen}:{type}[:{mealKind}]`) 판정 엔진 — `isLocalQR(data)`(접두어만 검사), `parseLocalQR(data)`(4·5-part), `runLocalQrCheckIn({data,now,mealWindows}, repo)`: 형식→세대(IDB `qrGeneration`과 비교, 저장값 없으면 생략)→명단→역할·유형→식사 시간(QR에 실린 mealKind 우선)→학생 자격→중복→`addCheckIn(synced:0)` 순으로 `CheckInResult`(`checkin-client.ts`) 반환. 저장소 주입 `LocalQrRepo{getSetting,getUser,isEligible,getCheckIn,addCheckIn}`. 원래 `/check` 안에 있던 로직을 분리해 `/check`·`/facecheck` QR 모드 공용 (테스트 `__tests__/qr-checkin-local.test.ts`) |
+| `src/lib/kiosk-sync.ts` | `/check`·`/facecheck` 키오스크 설정·로컬 모드 동기화: `fetchKioskSettings()`(`/api/system/settings`를 `AbortSignal.timeout(5000)`으로 조회→IDB settings 저장; 오프라인·타임아웃·비2xx면 null — Wi-Fi는 잡히지만 서버에 닿지 않는 키오스크가 "모드 확인 중"에 갇히지 않도록; 서버 모드 online이면 `clearFaceProfiles`), `loadSavedKioskSettings()`, `performKioskSync()`(미전송 업로드 `/api/sync/upload` → `/api/sync/download?faces=1` → users/eligibleEntries/faceProfiles/settings/lastSyncAt 갱신; 401/403이면 관리자 로그인 안내) |
 
 ## §9 인증 / 미들웨어
 
@@ -305,9 +309,10 @@ public/
 - Tailwind v4: CSS 기반 설정 (`globals.css`), `tailwind.config.ts` 없음
 - `MealRegistration` upsert 패턴: 취소된 row가 있으면 UPDATE(재활성화), 없으면 INSERT. 200/201 분리 반환
 - `AdminLevel` 도입: User.adminLevel(NONE/SUBADMIN/ADMIN)로 서브관리자 지원. `canWriteAdmin` = ADMIN만, `canReadAdmin` = ADMIN+SUBADMIN
-- 오프라인(로컬) 모드: `SystemSetting.operationMode=local` 시 SW가 IndexedDB에 체크인 저장 → `/api/sync/upload` 로 업로드
+- 오프라인(로컬) 모드: `SystemSetting.operationMode=local` 시 키오스크 페이지(`/check`·`/facecheck`)가 IndexedDB에 체크인 저장 → `/api/sync/upload` 로 업로드
 - `CheckInSource` 필드: QR(스캔), ADMIN_MANUAL(관리자 토글), LOCAL_SYNC(오프라인 업로드) 구분
 - `SwUpdater` + `ResetOnQuery`: PWA 업데이트 시 SW SKIP_WAITING → controllerchange → 페이지 리로드; ?reset=1 시 브라우저 상태 전체 초기화
+- **Service Worker 캐시 전략 (`public/sw.js`, `CACHE_VERSION=posanmeal-v7`)**: install 시 `/check`·`/facecheck`만 프리캐시(인증 페이지는 익명 접속 시 리다이렉트라 오프라인 사본이 될 수 없음). 키오스크 페이지 내비게이션은 **네트워크 우선(5s 타임아웃) → 캐시 폴백 → 503 오프라인 HTML**(캐시 키는 쿼리 없는 pathname, `ignoreVary`) — 온라인이면 배포가 즉시 반영되고 오프라인에서도 페이지가 열림. v6까지의 `/check` 캐시 우선은 배포 후에도 옛 HTML을 영구 서빙해 hydration이 안 되고 "모드 확인 중" 스피너에 갇히는 원인이었음. `/_next/static/`·`/models/`(얼굴 모델 ~10MB, 오프라인 재로딩 후 안면인식에 필요)·아이콘/manifest/`meal.png`는 캐시 우선이며 `response.ok` 응답만 저장. 비키오스크 내비게이션과 `/api/`는 SW가 관여하지 않음. 메시지 `SKIP_WAITING`/`CLEAR_ALL` 지원
 - `NEIS` 급식 API: 오피스코드 D10, 학교코드 7240189, 1시간 캐시
 - 사진: `UPLOAD_DIR`(Railway Volume `/app/uploads`) 저장 → `/api/uploads/[filename]` 스트리밍 서빙, 파일 없으면 `/uploads/` 정적 폴백. 서명은 DB(`MealRegistration.signature` base64)에 보관
 - **CheckIn unique 마이그레이션 (`20260502120000`)**: `mealKind` NOT NULL + `@@unique([userId,date,mealKind])`. SQL은 반드시 `DROP INDEX IF EXISTS "CheckIn_userId_date_key"` + `CREATE UNIQUE INDEX ...` 형태로 작성 — `DROP CONSTRAINT` 는 init 마이그레이션이 `CREATE UNIQUE INDEX` 로 만든 unique를 인식하지 못해 E42704 로 실패함
@@ -321,7 +326,7 @@ public/
 - **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
 - **관리자 대리 신청 표시**: `MealRegistration.addedBy="ADMIN"` + `updatedAt` 이 관리자 대리 신청의 근거. 관리자가 학생 신청을 생성/수정하면 `addedBy`가 ADMIN으로 기록됨(의도된 동작). `AdminApplyDialog`는 신청기간(`applyStartAt/EndAt`) 검사를 우회한다
 - **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)
-- **출력 카드 QR**: 담임이 출력하는 학생 QR 카드는 `posanmeal:{id}:{qrGeneration}:STUDENT` 형식의 고정 로컬 QR(만료 없음·식사 무관)이며 `/check`의 `parseLocalQR`/`handleLocalScan`(기존 4-part 로컬 경로)로 체크인된다. `/api/checkin`·`/check`는 비변경. 관리자 QR 강제 갱신(`PUT /api/system/settings`로 `qrGeneration` 증가)으로 출력된 카드를 일괄 무효화할 수 있음
+- **출력 카드 QR**: 담임이 출력하는 학생 QR 카드는 `posanmeal:{id}:{qrGeneration}:STUDENT` 형식의 고정 로컬 QR(만료 없음·식사 무관)이며 `qr-checkin-local.ts`의 `parseLocalQR`/`runLocalQrCheckIn`(4-part 로컬 경로, `/check`·`/facecheck` QR 모드 공용)으로 체크인된다. `/api/checkin`은 비변경. 관리자 QR 강제 갱신(`PUT /api/system/settings`로 `qrGeneration` 증가)으로 출력된 카드를 일괄 무효화할 수 있음
 - **`next.config.ts` `serverExternalPackages: ["sharp", "@vladmandic/human"]` 제거 금지**: Turbopack의 Client-SSR 레이어가 이 설정 없이는 `@vladmandic/human`의 node export(`human.node.js` → `tfjs-node` 미설치로 빌드 실패)를 해석하려 시도함. 필수 설정
 - **Human 모델 캐싱**: `@vladmandic/human`은 모델을 IndexedDB에 파일명 키로 캐시함. `public/models/`의 모델 파일을 교체할 때는 경로를 버전화(예: `/models/v2/`)해야 클라이언트가 구 캐시를 계속 쓰는 문제를 피할 수 있음
 - **얼굴 원본 미저장**: 카메라로 촬영한 얼굴 이미지는 어디에도 저장·전송되지 않음 — 브라우저에서 Human으로 임베딩만 추출해 `FaceProfile.embeddings`(숫자 배열)만 서버에 저장/전송

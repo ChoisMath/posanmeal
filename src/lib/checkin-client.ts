@@ -1,3 +1,5 @@
+import type { MealKind } from "@/lib/meal-kind-local";
+
 export interface CheckInResult {
   success: boolean;
   duplicate?: boolean;
@@ -14,7 +16,7 @@ export interface CheckInResult {
   };
   type?: string;
   checkedAt?: string;
-  mealKind?: "BREAKFAST" | "DINNER";
+  mealKind?: MealKind;
 }
 
 interface PostCheckInOptions {

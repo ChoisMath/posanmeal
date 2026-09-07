@@ -23,6 +23,8 @@ export interface KioskSettings {
 }
 
 const DEFAULT_FACE_MATCH = { threshold: DEFAULT_FACE_MATCH_THRESHOLD, margin: DEFAULT_FACE_MATCH_MARGIN };
+// 와이파이가 잡혀 있지만 서버에 닿지 않는 키오스크가 "모드 확인 중"에 갇히지 않도록 상한을 둔다.
+const SETTINGS_FETCH_TIMEOUT_MS = 5000;
 
 function toMode(value: unknown): OperationMode {
   return value === "local" ? "local" : "online";
@@ -37,7 +39,7 @@ async function saveSettings(s: KioskSettings): Promise<void> {
 export async function fetchKioskSettings(): Promise<KioskSettings | null> {
   if (!navigator.onLine) return null;
   try {
-    const res = await fetch("/api/system/settings");
+    const res = await fetch("/api/system/settings", { signal: AbortSignal.timeout(SETTINGS_FETCH_TIMEOUT_MS) });
     if (!res.ok) return null;
     const data = await res.json();
     const settings: KioskSettings = {
