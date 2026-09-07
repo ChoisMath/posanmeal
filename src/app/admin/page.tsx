@@ -1274,15 +1274,15 @@ export default function AdminPage() {
           {!adminPerm.isSubadmin && (
           <TabsContent value="settings" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-2 space-y-6 flex-1 min-h-0 overflow-y-auto">
+              <CardContent className="pt-2 px-2 sm:px-4 space-y-6 flex-1 min-h-0 overflow-y-auto">
                 <div>
                   <h3 className="font-semibold mb-4 flex items-center gap-2">
                     <Settings className="h-4 w-4" /> 시스템 설정
                   </h3>
 
                   {/* Operation Mode */}
-                  <div className="flex items-center justify-between p-4 border rounded-xl">
-                    <div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-xl">
+                    <div className="min-w-0 break-keep">
                       <p className="font-medium">운영 모드</p>
                       <p className="text-sm text-muted-foreground">
                         {sysMode === "online"
@@ -1293,6 +1293,7 @@ export default function AdminPage() {
                     <Button
                       variant={sysMode === "local" ? "default" : "outline"}
                       size="sm"
+                      className="min-h-11 shrink-0 self-end sm:self-auto"
                       onClick={handleModeToggle}
                       disabled={sysLoading}
                     >
@@ -1301,8 +1302,8 @@ export default function AdminPage() {
                   </div>
 
                   {/* QR Generation */}
-                  <div className="flex items-center justify-between p-4 border rounded-xl mt-3">
-                    <div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-xl mt-3">
+                    <div className="min-w-0 break-keep">
                       <p className="font-medium">QR 세대</p>
                       <p className="text-sm text-muted-foreground">
                         현재: {sysGeneration}세대 — 새로고침 시 기존 QR 모두 무효화
@@ -1311,6 +1312,7 @@ export default function AdminPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="min-h-11 shrink-0 self-end sm:self-auto"
                       onClick={handleRefreshQR}
                       disabled={sysLoading}
                     >
@@ -1319,8 +1321,8 @@ export default function AdminPage() {
                   </div>
 
                   {/* Data Sync for Tablets */}
-                  <div className="flex items-center justify-between p-4 border rounded-xl mt-3">
-                    <div>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-xl mt-3">
+                    <div className="min-w-0 break-keep">
                       <p className="font-medium">태블릿 데이터 동기화</p>
                       <p className="text-sm text-muted-foreground">
                         사용자·석식기간·설정을 이 기기에 저장합니다
@@ -1329,12 +1331,12 @@ export default function AdminPage() {
                         <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">{syncStatus}</p>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 justify-end">
+                    <div className="flex flex-wrap items-center gap-2 justify-end self-end sm:self-auto shrink-0">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={handleOpenLocalData}
-                        className="relative"
+                        className="relative min-h-11"
                       >
                         <Database className="h-4 w-4 mr-1" />
                         로컬 데이터
@@ -1347,6 +1349,7 @@ export default function AdminPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className="min-h-11"
                         onClick={handleAdminSync}
                         disabled={isSyncing}
                       >
@@ -1357,14 +1360,14 @@ export default function AdminPage() {
                   </div>
 
                   {/* Meal Time Windows */}
-                  <div className="p-4 border rounded-xl mt-3">
+                  <div className="p-3 sm:p-4 border rounded-xl mt-3">
                     <p className="font-medium">식사 시간 윈도우</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground break-keep">
                       QR 체크인이 가능한 시간대입니다. 시간 외 스캔은 거부됩니다.
                     </p>
 
                     {windowsLoadFailed && (
-                      <p className="text-sm text-red-600 dark:text-red-400 mt-3">
+                      <p className="text-sm text-red-600 dark:text-red-400 mt-3 break-keep">
                         설정을 불러올 수 없습니다. 새로고침 해주세요.
                       </p>
                     )}
@@ -1392,7 +1395,7 @@ export default function AdminPage() {
                                     handleWindowsChange(meal, "start", e.target.value)
                                   }
                                   disabled={sysLoading}
-                                  className="w-32"
+                                  className="w-32 h-11"
                                 />
                               </div>
                               <div className="flex items-center gap-2">
@@ -1407,7 +1410,7 @@ export default function AdminPage() {
                                     handleWindowsChange(meal, "end", e.target.value)
                                   }
                                   disabled={sysLoading}
-                                  className="w-32"
+                                  className="w-32 h-11"
                                 />
                               </div>
                             </div>
@@ -1415,8 +1418,8 @@ export default function AdminPage() {
                         </div>
 
                         {windowsError && (
-                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-center gap-1">
-                            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-start gap-1 break-keep">
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
                             {windowsError}
                           </p>
                         )}
@@ -1424,6 +1427,7 @@ export default function AdminPage() {
                         <div className="flex justify-end mt-3">
                           <Button
                             size="sm"
+                            className="min-h-11"
                             onClick={handleSaveWindows}
                             disabled={
                               sysLoading ||
@@ -1440,16 +1444,16 @@ export default function AdminPage() {
                   </div>
 
                   {/* Face Match Threshold */}
-                  <div className="p-4 border rounded-xl mt-3">
+                  <div className="p-3 sm:p-4 border rounded-xl mt-3">
                     <p className="font-medium">안면인식 임계값</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground break-keep">
                       유사도가 임계값 이상이면 본인으로 판정합니다. 높일수록 타인 통과는 줄고 본인 거부는 늘어납니다.
                       2위와 차이는 1위 후보가 2위보다 앞서야 하는 최소 유사도 차이입니다.
                     </p>
 
                     {faceMatchForm && sysFaceMatch && (
                       <>
-                        <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                        <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
                           <div className="flex items-center gap-2">
                             <Label htmlFor="face-threshold" className="text-sm whitespace-nowrap">
                               임계값
@@ -1464,7 +1468,7 @@ export default function AdminPage() {
                               value={faceMatchForm.threshold}
                               onChange={(e) => handleFaceMatchChange("threshold", e.target.value)}
                               disabled={sysLoading}
-                              className="w-24"
+                              className="w-24 h-11"
                             />
                           </div>
                           <div className="flex items-center gap-2">
@@ -1481,7 +1485,7 @@ export default function AdminPage() {
                               value={faceMatchForm.margin}
                               onChange={(e) => handleFaceMatchChange("margin", e.target.value)}
                               disabled={sysLoading}
-                              className="w-24"
+                              className="w-24 h-11"
                             />
                           </div>
                           <span className="text-xs text-muted-foreground whitespace-nowrap">
@@ -1490,8 +1494,8 @@ export default function AdminPage() {
                         </div>
 
                         {faceMatchError && (
-                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-center gap-1">
-                            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-start gap-1 break-keep">
+                            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
                             {faceMatchError}
                           </p>
                         )}
@@ -1499,6 +1503,7 @@ export default function AdminPage() {
                         <div className="flex justify-end mt-3">
                           <Button
                             size="sm"
+                            className="min-h-11"
                             onClick={handleSaveFaceMatch}
                             disabled={
                               sysLoading ||
@@ -1514,7 +1519,7 @@ export default function AdminPage() {
                   </div>
 
                   {sysMode === "local" && (
-                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-3">
+                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-3 break-keep">
                       태블릿에서 동기화를 실행해야 설정이 반영됩니다.
                     </p>
                   )}
@@ -1527,7 +1532,8 @@ export default function AdminPage() {
       </div>
 
       <Dialog open={localDataDialogOpen} onOpenChange={handleCloseLocalData}>
-        <DialogContent className="max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto">
+        {/* 베이스의 sm:max-w-sm은 max-w-3xl로 덮이지 않아 태블릿에서 384px로 잘리므로 sm: 변형으로 지정 */}
+        <DialogContent className="max-w-[calc(100%-0.5rem)] sm:max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>로컬 저장 데이터 (서버 미전송)</DialogTitle>
           </DialogHeader>
@@ -1541,6 +1547,7 @@ export default function AdminPage() {
               <Button
                 variant="outline"
                 size="sm"
+                className="min-h-11"
                 onClick={handleExportLocalDataExcel}
                 disabled={exportingExcel || localRows.length === 0}
               >
@@ -1550,6 +1557,7 @@ export default function AdminPage() {
               <Button
                 variant="default"
                 size="sm"
+                className="min-h-11"
                 onClick={() => handleCloseLocalData(false)}
               >
                 닫기

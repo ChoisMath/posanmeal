@@ -90,7 +90,7 @@ export function QRScanner({ onScan }: QRScannerProps) {
       {hasMultipleCameras && (
         <button
           onClick={handleToggleCamera}
-          className="absolute bottom-3 right-3 bg-black/50 hover:bg-black/70 text-white rounded-full p-2.5 transition-colors z-10"
+          className="absolute bottom-3 right-3 bg-black/50 hover:bg-black/70 text-white rounded-full p-3 transition-colors z-10"
           aria-label="카메라 전환"
         >
           <SwitchCamera className="h-5 w-5" />
