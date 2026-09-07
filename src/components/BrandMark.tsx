@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 
 interface BrandMarkProps {
   /**
@@ -17,7 +18,7 @@ interface BrandMarkProps {
   label?: string;
   /** Override href if the logo should link somewhere other than "/". */
   href?: string;
-  /** Extra classes merged onto the outer <Link>. */
+  /** Extra classes merged (tailwind-merge) onto the outer <Link>, e.g. `top-10` to clear a fixed status bar. */
   className?: string;
 }
 
@@ -55,7 +56,7 @@ export function BrandMark({
     <Link
       href={href}
       aria-label={label ? `${label} — 홈` : "PosanMeal 홈"}
-      className={[wrapperByVariant[variant], className].filter(Boolean).join(" ")}
+      className={cn(wrapperByVariant[variant], className)}
     >
       <span className={badgeByVariant[variant]}>
         {/* 256x256 transparent PNG derived from meal.png (meal.ico renders

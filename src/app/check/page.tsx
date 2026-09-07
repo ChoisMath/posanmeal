@@ -336,7 +336,7 @@ export default function CheckPage() {
 
   return (
     <div className={`min-h-dvh transition-colors duration-300 ${bgClass}`}>
-      <BrandMark variant="overlay" href="/" label="홈으로" />
+      <BrandMark variant="overlay" href="/" label="홈으로" className="top-10" />
 
       {/* Status Bar */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-1.5 bg-black/60 text-white text-xs">
@@ -358,7 +358,7 @@ export default function CheckPage() {
       {/* Main layout */}
       <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-20">
         {/* Camera Area */}
-        <div className="bg-gray-900/95 p-2 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
+        <div className="bg-gray-900/95 p-2 md:p-3 lg:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto md:max-w-lg w-full">
             {modeLoaded ? (
               <QRScanner onScan={handleScan} />
@@ -374,7 +374,7 @@ export default function CheckPage() {
         </div>
 
         {/* Result Area */}
-        <div className="p-2 sm:p-4 md:p-6 md:flex-1 md:flex md:items-center md:justify-center">
+        <div className="p-2 md:p-3 lg:p-6 md:flex-1 md:flex md:items-center md:justify-center">
           <div className="max-w-md mx-auto w-full">
             {result && (
               <div className="flex items-center gap-4 glass rounded-2xl p-5 card-elevated animate-in fade-in duration-200">
