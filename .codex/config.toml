@@ -1,0 +1,22 @@
+model = "gpt-6-astra"
+
+[agents.project-map-updater]
+description = "프로젝트 구조 변경 후 .codex/PROJECT_MAP.md 갱신"
+config_file = "agents/project-map-updater.toml"
+
+[agents.project-memory-keeper]
+description = "중요 작업의 프로젝트 인계와 검증 상태 기록"
+config_file = "agents/project-memory-keeper.toml"
+
+[agents.responsive-ui-reviewer]
+description = "UI 변경 후 반응형 규칙 검토"
+config_file = "agents/responsive-ui-reviewer.toml"
+
+[agents.prisma-migration-guardian]
+description = "Prisma 변경 및 migrate 실행 전 안전 검수"
+config_file = "agents/prisma-migration-guardian.toml"
+
+[agents.railway-deploy-advisor]
+description = "Railway 배포/환경변수/Volume 검토"
+config_file = "agents/railway-deploy-advisor.toml"
+

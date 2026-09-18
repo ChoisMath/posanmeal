@@ -2,6 +2,7 @@ import "client-only";
 import type { Human, Config, FaceResult } from "@vladmandic/human";
 import type { FaceBackend } from "@/lib/face-pacing";
 import { FACE_MODEL_PATH } from "@/lib/face-constants";
+import type { EnrollmentFaceGeometry } from "@/lib/face-quality";
 
 export const FACE_QUALITY = { minScore: 0.7, minReal: 0.5, minLive: 0.5 };
 
@@ -109,15 +110,31 @@ export interface DetectedFace {
   real: number;
   live: number;
   score: number;
+  geometry: EnrollmentFaceGeometry | null;
 }
 
-function toDetected(face: FaceResult): DetectedFace | null {
+function toDetected(face: FaceResult, video: HTMLVideoElement): DetectedFace | null {
   if (!face.embedding || face.embedding.length === 0) return null;
+  const frame = { width: video.videoWidth, height: video.videoHeight };
+  const angle = face.rotation?.angle;
+  const geometry = frame.width > 0 && frame.height > 0 && angle
+    ? {
+        frame,
+        box: {
+          x: face.box[0],
+          y: face.box[1],
+          width: face.box[2],
+          height: face.box[3],
+        },
+        pose: { yaw: angle.yaw, pitch: angle.pitch, roll: angle.roll },
+      }
+    : null;
   return {
     embedding: Array.from(face.embedding),
     real: face.real ?? 0,
     live: face.live ?? 0,
     score: face.score ?? 0,
+    geometry,
   };
 }
 
@@ -130,7 +147,7 @@ export async function detectFaces(human: Human, video: HTMLVideoElement): Promis
   const result = await withTimeout(human.detect(video), DETECT_TIMEOUT_MS, "detect");
   if (result.face.length === 0) return { kind: "none" };
   if (result.face.length > 1) return { kind: "multiple" };
-  const face = toDetected(result.face[0]);
+  const face = toDetected(result.face[0], video);
   return face ? { kind: "face", face } : { kind: "none" };
 }
 

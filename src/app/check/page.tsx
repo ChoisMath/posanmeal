@@ -19,12 +19,12 @@ import {
   clearSyncedCheckIns,
   clearAllData,
 } from "@/lib/local-db";
-import { RefreshCw, ScanFace, Wifi, WifiOff, Trash2 } from "lucide-react";
+import { RefreshCw, QrCode, ScanFace, Wifi, WifiOff, Trash2 } from "lucide-react";
 import { DEFAULT_MEAL_WINDOWS, type MealWindows } from "@/lib/meal-kind-local";
 import { MEAL_LABEL } from "@/lib/meal-plan";
 import { postCheckInWithRetry, type CheckInResult } from "@/lib/checkin-client";
 import { playDenied, playDuplicate, playError, playLockClick, playSuccess } from "@/lib/checkin-sounds";
-import { RESULT_BG_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
+import { RESULT_BORDER_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
 import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
 import { fetchKioskSettings, loadSavedKioskSettings } from "@/lib/kiosk-sync";
 
@@ -332,15 +332,16 @@ export default function CheckPage() {
     return "";
   };
 
-  const bgClass = result ? RESULT_BG_CLASS[resultCategory(result)] : "bg-background";
+  const borderClass = result ? RESULT_BORDER_CLASS[resultCategory(result)] : "border-slate-700";
 
   return (
-    <div className={`min-h-dvh transition-colors duration-300 ${bgClass}`}>
-      <BrandMark variant="overlay" href="/" label="홈으로" className="top-10" />
+    <div className="flex h-dvh flex-col overflow-hidden bg-gray-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white">
 
       {/* Status Bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-1.5 bg-black/60 text-white text-xs">
-        <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-2 px-2 py-1 text-xs sm:px-3">
+        <BrandMark variant="overlay" href="/" label="홈으로" className="static min-h-11 shrink-0 whitespace-nowrap" />
+
+        <div className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto">
           {isOnline ? (
             <span className="flex items-center gap-1 text-emerald-400 whitespace-nowrap"><Wifi className="h-3 w-3" /> 온라인</span>
           ) : (
@@ -355,98 +356,66 @@ export default function CheckPage() {
         )}
       </div>
 
-      {/* Main layout */}
-      <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-20">
-        {/* Camera Area */}
-        <div className="bg-gray-900/95 p-2 md:p-3 lg:p-6 md:flex-1 md:flex md:items-center md:justify-center">
-          <div className="max-w-md mx-auto md:max-w-lg w-full">
-            {modeLoaded ? (
-              <QRScanner onScan={handleScan} />
-            ) : (
-              <div className="flex items-center justify-center h-[300px] text-white/60">
-                <div className="text-center">
-                  <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-2" />
-                  <p className="text-sm">모드 확인 중...</p>
-                </div>
-              </div>
-            )}
-          </div>
+      <main className="flex min-h-0 flex-1 flex-col gap-2 px-2 sm:px-3">
+        <section
+          aria-label="카메라 화면"
+          className={`relative min-h-0 flex-1 overflow-hidden rounded-2xl border-[10px] bg-black transition-colors duration-300 sm:border-[14px] ${borderClass}`}
+        >
+          {modeLoaded ? (
+            <QRScanner onScan={handleScan} />
+          ) : (
+            <div className="flex h-full items-center justify-center gap-2 text-white/70">
+              <RefreshCw className="h-6 w-6 animate-spin" />
+              <p className="whitespace-nowrap">모드 확인 중...</p>
+            </div>
+          )}
+        </section>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="flex h-16 shrink-0 items-center overflow-x-auto rounded-xl bg-white px-3 text-slate-900 sm:h-20 sm:px-4 dark:bg-slate-900 dark:text-white"
+        >
+          {result ? (
+            <div className="mx-auto flex w-max items-center gap-3 whitespace-nowrap">
+              {result.user?.photoUrl ? (
+                <img
+                  src={result.user.photoUrl}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded-lg object-cover sm:h-12 sm:w-12"
+                />
+              ) : result.user ? (
+                <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-lg font-bold text-slate-700 sm:h-12 sm:w-12">
+                  {result.user.name.charAt(0)}
+                </span>
+              ) : null}
+              {result.user && (
+                <span className="text-base font-bold sm:text-xl">
+                  {result.user.role === "STUDENT"
+                    ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ${result.user.name}`
+                    : `${result.user.name} 선생님`}
+                </span>
+              )}
+              {result.user && <span aria-hidden="true" className="text-slate-400">·</span>}
+              <span className={`text-sm font-semibold sm:text-lg ${RESULT_TEXT_CLASS[resultCategory(result)]}`}>
+                {result.success
+                  ? result.user?.role === "TEACHER" && result.checkedAt
+                    ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
+                    : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`
+                  : result.error || (result.duplicate ? "이미 체크인 되었습니다." : result.notApplicant ? "신청자가 아닙니다." : "인정되지 않는 QR입니다.")}
+              </span>
+            </div>
+          ) : (
+            <p className="mx-auto flex w-max items-center gap-2 whitespace-nowrap text-base font-medium sm:text-xl">
+              <QrCode className="h-5 w-5 shrink-0" />
+              QR 코드를 카메라에 보여주세요
+            </p>
+          )}
         </div>
+      </main>
 
-        {/* Result Area */}
-        <div className="p-2 md:p-3 lg:p-6 md:flex-1 md:flex md:items-center md:justify-center">
-          <div className="max-w-md mx-auto w-full">
-            {result && (
-              <div className="flex items-center gap-4 glass rounded-2xl p-5 card-elevated animate-in fade-in duration-200">
-                {result.user?.photoUrl ? (
-                  <img
-                    src={result.user.photoUrl}
-                    alt={result.user.name}
-                    className="w-18 h-18 md:w-20 md:h-20 rounded-2xl object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-18 h-18 md:w-20 md:h-20 rounded-2xl bg-white/20 flex items-center justify-center text-2xl font-bold text-white shrink-0">
-                    {result.user?.name?.charAt(0) || "?"}
-                  </div>
-                )}
-                <div className="min-w-0 overflow-hidden">
-                  {result.user?.role === "STUDENT" ? (
-                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
-                      {result.user.grade}-{result.user.classNum}{" "}
-                      {result.user.number}번 {result.user.name}
-                    </p>
-                  ) : result.user ? (
-                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white">
-                      {result.user.name} 선생님
-                    </p>
-                  ) : null}
-
-                  {result.success && (
-                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium truncate`}>
-                      {result.user?.role === "TEACHER" && result.checkedAt
-                        ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 석식 체크인 되었습니다.`
-                        : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
-                    </p>
-                  )}
-
-                  {result.duplicate && (
-                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold truncate`}>
-                      {result.error || "이미 체크인 되었습니다."}
-                    </p>
-                  )}
-
-                  {result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold truncate`}>
-                      {result.error || "신청자가 아닙니다."}
-                    </p>
-                  )}
-
-                  {!result.success && !result.duplicate && !result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium truncate`}>
-                      {result.error || "인정되지 않는 QR입니다."}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {!result && (
-              <div className="text-center text-muted-foreground">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-4">
-                  <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-                  </svg>
-                </div>
-                <p className="text-lg font-semibold whitespace-nowrap">QR 코드를 스캔해 주세요</p>
-                <p className="text-sm mt-1 opacity-70 whitespace-nowrap">카메라에 QR 코드를 보여주세요</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* 하단 고정 바: 로컬 동기화 + 얼굴 체크인 이동 (/facecheck 하단 바와 같은 위치·모양) */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 flex items-center justify-end gap-2 p-3 bg-gradient-to-t from-black/60 to-transparent text-white text-xs">
+      {/* 하단 바: 로컬 동기화 + 얼굴 체크인 이동 (/facecheck 하단 바와 같은 위치·모양) */}
+      <div className="flex shrink-0 items-center justify-end gap-2 p-2 text-white text-xs sm:px-3">
         {(operationMode === "local" || unsyncedCount > 0 || syncRejectedCount > 0) && (
           <div className="mr-auto flex items-center gap-2 min-w-0 overflow-x-auto">
             <button

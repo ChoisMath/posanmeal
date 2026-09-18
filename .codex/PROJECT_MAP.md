@@ -1,5 +1,7 @@
 # Project Map — PosanMeal
 
+> 2026-09-18 `.claude/PROJECT_MAP.md`에서 이관. §11 배포 설명은 과거 기록이며 9월 테스트 서비스 기록과 충돌한다. 현재 연결은 배포 작업 시 확인하고 `.codex/rules/railway-stack.md`를 따른다.
+
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
 > 마지막 업데이트: 2026-09-18 (키오스크 `/check`·`/facecheck`를 `100dvh` 단일 화면으로 재구성: 중앙 `object-contain` 영상, 하단 1행 결과, 성공/중복/미신청/오류의 두꺼운 4색 테두리. `QRScanner`는 실제 스캔 윤곽을 외부 overlay에 렌더하고 React StrictMode에서 이전 스트림이 새 스트림을 끄지 않도록 시작을 지연. `FaceEnroll`은 전면 카메라를 미러링하고, 등록 전 얼굴 크기·프레임 경계·라디안 yaw/pitch/roll 자세를 검사하는 `face-quality.ts`를 적용. 기존 모델·DB·매칭·사운드 흐름은 유지)
@@ -338,9 +340,13 @@ public/
 
 ## §13 Project-Map Maintenance
 
-이 파일은 `project-map-keeper` 에이전트가 관리한다.
+Codex 기준 맵은 `.codex/PROJECT_MAP.md`. `project-map-updater`가 git diff와 untracked 파일을 근거로 필요한 부분만 갱신한다. Claude 훅/pending 로그와 별도로 관리하며 원본 로그는 지우지 않는다.
 
-- **Targeted update**: `.claude/.project-map-pending.log` 의 경로를 읽어 구조적 변경만 surgical Edit 적용
-- **Full regeneration**: 전체 트리 Glob 후 이 파일 전체 덮어쓰기
-- 비구조적 변경(로직 버그 수정, 스타일 트윅 등)은 맵을 건드리지 않음
-- 갱신 후 `.claude/.project-map-pending.log` 를 비움(truncate)
+## §14 Codex 작업 환경
+
+- `AGENTS.md`: 자동 로드할 프로젝트 지침과 명령.
+- `.codex/config.toml`: GPT-6-Astra 기본 모델 및 5개 검수/문서 역할 등록.
+- `.codex/rules/`: 프로젝트 탐색, 코딩, UI, Prisma, Railway 규칙.
+- `.codex/agents/`: 위 역할의 프로젝트 전용 지침.
+- `.codex/memory/MEMORY.md`: 인계 색인; legacy 하위는 Claude 메모리의 역사적 사본.
+- `.codex/README.md`: 시작 명령과 이관 내역.

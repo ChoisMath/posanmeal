@@ -20,6 +20,13 @@ export const RESULT_BG_CLASS: Record<CheckInCategory, string> = {
   error: "bg-orange-500",
 };
 
+export const RESULT_BORDER_CLASS: Record<CheckInCategory, string> = {
+  success: "border-emerald-500",
+  duplicate: "border-blue-500",
+  notApplicant: "border-red-500",
+  error: "border-orange-500",
+};
+
 export const RESULT_TEXT_CLASS: Record<CheckInCategory, string> = {
   success: "text-emerald-700 dark:text-emerald-300",
   duplicate: "text-blue-700 dark:text-blue-300",

@@ -9,6 +9,7 @@ import { ScanFace, Trash2 } from "lucide-react";
 import { FACE_CONSENT_TEXT, FACE_CONSENT_VERSION } from "@/lib/face-consent";
 import { FACE_MIN_EMBEDDINGS, FACE_MODEL_VERSION } from "@/lib/face-constants";
 import { detectFaces, loadHuman, qualityIssue } from "@/lib/human-client";
+import { enrollmentQualityIssue } from "@/lib/face-quality";
 
 interface FaceStatus {
   registered: boolean;
@@ -29,6 +30,7 @@ export function FaceEnroll() {
   const [agreed, setAgreed] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
+  const [isFrontFacing, setIsFrontFacing] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   // 캡처 세션 번호. 취소/재시도 시 증가시켜 진행 중이던 루프가 다음 await 직후 스스로 종료되게 한다.
@@ -59,6 +61,7 @@ export function FaceEnroll() {
         return;
       }
       streamRef.current = stream;
+      setIsFrontFacing(stream.getVideoTracks()[0]?.getSettings().facingMode !== "environment");
       const video = videoRef.current;
       if (!video) throw new Error("video element not mounted");
       video.srcObject = stream;
@@ -69,7 +72,7 @@ export function FaceEnroll() {
       const human = await loadHuman();
       if (!isActive()) return;
 
-      setMessage("얼굴을 화면 중앙에 맞춰주세요");
+      setMessage("얼굴 전체가 화면 안에 들어오도록 정면을 바라봐 주세요");
       let lastCaptureAt = 0;
 
       while (isActive() && embeddings.length < FACE_MIN_EMBEDDINGS) {
@@ -92,6 +95,23 @@ export function FaceEnroll() {
         }
         if (issue === "lowScore") {
           setMessage("조금 더 밝은 곳에서 정면을 바라봐 주세요");
+          continue;
+        }
+        if (!outcome.face.geometry) {
+          setMessage("카메라 영상이 준비될 때까지 잠시 기다려 주세요");
+          continue;
+        }
+        const enrollmentIssue = enrollmentQualityIssue(outcome.face.geometry);
+        if (enrollmentIssue === "tooSmall") {
+          setMessage("얼굴을 화면에 조금 더 가깝게 보여 주세요");
+          continue;
+        }
+        if (enrollmentIssue === "clipped") {
+          setMessage("얼굴 전체가 화면 안에 들어오게 해 주세요");
+          continue;
+        }
+        if (enrollmentIssue === "turned") {
+          setMessage("고개를 정면으로 하고 위아래로 기울이지 말아 주세요");
           continue;
         }
         if (Date.now() - lastCaptureAt < CAPTURE_GAP_MS) continue;
@@ -163,10 +183,10 @@ export function FaceEnroll() {
                 등록됨 ({data.consentAt ? new Date(data.consentAt).toLocaleDateString("ko-KR") : ""})
               </span>
             )}
-            <Button size="sm" variant="outline" className="rounded-xl min-h-9 shrink-0" onClick={() => { setAgreed(false); setPhase("consent"); }}>
+            <Button size="sm" variant="outline" className="rounded-xl min-h-11 shrink-0" onClick={() => { setAgreed(false); setPhase("consent"); }}>
               재등록
             </Button>
-            <Button size="sm" variant="outline" className="rounded-xl min-h-9 text-red-600 shrink-0" onClick={handleDelete}>
+            <Button size="sm" variant="outline" className="rounded-xl min-h-11 min-w-11 text-red-600 shrink-0" aria-label="등록된 얼굴 삭제" onClick={handleDelete}>
               <Trash2 className="h-4 w-4" />
             </Button>
           </span>
@@ -203,8 +223,10 @@ export function FaceEnroll() {
           <DialogHeader>
             <DialogTitle>얼굴 등록 ({progress}/{FACE_MIN_EMBEDDINGS})</DialogTitle>
           </DialogHeader>
-          <video ref={videoRef} playsInline muted className="w-full rounded-xl bg-black aspect-[3/4] object-cover" />
-          <p className="text-sm text-center text-muted-foreground">{message}</p>
+          <video ref={videoRef} playsInline muted className={`h-[min(50dvh,28rem)] w-full rounded-xl bg-black object-contain ${isFrontFacing ? "-scale-x-100" : ""}`} />
+          <div className="min-w-0 overflow-x-auto text-sm text-muted-foreground">
+            <p className="w-max min-w-full whitespace-nowrap text-center">{message}</p>
+          </div>
           <Button variant="outline" onClick={handleCancelCapture} className="rounded-xl min-h-11 w-full">
             취소
           </Button>

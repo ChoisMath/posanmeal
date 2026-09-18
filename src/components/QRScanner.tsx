@@ -10,11 +10,13 @@ interface QRScannerProps {
 
 export function QRScanner({ onScan }: QRScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const scannerRef = useRef<QrScanner | null>(null);
   const onScanRef = useRef(onScan);
   const cooldownRef = useRef(false);
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  const [cameraError, setCameraError] = useState(false);
 
   useEffect(() => {
     onScanRef.current = onScan;
@@ -22,18 +24,19 @@ export function QRScanner({ onScan }: QRScannerProps) {
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    const overlay = overlayRef.current;
+    if (!video || !overlay) return;
+    let disposed = false;
+    let cooldownTimer: ReturnType<typeof setTimeout> | undefined;
 
     const scanner = new QrScanner(
       video,
       (result) => {
-        if (cooldownRef.current) return;
-        console.log("QR decoded:", result.data.substring(0, 30) + "...");
+        if (disposed || cooldownRef.current) return;
         cooldownRef.current = true;
         onScanRef.current(result.data);
 
-        // Cooldown 2 seconds
-        setTimeout(() => {
+        cooldownTimer = setTimeout(() => {
           cooldownRef.current = false;
         }, 2000);
       },
@@ -42,6 +45,7 @@ export function QRScanner({ onScan }: QRScannerProps) {
         maxScansPerSecond: 15,
         highlightScanRegion: false,
         highlightCodeOutline: true,
+        overlay,
         returnDetailedScanResult: true,
         calculateScanRegion: (v: HTMLVideoElement) => ({
           x: 0,
@@ -53,19 +57,28 @@ export function QRScanner({ onScan }: QRScannerProps) {
     );
 
     scannerRef.current = scanner;
-    scanner.start().then(() => {
-      console.log("QR Scanner started (nimiq/qr-scanner)");
-      QrScanner.listCameras(true).then((cameras) => {
+    // StrictMode의 첫 정리 이후 시작해야 이전 인스턴스의 지연 stop이 새 스트림을 끄지 않는다.
+    Promise.resolve().then(async () => {
+      if (disposed) return;
+      await scanner.start();
+      if (disposed) return;
+      const cameras = await QrScanner.listCameras(true);
+      if (!disposed) {
         setHasMultipleCameras(cameras.length > 1);
-      });
+      }
     }).catch((err) => {
+      if (disposed) return;
       console.error("QR Scanner start error:", err);
+      setCameraError(true);
     });
 
     return () => {
-      scanner.stop();
+      disposed = true;
+      clearTimeout(cooldownTimer);
+      cooldownRef.current = false;
       scanner.destroy();
       scannerRef.current = null;
+      overlay.replaceChildren();
     };
   }, []);
 
@@ -81,12 +94,20 @@ export function QRScanner({ onScan }: QRScannerProps) {
   }, [facingMode]);
 
   return (
-    <div className="relative w-full max-w-md mx-auto">
+    <div className="relative w-full h-full min-h-0 overflow-hidden">
       <video
         ref={videoRef}
-        className="w-full rounded-lg"
-        style={{ maxHeight: "400px", objectFit: "cover" }}
+        className="w-full h-full object-contain object-center"
       />
+      <div ref={overlayRef} aria-hidden="true" />
+      {cameraError && (
+        <p
+          role="alert"
+          className="absolute inset-0 grid place-items-center bg-black/60 px-6 text-center text-sm text-white"
+        >
+          카메라를 시작할 수 없습니다. 카메라 권한을 확인해 주세요.
+        </p>
+      )}
       {hasMultipleCameras && (
         <button
           onClick={handleToggleCamera}
@@ -96,19 +117,6 @@ export function QRScanner({ onScan }: QRScannerProps) {
           <SwitchCamera className="h-5 w-5" />
         </button>
       )}
-      {/* 시각적 가이드 프레임 — 실제 스캔 영역을 제한하지 않음 */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 flex items-center justify-center"
-      >
-        <div className="relative w-[70%] aspect-square">
-          {/* 네 모서리 강조 (L자 코너) */}
-          <div className="absolute left-0 top-0 h-6 w-6 border-l-2 border-t-2 border-white/80 rounded-tl" />
-          <div className="absolute right-0 top-0 h-6 w-6 border-r-2 border-t-2 border-white/80 rounded-tr" />
-          <div className="absolute left-0 bottom-0 h-6 w-6 border-l-2 border-b-2 border-white/80 rounded-bl" />
-          <div className="absolute right-0 bottom-0 h-6 w-6 border-r-2 border-b-2 border-white/80 rounded-br" />
-        </div>
-      </div>
     </div>
   );
 }

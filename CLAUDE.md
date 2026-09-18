@@ -45,7 +45,9 @@
 - nimiq/qr-scanner: Web Worker 기반, BarcodeDetector API 자동 fallback
 - 기본 전방카메라(user), 다중카메라 기기에서 전환 버튼 표시
 - 상태별 사운드 피드백 (AudioContext): 승인=딩동 차임, 중복=긴 삐, 오류=삐삐
-- 체크인 결과 2초 표시 후 자동 초기화, 태블릿에서 카메라/결과 좌우 분할
+- `/check`·`/facecheck`는 100dvh 중앙에 전체 촬영 영역을 `object-contain`으로 표시하고, 결과는 하단 한 줄에 2초간 표시. 카메라의 두꺼운 테두리가 정상=초록/중복=파랑/미신청=빨강/오류=주황으로 변함. 기존 사운드와 음량 유지
+- 전면 카메라는 거울 보기(QR은 라이브러리, 얼굴은 표시용 CSS). `QRScanner`의 전체 프레임 검사와 실제 코드 윤곽 overlay를 사용하며, StrictMode 첫 cleanup 이후 시작해 이전 scanner의 지연 stop과 충돌하지 않게 함
+- 얼굴 등록은 기존 모델·crop·특징값 저장 형식을 유지. `face-quality.ts`가 작은 얼굴, 프레임 경계에서 잘린 얼굴, 과도한 라디안 yaw/pitch/roll을 제외하며 화면 중앙 위치는 필수 조건이 아님. 기존 등록 정보와 호환
 
 ### 사진 저장
 - Railway Volume `/app/uploads`에 저장

@@ -9,7 +9,7 @@ import { DEFAULT_MEAL_WINDOWS, type MealKind } from "@/lib/meal-kind-local";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
 import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
 import { playDenied, playDuplicate, playError, playSuccess } from "@/lib/checkin-sounds";
-import { RESULT_BG_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
+import { RESULT_BORDER_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
 import { UnmatchedTracker } from "@/lib/unmatched-tracker";
 import { detectFaces, getActiveFaceBackend, loadHuman, qualityIssue } from "@/lib/human-client";
 import { nextDetectDelay, resolveFaceBackends } from "@/lib/face-pacing";
@@ -105,6 +105,7 @@ function formatSyncTime(iso: string | null): string {
 
 export default function FaceCheckPage() {
   const [mode, setMode] = useState<"face" | "qr">("face");
+  const [isFrontFacing, setIsFrontFacing] = useState(true);
   const [result, setResult] = useState<FaceCheckResult | null>(null);
   const [pending, setPending] = useState<PendingTeacher | null>(null);
   const [countdown, setCountdown] = useState(TEACHER_TIMEOUT_S);
@@ -502,6 +503,7 @@ export default function FaceCheckPage() {
         return;
       }
       streamRef.current = stream;
+      setIsFrontFacing(stream.getVideoTracks()[0]?.getSettings().facingMode !== "environment");
       const video = videoRef.current;
       if (video) {
         video.srcObject = stream;
@@ -660,16 +662,17 @@ export default function FaceCheckPage() {
     }
   };
 
-  const bgClass = result ? RESULT_BG_CLASS[resultCategory(result)] : "bg-background";
+  const borderClass = result ? RESULT_BORDER_CLASS[resultCategory(result)] : "border-slate-700";
 
   return (
-    <div className={`min-h-dvh transition-colors duration-300 ${bgClass}`}>
-      <BrandMark variant="overlay" href="/" label="홈으로" className="top-10" />
+    <div className="flex h-dvh flex-col overflow-hidden bg-gray-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white">
 
       {/* Status Bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between gap-2 px-4 py-1.5 bg-black/60 text-white text-xs">
-        <div className="flex items-center gap-2 overflow-hidden">
-          <span className="font-medium whitespace-nowrap">안면인식 체크인</span>
+      <div className="flex shrink-0 items-center gap-2 px-2 py-1 text-xs sm:px-3">
+        <BrandMark variant="overlay" href="/" label="홈으로" className="static min-h-11 shrink-0 whitespace-nowrap" />
+
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+          <span className="hidden font-medium whitespace-nowrap sm:inline">안면인식 체크인</span>
           {isOnline ? (
             <span className="flex items-center gap-1 text-emerald-400 whitespace-nowrap">
               <Wifi className="h-3 w-3" /> 온라인
@@ -708,115 +711,73 @@ export default function FaceCheckPage() {
         </span>
       </div>
 
-      {/* Main layout */}
-      <div className="min-h-dvh flex flex-col md:flex-row pt-8 pb-20">
-        {/* Camera Area */}
-        <div className="bg-gray-900/95 p-2 md:p-3 lg:p-6 md:flex-1 md:flex md:items-center md:justify-center">
-          <div className="max-w-md mx-auto md:max-w-lg w-full">
-            {mode === "face" ? (
-              <div className="relative w-full max-w-md mx-auto">
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  className="w-full rounded-lg bg-black aspect-[3/4] object-cover"
+      <main className="flex min-h-0 flex-1 flex-col gap-2 px-2 sm:px-3">
+        <section
+          aria-label="카메라 화면"
+          className={`relative min-h-0 flex-1 overflow-hidden rounded-2xl border-[10px] bg-black transition-colors duration-300 sm:border-[14px] ${borderClass}`}
+        >
+          {mode === "face" ? (
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              aria-label="얼굴 인식 카메라"
+              className={`h-full w-full object-contain object-center ${isFrontFacing ? "-scale-x-100" : ""}`}
+            />
+          ) : (
+            <QRScanner onScan={handleQrScan} />
+          )}
+        </section>
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="flex h-16 shrink-0 items-center overflow-x-auto rounded-xl bg-white px-3 text-slate-900 sm:h-20 sm:px-4 dark:bg-slate-900 dark:text-white"
+        >
+          {result ? (
+            <div className="mx-auto flex w-max items-center gap-3 whitespace-nowrap">
+              {result.user?.photoUrl ? (
+                <img
+                  src={result.user.photoUrl}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded-lg object-cover sm:h-12 sm:w-12"
                 />
-                <div className="absolute inset-x-2 bottom-3 flex justify-center">
-                  <span className="max-w-full flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 text-white text-xs sm:text-sm">
-                    <PhaseIndicator phase={phase} />
-                    <span className="truncate">{status}</span>
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <QRScanner onScan={handleQrScan} />
-            )}
-          </div>
-        </div>
-
-        {/* Result Area */}
-        <div className="p-2 md:p-3 lg:p-6 md:flex-1 md:flex md:items-center md:justify-center">
-          <div className="max-w-md mx-auto w-full">
-            {result && (
-              <div className="flex items-center gap-4 glass rounded-2xl p-5 card-elevated animate-in fade-in duration-200">
-                {result.user?.photoUrl ? (
-                  <img
-                    src={result.user.photoUrl}
-                    alt={result.user.name}
-                    className="w-18 h-18 md:w-20 md:h-20 rounded-2xl object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-18 h-18 md:w-20 md:h-20 rounded-2xl bg-white/20 flex items-center justify-center text-2xl font-bold text-white shrink-0">
-                    {result.user?.name?.charAt(0) || "?"}
-                  </div>
+              ) : result.user ? (
+                <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-lg font-bold text-slate-700 sm:h-12 sm:w-12">
+                  {result.user.name.charAt(0)}
+                </span>
+              ) : null}
+              {result.user && (
+                <span className="text-base font-bold sm:text-xl">
+                  {result.user.role === "STUDENT"
+                    ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ${result.user.name}`
+                    : `${result.user.name} 선생님`}
+                </span>
+              )}
+              {result.user && <span aria-hidden="true" className="text-slate-400">·</span>}
+              <span className={`text-sm font-semibold sm:text-lg ${RESULT_TEXT_CLASS[resultCategory(result)]}`}>
+                {result.success
+                  ? result.user?.role === "TEACHER" && result.checkedAt
+                    ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
+                    : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`
+                  : result.error || (result.duplicate ? "이미 체크인 되었습니다." : result.notApplicant ? "신청자가 아닙니다." : "인식되지 않았습니다.")}
+              </span>
+                {result.errorCode === "UNMATCHED" && (
+                  <span className="text-sm text-slate-600 dark:text-slate-300">등록했다면 정면을 봐 주세요</span>
                 )}
-                <div className="min-w-0 overflow-hidden">
-                  {result.user?.role === "STUDENT" ? (
-                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
-                      {result.user.grade}-{result.user.classNum} {result.user.number}번{" "}
-                      {result.user.name}
-                    </p>
-                  ) : result.user ? (
-                    <p className="font-bold text-fit-lg text-gray-900 dark:text-white whitespace-nowrap">
-                      {result.user.name} 선생님
-                    </p>
-                  ) : null}
 
-                  {result.success && (
-                    <p className={`${RESULT_TEXT_CLASS.success} text-fit-sm mt-1.5 font-medium truncate`}>
-                      {result.user?.role === "TEACHER" && result.checkedAt
-                        ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
-                        : `${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 하였습니다.`}
-                    </p>
-                  )}
-
-                  {result.duplicate && (
-                    <p className={`${RESULT_TEXT_CLASS.duplicate} text-fit-sm mt-1.5 font-semibold truncate`}>
-                      {result.error || "이미 체크인 되었습니다."}
-                    </p>
-                  )}
-
-                  {result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.notApplicant} text-fit-sm mt-1.5 font-semibold truncate`}>
-                      {result.error || "신청자가 아닙니다."}
-                    </p>
-                  )}
-
-                  {!result.success && !result.duplicate && !result.notApplicant && (
-                    <p className={`${RESULT_TEXT_CLASS.error} text-fit-sm mt-1.5 font-medium truncate`}>
-                      {result.error || "인식되지 않았습니다."}
-                    </p>
-                  )}
-
-                  {result.errorCode === "UNMATCHED" && (
-                    <p className="text-fit-sm mt-1 text-gray-600 dark:text-gray-300 truncate">
-                      등록했다면 정면을 봐 주세요
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {!result && (
-              <div className="text-center text-muted-foreground">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 mb-4">
-                  {mode !== "face" ? (
-                    <QrCode className="w-8 h-8 text-primary" />
-                  ) : phase === "scanning" || phase === "blocked" ? (
-                    <ScanFace className="w-8 h-8 text-primary" />
-                  ) : (
-                    <LoaderCircle className="w-8 h-8 text-primary animate-spin" />
-                  )}
-                </div>
-                <p className="text-lg font-semibold whitespace-nowrap">
-                  {mode === "face" ? PHASE_HEADLINE[phase] : "QR 코드를 스캔해 주세요"}
-                </p>
-                <p className="text-sm mt-1 opacity-70 truncate">{status}</p>
-              </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="mx-auto flex w-max items-center gap-2 whitespace-nowrap">
+              {mode === "face" ? <PhaseIndicator phase={phase} /> : <QrCode className="h-5 w-5 shrink-0" />}
+              <span className="text-base font-semibold sm:text-xl">
+                {mode === "face" ? PHASE_HEADLINE[phase] : "QR 코드를 스캔해 주세요"}
+              </span>
+              <span className="text-sm text-slate-600 dark:text-slate-300">{status}</span>
+            </div>
+          )}
         </div>
-      </div>
+      </main>
 
       {/* 교사 근무/개인/취소 선택 오버레이 */}
       {pending && (
@@ -863,8 +824,8 @@ export default function FaceCheckPage() {
         </div>
       )}
 
-      {/* 하단 고정 바: 로컬 동기화 + 모드 전환 */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 flex items-center justify-end gap-2 p-3 bg-gradient-to-t from-black/60 to-transparent">
+      {/* 하단 바: 로컬 동기화 + 모드 전환 */}
+      <div className="flex shrink-0 items-center justify-end gap-2 p-2 sm:px-3">
         {isLocal && (
           <div className="mr-auto flex items-center gap-2 min-w-0 overflow-x-auto">
             <button

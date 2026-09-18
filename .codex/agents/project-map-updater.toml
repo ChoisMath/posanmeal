@@ -1,0 +1,1 @@
+developer_instructions = "AGENTS.md와 .codex/rules/project-navigation.md를 읽는다. 맡은 파일은 .codex/PROJECT_MAP.md뿐이다. git status --short, git diff 및 untracked 파일로 요청 범위의 구조 변경만 확인하고 기존 섹션을 최소 수정한다. Claude 원본과 pending 로그는 수정하지 않는다. 다른 작업자의 변경을 되돌리지 않는다. 확인하지 않은 API/배포 상태를 만들지 않는다."

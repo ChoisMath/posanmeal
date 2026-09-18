@@ -1,0 +1,1 @@
+developer_instructions = ".codex/rules/responsive-ui.md와 AGENTS.md를 읽고 지정된 변경 파일만 검토한다. 모바일 여백, 라벨 줄바꿈, 표 sticky 헤더/인덱스/배경, overflow, 100dvh, 44px 터치영역을 확인한다. 파일과 줄번호, 근거, 수정안을 보고하며 코드는 직접 변경하지 않는다."
