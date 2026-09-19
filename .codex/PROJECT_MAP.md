@@ -4,7 +4,11 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-19 (`/check`·`/facecheck` 공용 `KioskViewport` 추가: 실제 가시 높이와 화면 복귀·회전 대응, 확대 중 재배치 방지. `globals.css`의 `.kiosk-*`로 결과·하단 조작부를 축소하고 로컬 동기화 상세를 별도 행에 배치)
+> 마지막 업데이트: 2026-09-19 (학년도별 명부 Release A — 커밋 `1d9a15e..81a4a81`. 마이그레이션 `20260919000001_add_academic_year_roster`로 User 4컬럼·`MealApplication.academicYear`·새 모델 13개 추가, `src/lib/academic-year/`(행위자 재검증 `requireActor`/`assertActor`, 계정 API, 호환 쓰기 `withCompatUserWrite`, 초기 이전), JWT `sessionVersion`·매 요청 DB 재검증, `/api/admin/users/[id]/{email,access,permissions}`, `/api/users/me` PUT 삭제, 사용자 DELETE 409, 전용 통합 테스트 DB(`tests/integration/`, `scripts/academic-year/`). 설계 `docs/superpowers/specs/2026-09-19-academic-year-roster-design.md`, 계획 `docs/superpowers/plans/2026-09-19-academic-year-roster.md`)
+>
+> 이전 업데이트: 2026-09-19 (독립 `demo-video/` 제작 환경과 학생 안내 `StudentGuide` 16장면·46문장. 인트로·얼굴 인식 베타 소개·도움말 아웃트로, 자막·챕터·썸네일·스틸 제작 경로는 §14 참조. 앱 `/help`는 미구현)
+>
+> 이전 업데이트: 2026-09-19 (`/check`·`/facecheck` 공용 `KioskViewport` 추가: 실제 가시 높이와 화면 복귀·회전 대응, 확대 중 재배치 방지. `globals.css`의 `.kiosk-*`로 결과·하단 조작부를 축소하고 로컬 동기화 상세를 별도 행에 배치)
 >
 > 이전 업데이트: 2026-09-19 (`/facecheck` 학생·교사 확인 후 저장: geometry 품질 검사·동일 대상 연속 3회 매칭, 10초 무응답 취소. 온라인·로컬 `confirmation` 대상/날짜/식사 재검증. Human 로드·추론 전역 직렬화와 모드 전환 시 세션·요청 정리. 모델·임계값·사운드 유지)
 >
@@ -45,6 +49,7 @@
 | @vladmandic/human | 3.3.6 (정확 고정) | 브라우저 얼굴 검출·임베딩·안티스푸핑/라이브니스 (facecheck) |
 | @vladmandic/human-models | 3.0.4 (devDep, 정확 고정) | Human 모델 파일 원본 — `public/models/`로 복사해 self-host |
 | vitest | ^4.1.5 | 단위 테스트 (devDep) |
+| embedded-postgres | ^16.14.0-beta.17 (devDep) | 학년도 명부 통합 테스트용 실제 PostgreSQL — Docker가 없을 때의 폴백(`scripts/academic-year/pg-daemon.ts`) |
 
 ## §3 폴더 구조
 
@@ -55,7 +60,7 @@ src/
 │   ├── page.tsx                 # 랜딩 (Google 로그인)
 │   ├── check/page.tsx           # QR 키오스크 (공개) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과, 모드 해석 kiosk-sync.ts·로컬 판정 qr-checkin-local.ts
 │   ├── facecheck/page.tsx       # 얼굴 키오스크 (공개, 온라인·로컬) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과 + 페이지 내 QR 모드
-│   ├── student/page.tsx         # 학생 4탭 (QR, 신청, 개인정보, 확인)
+│   ├── student/page.tsx         # 학생 기본 4탭 (식단, QR, 개인정보, 확인), 공고가 있으면 신청 추가
 │   ├── teacher/page.tsx         # 교사 탭 (담임: 6탭, 비담임: 4탭)
 │   ├── admin/
 │   │   ├── login/page.tsx       # 관리자 로그인
@@ -67,6 +72,9 @@ src/
 ├── components/                  # (§7 참조)
 │   └── meal/                    # 식사별 공고·신청 UI (meal-ui.ts 테마 포함)
 ├── lib/                         # (§8 참조)
+│   ├── academic-year/           # 학년도 명부 도메인: 행위자 재검증·계정 서비스·호환 쓰기·초기 이전 (§8)
+│   ├── public-paths.ts          # proxy 공개 경로 판정 isPublicPath (§9)
+│   └── session-recovery.ts      # 401 세션 만료 시 로그아웃·로그인 화면 이동 (§8)
 ├── providers/
 │   └── AuthProvider.tsx
 ├── hooks/                       # SWR 훅 등
@@ -76,6 +84,15 @@ src/
 prisma/
 ├── schema.prisma
 └── migrations/
+scripts/
+└── academic-year/               # 통합 테스트 DB wrapper·초기 이전/검증 CLI (§8)
+tests/
+└── integration/                 # 실제 PG 통합 테스트 academic-*.test.ts 6개 (npm run test:academic, §12)
+    ├── support/                 # db.ts, academic-fixture.ts, legacy-fixture.ts
+    ├── sql/identity.sql         # academic_meta 스키마의 테스트 DB 식별 marker
+    └── prisma.config.ts         # ACADEMIC_TEST_DATABASE_URL 전용 (dotenv 미사용)
+compose.academic-year-test.yml   # postgres:16-alpine, 127.0.0.1:55439, tmpfs
+vitest.integration.config.ts     # tests/integration/**/*.test.ts, fileParallelism 끔
 public/
 ├── sw.js                        # Service Worker (posanmeal-v7) — /check·/facecheck 네트워크 우선(5s)→캐시→오프라인 HTML, /_next/static·/models 캐시 우선 (§12)
 └── models/                      # @vladmandic/human 모델 self-host (blazeface/facemesh/antispoof/liveness + insightface-mobilenet-emore .json+.bin; faceres는 미사용 잔존. 출처·해시: public/models/README.md)
@@ -88,8 +105,8 @@ public/
 | `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 키오스크 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). `KioskViewport` 화면의 중앙에는 `object-contain` 영상과 실제 QR 윤곽 overlay를, 하단에는 한 줄 결과를 둔다. 결과는 성공/중복/미신청/오류별 두꺼운 초록/파랑/빨강/주황 테두리. 하단 왼쪽은 로컬 동기화 그룹, 오른쪽 [얼굴로 체크인]은 SW 오프라인 응답을 위한 의도적 전체 이동 `<a href="/facecheck">` |
 | `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 키오스크 — `KioskViewport` 내 중앙 `object-contain` 영상과 하단 1행 4색 결과를 쓰며, 얼굴 크기·경계·자세 검사와 동일 사용자·날짜·식사의 연속 3회 유효 매칭(`face-stability.ts`) 후 확인창을 연다. 학생은 학번·이름 확인/취소, 교사는 근무/개인/취소를 선택하며 모두 10초 무응답 시 취소한다. 확인 전 매칭은 읽기 전용이고 명시적 확인 후에만 저장한다. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·확인 후 IDB 저장. 얼굴↔QR 전환·언마운트 시 세션 세대, busy, 확인 대기, 재개/결과 타이머를 정리하고 요청·감지 호출을 AbortSignal로 취소한다. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽 버튼이 [QR로 체크인]↔[얼굴로 체크인]을 전환하며 `giveUpFace`도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`, 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
-| `/student` | `src/app/student/page.tsx` | 학생 | 4탭: QR, 신청, 개인정보, 확인 |
-| `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭 |
+| `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단 |
+| `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭. 개인정보 탭은 읽기 전용(이름·교과·담임·직책 본인 수정 폼 제거 — 명부 소유) |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
 | `/admin` | `src/app/admin/page.tsx` | 관리자 | 사용자관리·신청관리·체크인·당일현황 |
 | `/admin/applications/new` | `src/app/admin/applications/new/page.tsx` | 관리자 | 신청 공고 작성 (ApplicationForm) |
@@ -108,12 +125,12 @@ public/
 
 | API | 메서드 | 인증 | 설명 |
 |-----|--------|------|------|
-| `/api/qr/token` | GET | 학생/교사 | QR JWT 토큰 발급 (3분 만료) |
+| `/api/qr/token` | GET | 학생/교사 (`requireActor("SIGNED_IN")`+`selfUserId`) | QR JWT 토큰 발급 (3분 만료) |
 | `/api/checkin` | POST | 공개 | QR 체크인 (JWT 토큰 검증) |
-| `/api/checkins` | GET | 학생/교사 | 본인 월별 체크인 이력 |
-| `/api/users/me` | GET/PUT | 학생/교사 | 본인 프로필 조회/수정 — GET이 `todayMeals`(오늘 자격 식사 목록) 반환, 구 `registrations` 필드 제거됨 |
-| `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 — POST 저장 경로 `UPLOAD_DIR`(Railway Volume) 우선, photoUrl `/api/uploads/{id}.webp?t=...` 발급 |
-| `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 관리 — GET 등록 여부/모델버전/동의일시, POST `faceEnrollSchema`(embeddings 3~5개, consentVersion) upsert, DELETE 완전 삭제. 모두 `invalidateFaceCache()` 호출 |
+| `/api/checkins` | GET | 학생/교사 (`requireActor("SIGNED_IN")`+`selfUserId`) | 본인 월별 체크인 이력 |
+| `/api/users/me` | GET | 학생/교사 (`requireActor("SIGNED_IN")`+`selfUserId`) | 본인 프로필 조회 — `todayMeals`(오늘 자격 식사 목록) 반환, 구 `registrations` 필드 제거됨. **PUT은 삭제됨**(명부 필드는 관리자 소유, 교사 본인 수정 UI도 제거) |
+| `/api/users/me/photo` | POST/DELETE | 학생/교사 (`requireActor("SIGNED_IN")`+`selfUserId`) | 사진 업로드/삭제 — POST 저장 경로 `UPLOAD_DIR`(Railway Volume) 우선, photoUrl `/api/uploads/{id}.webp?t=...` 발급 |
+| `/api/users/me/face` | GET/POST/DELETE | 학생/교사 (`requireActor("SIGNED_IN")`+`selfUserId`) | 안면인식 등록 관리 — GET 등록 여부/모델버전/동의일시, POST `faceEnrollSchema`(embeddings 3~5개, consentVersion) upsert, DELETE 완전 삭제. 모두 `invalidateFaceCache()` 호출 |
 | `/api/facecheck` | POST | 공개(키오스크 키) | 얼굴 임베딩 1:N 매칭 체크인 — `faceCheckSchema`({embedding,type?,confirmation?}), `confirmation={userId,mealKind,date}`. `rankCandidates`+`decideMatch`로 사용자 특정 후 확인 전에는 `needConfirmation:true`와 대상·식사·KST 날짜를 반환(저장 없음). 확인 요청은 임베딩 재매칭 후 동일 대상/현재 날짜/식사를 검증하며 불일치 시 `CONFIRMATION_CHANGED`. 확인 후 중복·학생 자격 검증과 체크인. 매칭 결과에 `similarity/runnerUp`(1·2위 유사도). 헤더 `x-kiosk-key`가 `FACECHECK_KIOSK_KEY`와 일치해야 함(불일치 401, 미설정 503), IP당 분당 120회 레이트리밋(429). 교사는 type 없으면 `needConfirmation:true,needType:true` 응답(2단계 무상태), 학생은 `isStudentEligibleToday` 자격 검증, source="FACE" |
 | `/api/uploads/[filename]` | GET | 공개 | `runtime=nodejs`, `UPLOAD_DIR`에서 readFile 스트리밍 (없으면 `/uploads/` 정적 폴백) |
 | `/api/meals` | GET | 공개 | NEIS API 급식 메뉴 조회 (?date=YYYYMMDD) |
@@ -135,8 +152,11 @@ public/
 
 | API | 메서드 | 인증 | 설명 |
 |-----|--------|------|------|
-| `/api/admin/users` | CRUD | 관리자 | 사용자 관리 (GET은 `canReadAdmin` 가드, 응답에 `gender` 포함; POST/PUT은 학생 gender 필수 + role/gender 형식 검증) |
-| `/api/admin/import` | POST | 관리자 | Spreadsheet CSV 사용자 가져오기 (학생 시트 6번째 열 `gender` 필수 파싱·검증, create/update upsert에 반영) |
+| `/api/admin/users` | GET/POST/PUT/DELETE | 관리자 | 사용자 관리 — GET `requireActor("READ_ADMIN")`(응답에 `gender` 포함), POST/PUT/DELETE `requireActor("WRITE_ADMIN")`. POST/PUT은 학생 gender 필수 + role/gender 형식 검증 후 `withCompatUserWrite`로 저장해 ACTIVE 학년도 기록·명부에 미러(호환 쓰기). **DELETE는 항상 409**(`reason`: 삭제 불가, 이용 중단으로 처리) |
+| `/api/admin/users/[id]/email` | PUT | `requireActor("WRITE_ADMIN")` | 이메일 교체 `{requestId, expectedRowVersion, email}` → `changeEmail`(emailKey 갱신, sessionVersion 증가, 연결 RosterEntry 키 이동). 응답 `{receipt}` |
+| `/api/admin/users/[id]/access` | PUT | `requireActor("WRITE_ADMIN")` (재개는 MAIN만 — `changeAccess`가 트랜잭션 안에서 재판정) | 이용 상태 `{requestId, expectedRowVersion, state: ACTIVE\|INACTIVE, reason, confirmPrivileges?}`. 중단 시 sessionVersion 증가·FaceProfile 삭제·얼굴 캐시 무효화, `UserAccessEvent` 기록 |
+| `/api/admin/users/[id]/permissions` | PUT | `requireActor("MAIN")` | 관리자 등급 `{requestId, expectedRowVersion, level: NONE\|SUBADMIN\|ADMIN}` → `changePermissions`(sessionVersion 증가) |
+| `/api/admin/import` | POST | `requireActor("WRITE_ADMIN")` | Spreadsheet CSV 사용자 가져오기 (학생 시트 6번째 열 `gender` 필수 파싱·검증, create/update upsert에 반영). 쓰기는 `withCompatUserWrite` 안에서 수행해 학년도 기록에 미러(호환 쓰기) |
 | `/api/admin/checkins` | GET | 관리자 | 월별 체크인 + `mealColumns`(승인된 BREAKFAST 신청일에만 조 컬럼 삽입) (category: teacher/1/2/3) |
 | `/api/admin/checkins/toggle` | POST | 관리자 | 체크인 수동 토글 (body.mealKind 필수, 학생: on/off, 교사: cycle WORK→PERSONAL→삭제) |
 | `/api/admin/dashboard` | GET | 관리자 | 당일 현황 + `hasBreakfast`/`hasLunch`/`breakfastStudentCount`/`lunchStudentCount`/`dinnerStudentCount` |
@@ -154,17 +174,19 @@ public/
 | API | 메서드 | 인증 | 설명 |
 |-----|--------|------|------|
 | `/api/system/settings` | GET | 공개 | 운영 모드·QR 생성 번호·faceMatch 조회 (30s 캐시) |
-| `/api/system/settings` | PUT | 관리자 | 운영 모드 변경 / QR 강제 갱신 / `faceMatchThreshold`·`faceMatchMargin` 조정 |
+| `/api/system/settings` | PUT | `requireActor("WRITE_ADMIN")` | 운영 모드 변경 / QR 강제 갱신 / `faceMatchThreshold`·`faceMatchMargin` 조정 |
 | `/api/sync/download` | GET | 관리자 | 오프라인 모드용 초기 데이터 다운로드 (사용자 목록, 신청 자격자). `?faces=1`이면 `faceProfiles[{userId,embeddings}]`(현재 `FACE_MODEL_VERSION` 프로필만)·`faceMatch{threshold,margin}` 추가(로컬 모드 안면인식용, 없으면 기존 페이로드 불변; 테스트 `__tests__/sync-download.test.ts`) |
 | `/api/sync/upload` | POST | 관리자 | 오프라인에서 쌓인 체크인 서버 업로드 |
+
+> **가드 현황(학년도 명부 Release A)**: `requireActor`(최신 DB 재검증, §9)로 바뀐 라우트는 `/api/admin/users`(+`[id]/email·access·permissions`), `/api/admin/import`, `/api/system/settings` PUT, `/api/users/me`, `/api/users/me/photo`, `/api/users/me/face`, `/api/checkins`, `/api/qr/token`. 이 라우트들의 오류는 `routeResponse`/`errorResponse`가 `{error:{code,message}}`로 변환(401 UNAUTHENTICATED·STALE_SESSION / 403 FORBIDDEN·ACCOUNT_INACTIVE / 409 VERSION_CONFLICT·REQUEST_REUSED·IDENTITY_CONFLICT / 422 / 503 NOT_READY). 그 외 `/api/admin/applications/**`, `/api/admin/checkins/**`, `/api/applications/**`, `/api/teacher/**`, `/api/sync/**`는 아직 `auth()` 직접 호출(토큰 기반) 그대로다.
 
 ## §6 데이터 모델 (Prisma)
 
 | 모델 | 주요 필드 | 관계 | 비고 |
 |------|----------|------|------|
 | `Admin` | id, username, passwordHash | — | 현재 미사용, 환경변수 방식 대체 |
-| `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, gender?(MALE/FEMALE), adminLevel(NONE/SUBADMIN/ADMIN) | checkIns, registrations, faceProfile? | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) — gender는 학생 필수(API 검증) / 교사 옵셔널, 컬럼은 nullable |
-| `MealApplication` | id, title, description?, **applyStartAt/applyEndAt?(DateTime)**, **startYear/startMonth/monthCount?(Int)**, status(OPEN/CLOSED) | registrations, meals, mealDates | applyStartAt/EndAt(시각 단위 신청기간) + startYear/Month/monthCount(대상 월 범위) — 구 `type` 컬럼은 Wave 2b(20260611000004)에서 DROP 완료 |
+| `User` | id, email, name, role(STUDENT/TEACHER), grade?, classNum?, number?, subject?, homeroom?, position?, photoUrl?, gender?(MALE/FEMALE), adminLevel(NONE/SUBADMIN/ADMIN), **emailKey?(@unique, 정규화 이메일)**, **accessState(String, 기본 ACTIVE; CHECK ACTIVE/INACTIVE)**, **sessionVersion(Int 0)**, **profileVersion(Int 0)** | checkIns, registrations, faceProfile?, academicRecords, rosterEntries, rosterDecisions, accessEvents | @@index([role,grade,classNum,number]), @@index([role,adminLevel]) — gender는 학생 필수(API 검증) / 교사 옵셔널, 컬럼은 nullable |
+| `MealApplication` | id, title, description?, **applyStartAt/applyEndAt?(DateTime)**, **startYear/startMonth/monthCount?(Int)**, status(OPEN/CLOSED), **academicYear?(Int → AcademicYear.year, onDelete Restrict)** | registrations, meals, mealDates, year | applyStartAt/EndAt(시각 단위 신청기간) + startYear/Month/monthCount(대상 월 범위) — 구 `type` 컬럼은 Wave 2b(20260611000004)에서 DROP 완료 |
 | `MealApplicationMeal` | applicationId, mealKind, price, exemptionSelectable, method(NONE/YN/WEEKDAY/DATE) | application | @@id([applicationId,mealKind]) — 공고가 제공하는 식사별 가격·신청 방식 |
 | `MealApplicationMealDate` | applicationId, mealKind, grade, date(@db.Date) | application | @@id([applicationId,mealKind,grade,date]) — 학년별 식사 개설일 |
 | `MealRegistration` | id, applicationId, userId, signature(Text), status(APPROVED/CANCELLED), cancelledAt?, cancelledBy?, addedBy? | application, user, meals, mealDates | @@unique([applicationId,userId]) — 취소 후 재신청 시 row 재활성화 |
@@ -173,6 +195,21 @@ public/
 | `CheckIn` | id, userId, date(@db.Date), **mealKind(NOT NULL)**, checkedAt, type(STUDENT/WORK/PERSONAL), source?(QR/ADMIN_MANUAL/LOCAL_SYNC/FACE) | user | @@unique([userId,date,mealKind]), @@index([date,mealKind]) |
 | `SystemSetting` | key(PK), value, updatedAt | — | operationMode, qrGeneration, breakfast/lunch/dinner_window_start/end, face_match_threshold/margin |
 | `FaceProfile` | id, userId(@unique), embeddings(Json, 임베딩 배열), modelVersion, consentAt, consentVersion, createdAt, updatedAt | user(onDelete Cascade) | 안면인식 등록 프로필. 마이그레이션 `20260902000001_add_face_profile`(수기 SQL) |
+| `AcademicYear` | year(Int PK), state(DRAFT/ACTIVE/ARCHIVED), version, reviewedVersion?, reviewedSourceVersion?, activatedAt? | records, entries, files, imports, decisions, applications, snapshots | ACTIVE는 부분 유니크 인덱스 `AcademicYear_one_active`로 1개만(SQL 전용) |
+| `RosterControl` | id(PK, CHECK id=1 싱글턴), mode(PREPARING/READY), version | — | 전역 잠금·낙관적 버전 행 (§12 잠금 순서) |
+| `UserAcademicRecord` | id, year, userId, role, name, grade?, classNum?, number?, gender?, subject?, homeroom?, position?, memberState(ENROLLED/EMPLOYED/GRADUATED/TRANSFERRED/RETIRED), needsReview, version | academicYear, user | @@unique([year,userId]); role↔memberState CHECK와 학생 좌석 부분 유니크 `AcademicRecord_student_seat`(year,grade,classNum,number WHERE STUDENT·ENROLLED·needsReview=false)는 SQL 전용 |
+| `RosterEntry` | id(cuid), year, userId?, emailKey, draftEmail?, draftProfile?(Json), included, baseUserVersion?, version | academicYear, user?(onDelete Restrict) | @@unique([year,emailKey]), @@unique([year,userId]) — 학년도 명부 항목/초안 |
+| `RosterFile` | id(cuid), year, version, schemaVersion, manifest(Json), createdAt | academicYear | @@index([createdAt]) — 내보낸 명부 파일 기록 |
+| `RosterImport` | id(cuid), year, scope(PARTIAL/FULL), controlVersion, yearVersion, payload?/preview?/summary?(Json), state(PREVIEW/COMMITTED/CANCELLED/EXPIRED) | academicYear | Excel 가져오기 미리보기·확정 |
+| `RosterDecision` | year, userId, decision(GRADUATED/TRANSFERRED/RETIRED/RESTORE), sourceVersion | academicYear, user | @@id([year,userId]) |
+| `RosterMutation` | requestId(PK), actorUserId?(MAIN은 null, FK 없음), kind, payloadHash, result(Json, 건수·ID만), version, changed | — | 멱등 요청 영수증·감사 기록 |
+| `UserAccessEvent` | id, userId, state(ACTIVE/INACTIVE), reason, effectiveAt, requestId? | user | @@index([userId,effectiveAt]) — 이용 중단/재개 이력 |
+| `EligibilityEvent` | id, scope(APPLICATION/REGISTRATION/ACCOUNT/ROLLOVER), applicationId?, userId?(둘 다 논리 참조, FK 없음), occurredAt, requestId? | — | @@index([userId,occurredAt]), @@index([applicationId,occurredAt]) |
+| `AcademicBackfill` | key(PK), state(PENDING/COPIED/VERIFIED), sourceManifest(Json), completedAt?, verifiedAt? | — | 초기 이전 진행 상태 (key=`"2026"`) |
+| `KioskSnapshot` | id(cuid), version, activeYear, lastEligibilityEventId, payload(Json), issuedAt, freshUntil, coversUntil(String) | academicYear(activeYear) | @@index([issuedAt]) |
+| `LocalCheckInReview` | id(cuid), clientKey(@unique), payloadHash, payload?, snapshotId?(논리 참조), reason, state(PENDING/ACCEPTED/DUPLICATE/REJECTED, 기본 PENDING), decision?, resolvedAt? | — | 로컬 체크인 검토 대기열 |
+
+> 학년도 명부 모델의 문자열 상태 컬럼 허용 값은 Prisma enum이 아니라 **마이그레이션 SQL의 CHECK가 단일 근거**다. 마이그레이션 `20260919000001_add_academic_year_roster`는 수기 SQL: 첫머리 `SET lock_timeout = '5s'`, 부분 유니크 인덱스 2개(`AcademicYear_one_active`, `AcademicRecord_student_seat`)와 모든 CHECK는 schema.prisma에 없고 SQL에만 있음, 끝에서 `RosterControl(1,'PREPARING',0)`·`AcademicYear(2026,'ACTIVE')` 시드. Release A에서 실제로 쓰는 모델은 AcademicYear·RosterControl·UserAcademicRecord·RosterEntry·RosterMutation·UserAccessEvent·AcademicBackfill이며, 나머지는 후속 릴리스용 테이블만 생성됨.
 
 ### Enums
 - `Role`: STUDENT, TEACHER
@@ -233,12 +270,14 @@ public/
 | `src/lib/qr-token.ts` | QR JWT 발급·검증 (QR_JWT_SECRET, 3분 만료) |
 | `src/lib/timezone.ts` | KST 날짜/시간 유틸 (nowKST, todayKST, formatKST 등) |
 | `src/lib/checkin-source.ts` | CheckInSource enum → 한국어 라벨 변환 |
-| `src/lib/permissions.ts` | canWriteAdmin / canReadAdmin (AdminLevel 기반) |
+| `src/lib/permissions.ts` | canWriteAdmin / canReadAdmin (AdminLevel 기반) — 토큰 값만 보는 UI 표시·화면 이동용. 서버 쓰기 허용 근거로 쓰지 말 것(`academic-year/access.ts`의 `assertActor` 담당) |
 | `src/lib/settings-cache.ts` | SystemSetting 30s 인메모리 캐시 (operationMode/qrGeneration/mealWindows + `faceMatch{threshold,margin}` — SystemSetting 키 face_match_threshold/margin, 기본값은 face-constants.ts) |
 | `src/lib/neis-meal.ts` | NEIS 급식 API 호출 + 1시간 캐시 |
 | `src/lib/local-db.ts` | IndexedDB 스키마 v5 (오프라인 모드용: settings, users, eligibleEntries, checkins, faceProfiles). v5에서 `faceProfiles`(keyPath userId, `{userId, embeddings:number[][]}`) 추가 — `replaceAllFaceProfiles/getAllFaceProfiles/clearFaceProfiles`, `clearAllData`에 포함 |
 | `src/lib/clearClientState.ts` | SW 해제 + Cache API + IndexedDB 전체 삭제 후 signOut |
-| `src/lib/fetcher.ts` | SWR 전용 fetch 래퍼 |
+| `src/lib/fetcher.ts` | SWR 전용 fetch 래퍼 — `fetchWithSessionRecovery` 경유, 실패 시 `status`/`info`를 단 Error throw (테스트 `__tests__/fetcher.test.ts`) |
+| `src/lib/session-recovery.ts` | 세션 만료 복구: `sessionRecoveryAction(status, body, pathname)` → `NONE`/`SIGN_OUT_HOME`/`SIGN_OUT_ADMIN`(보호 API의 401 코드 기준, 공개 키오스크 경로는 제외), `recoverSession`(첫 판정만 화면 이동), `fetchWithSessionRecovery(input, init?)` — 로그인 화면의 fetch 공용 (테스트 `__tests__/session-recovery.test.ts`) |
+| `src/lib/public-paths.ts` | `isPublicPath(pathname)` — proxy 공개 경로 판정. 접두사는 경로 경계(`=== prefix` 또는 `prefix + "/"`)에서만 인정 (§9) |
 | `src/lib/utils.ts` | 공통 유틸 (clsx/tailwind-merge 등) |
 | `src/lib/meal-kind.ts` | 서버 헬퍼: 3윈도우(조/중/석) `resolveMealKind` + `isStudentEligibleToday`(MealRegistrationMealDate 단일 조회로 자격 판정) |
 | `src/lib/meal-kind-local.ts` | 클라이언트 헬퍼 (오프라인 모드 태블릿용 mealKind 결정) |
@@ -271,14 +310,50 @@ public/
 | `src/lib/qr-checkin-local.ts` | 인쇄 카드·로컬 QR(`posanmeal:{id}:{gen}:{type}[:{mealKind}]`) 판정 엔진 — `isLocalQR(data)`(접두어만 검사), `parseLocalQR(data)`(4·5-part), `runLocalQrCheckIn({data,now,mealWindows}, repo)`: 형식→세대(IDB `qrGeneration`과 비교, 저장값 없으면 생략)→명단→역할·유형→식사 시간(QR에 실린 mealKind 우선)→학생 자격→중복→`addCheckIn(synced:0)` 순으로 `CheckInResult`(`checkin-client.ts`) 반환. 저장소 주입 `LocalQrRepo{getSetting,getUser,isEligible,getCheckIn,addCheckIn}`. 원래 `/check` 안에 있던 로직을 분리해 `/check`·`/facecheck` QR 모드 공용 (테스트 `__tests__/qr-checkin-local.test.ts`) |
 | `src/lib/kiosk-sync.ts` | `/check`·`/facecheck` 키오스크 설정·로컬 모드 동기화: `fetchKioskSettings()`(`/api/system/settings`를 `AbortSignal.timeout(5000)`으로 조회→IDB settings 저장; 오프라인·타임아웃·비2xx면 null — Wi-Fi는 잡히지만 서버에 닿지 않는 키오스크가 "모드 확인 중"에 갇히지 않도록; 서버 모드 online이면 `clearFaceProfiles`), `loadSavedKioskSettings()`, `performKioskSync()`(미전송 업로드 `/api/sync/upload` → `/api/sync/download?faces=1` → users/eligibleEntries/faceProfiles/settings/lastSyncAt 갱신; 401/403이면 관리자 로그인 안내) |
 
+### 학년도 명부 (`src/lib/academic-year/`)
+
+설계 `docs/superpowers/specs/2026-09-19-academic-year-roster-design.md`, 계획 `docs/superpowers/plans/2026-09-19-academic-year-roster.md`.
+
+| 파일 | 설명 |
+|------|------|
+| `contracts.ts` | 공용 타입: `YearState`/`ImportScope`/`MemberState`, `Actor`(`MAIN` \| `USER{userId,sessionVersion}`), `Profile`/`AcademicProfile`/`RosterRow`/`RowIssue`/`RowChange`/`ImportPreview`, `MutationReceipt`/`RowMutationInput`/`MutationInput`/`MutationSummary`, `DomainErrorCode` 12종 |
+| `calendar.ts` | `academicYearOfDate(dateKey)`(학년도는 3월 1일 시작, 1~2월은 직전 학년도), `academicYearBounds(year)`, `nextKstMidnight(now)`(절대시각 기준 — `nowKST()`의 재해석 Date 사용 금지) (테스트 `__tests__/academic-year-calendar.test.ts`) |
+| `errors.ts` | `DomainError(code, message)` + `isDomainError` |
+| `db.ts` | 타입 `Db`(PrismaClient \| TransactionClient), `Tx` |
+| `mutation.ts` | 멱등 변경 wrapper. `withAcademicMutation`(전환·Excel 확정 등 전역 변경: RosterControl `FOR UPDATE` + control version 낙관 충돌), `withUserMutation`(사용자 한 행: RosterControl `FOR SHARE` → User 행 `FOR UPDATE`, `profileVersion`으로 충돌 판정·증가). `RosterMutation`에 requestId 영수증 저장, 같은 actor·kind·payloadHash만 재전송으로 인정(아니면 REQUEST_REUSED). 트랜잭션 옵션 `ROSTER_TX`(timeout 60s)/`USER_TX`(15s) |
+| `backfill.ts` | 초기 이전: `INITIAL_ACADEMIC_YEAR`(2026), `runPreflight`(읽기 전용 충돌 보고), `copyAcademicRecords`, `backfill2026`(RosterControl `FOR UPDATE`, 점검·복사·상태 기록 한 트랜잭션, COPIED 이후 재복사 안 함, 기존 행 미덮어쓰기), `verifyBackfill`(원본 보존+잔여 충돌 없을 때 VERIFIED) |
+| `readiness.ts` | `requireAcademicReady(db)` — 새 학년도 기능 API 전용 가드(PREPARING이면 NOT_READY 503), `enableAcademicMode(db, actor)` — MAIN만 PREPARING→READY, 백필 VERIFIED·충돌 0 조건 |
+| `roster-sql.ts` | 백필·호환 쓰기 공용 SQL 조각: `CONFLICT_GROUPS_CTE`, `MIRROR_CONFLICT_GROUPS_CTE`, `NEEDS_REVIEW_EXPR`(필수값 누락·좌석 중복·정규화 이메일 중복) |
+| `access.ts` | `assertActor(tx, actor, required)` — 모든 보호 경로의 최종 근거. 토큰이 아닌 현재 DB 행으로 accessState·sessionVersion·role·adminLevel 재판정. `AccessRequirement` = SIGNED_IN/STUDENT/TEACHER/READ_ADMIN/WRITE_ADMIN/MAIN. `auth`를 import하지 않아 트랜잭션 안에서도 사용 (테스트 `__tests__/academic-access.test.ts`) |
+| `request-actor.ts` | `requireActor(required, db?)` — Route Handler 첫 단계이자 **이 디렉터리에서 `auth()`를 부르는 유일한 자리**. credentials 관리자(`role=ADMIN`, `dbUserId=0`)는 MAIN 행위자. `selfUserId(actor)`는 본인 전용 API용 좁힘(MAIN이면 FORBIDDEN) |
+| `account-service.ts` | `changeEmail`/`changeAccess`/`changePermissions`(모두 `withUserMutation` 경유, sessionVersion 증가로 기존 세션 무효화; 이용 상태·권한은 자기 자신 대상 변경 차단) + 트랜잭션 전용 집합 연산 `deactivateUsers(tx, userIds, …)`(INACTIVE·sessionVersion 증가·FaceProfile 삭제; 얼굴 캐시 무효화는 커밋 후 호출자 몫) (테스트 `__tests__/account-admin-routes.test.ts`) |
+| `api.ts` | DomainError→HTTP 변환의 유일한 자리: `domainErrorStatus`, `errorResponse`(예상 밖 오류는 로그만 남기고 500 일반 메시지), `routeResponse(handler)`, `payloadHash(value)`(서버가 재계산), `parseIdParam` |
+| `profile-schema.ts` | `normalizeEmail(email)` — `emailKey` 산출 규칙 |
+| `compat-write.ts` | `withCompatUserWrite(db, write)` — `User` 명부 필드를 쓰는 기존 경로의 유일한 통로(첫 문장 RosterControl `FOR SHARE`, 반환 id를 같은 트랜잭션에서 미러). `mirrorUsersToActiveYear(tx, userIds)` — ACTIVE 학년도의 UserAcademicRecord·RosterEntry·`emailKey`를 `User` 현재값에 맞추고 needsReview 재계산, 값이 바뀐 사용자만 `profileVersion` 증가. 집합 기반 고정 문장만 사용 |
+| `test-target.ts` | 통합 테스트 DB 고정 대상 상수(`ACADEMIC_TEST_HOST` 127.0.0.1, `ACADEMIC_TEST_PORT` 55439, DB·compose 프로젝트·Docker 라벨·identity marker) + `parseAcademicTestTarget(raw)` 검증 (테스트 `__tests__/academic-year-test-target.test.ts`) |
+
+### 학년도 명부 스크립트 (`scripts/academic-year/`)
+
+| 파일 | 설명 |
+|------|------|
+| `test-db.ts` | 통합 테스트 DB wrapper — `up`/`migrate`/`down`만 허용(`npm run academic:test-db -- <명령>`). URL은 프로세스 내부에서만 구성·미출력, 운영 `DATABASE_URL`로 fallback하지 않음 |
+| `pg-daemon.ts` | `up`이 detached로 띄우는 embedded-postgres 프로세스(Docker 없을 때). `down`이 SIGINT로 종료 |
+| `fingerprint.ts` / `legacy-columns.json` | 기존 테이블의 컬럼별 해시·PK 집합 지문(원본 훼손 검출용)과 그 대상 컬럼 목록 |
+| `backfill.ts` | 초기 이전 CLI — 기본 읽기 전용 inspect, 쓰기는 승인된 대상 설정·보호된 출력 경로 명시 필요. 출력은 차이 종류·건수만(개인정보·URL 미출력) |
+| `verify.ts` | 초기 이전 후 원본 보존 확인 읽기 전용 CLI (`--before` manifest와 비교) |
+| `db-target.ts` | CLI가 닿을 DB를 좁히는 관문 — 운영 `.env`/`DATABASE_URL` fallback 없음, 승인된 대상 설정 파일과 전부 일치할 때만 연결 |
+
 ## §9 인증 / 미들웨어
 
 - `src/auth.ts`: Auth.js v5, 전략=JWT, Google OAuth + credentials(관리자)
-  - signIn 콜백: email로 User 조회 (미등록 거부), role·adminLevel 토큰 주입
+  - signIn 콜백: email로 User 조회 (미등록 또는 `accessState≠ACTIVE` 거부), role·adminLevel·`sessionVersion` 토큰 주입
+  - JWT `sessionVersion`은 **로그인 시점에만** 기록(재검증 때 덮어쓰면 끊어 둔 토큰이 되살아남). 이메일·이용 상태·권한 변경이 DB `User.sessionVersion`을 올리면 기존 토큰은 무효. 타입은 `src/types/next-auth.d.ts`
+  - **매 요청 최신 DB 재검증**: `requireActor`→`assertActor`가 accessState·sessionVersion·role·adminLevel을 DB에서 다시 읽음. 토큰에 sessionVersion이 없거나(기능 이전 발급) 불일치하면 `STALE_SESSION` 401, 중단 계정은 `ACCOUNT_INACTIVE` 403. 클라이언트는 `session-recovery.ts`가 로그아웃 후 로그인 화면으로 보냄
+  - **MAIN = credentials 관리자**(`role=ADMIN`, `dbUserId=0`, DB 행 없음): SIGNED_IN/READ_ADMIN/WRITE_ADMIN/MAIN 요구만 통과, STUDENT/TEACHER·본인 전용(`selfUserId`)은 FORBIDDEN. DB 사용자는 adminLevel이 ADMIN이어도 MAIN 요구를 통과하지 못함
   - 관리자: ADMIN_USERNAME / ADMIN_PASSWORD_HASH (bcryptjs) 환경변수 비교
-- `src/proxy.ts` (실제 파일명 — `src/middleware.ts` 아님. Next.js가 `proxy.ts`를 미들웨어로 인식): allowlist 방식(`publicExact`/`publicPrefixes`), 그 외 경로는 role 검증 후 리다이렉트/403
+- `src/proxy.ts` (실제 파일명 — `src/middleware.ts` 아님. Next.js가 `proxy.ts`를 미들웨어로 인식): allowlist 방식 — 판정은 `src/lib/public-paths.ts`의 `isPublicPath`(`PUBLIC_EXACT`/`PUBLIC_PREFIXES`), 그 외 경로는 role 검증 후 리다이렉트/403. proxy 판정은 화면 이동용 선제 검사일 뿐이며 실제 허용은 각 Route Handler의 `requireActor`가 정함
   - `publicExact`: `/`, `/check`, `/facecheck`, `/admin/login`
-  - `publicPrefixes`: `/api/auth`, `/api/checkin`, `/api/facecheck`, `/api/uploads`, `/api/system/settings`, `/api/sync`, `/api/meals`, `/_next`, `/uploads`
+  - `publicPrefixes`: `/api/auth`, `/api/checkin`, `/api/facecheck`, `/api/uploads`, `/api/system/settings`, `/api/sync`, `/api/meals`, `/_next`, `/uploads` — **경로 경계 매칭**(정확히 일치하거나 `prefix/`로 시작). 예전 bare `startsWith`는 `/api/checkins`를 `/api/checkin` 접두사로 공개 처리했으나 이제 보호됨
   - 보호 경로: `/student`(STUDENT), `/teacher`(TEACHER), `/admin`(canReadAdmin) — role별 리다이렉트. `/api/users/me/face`는 allowlist에 없어 로그인 필수
   - matcher: `_next/`와 확장자 포함 경로 제외 전체
 
@@ -332,7 +407,7 @@ public/
 - **CANCELLED 필터 필수**: CANCELLED 신청의 MealRegistrationMealDate 행은 보존됨(재신청 재활성화 대비) → 모든 집계·자격 조회에 `status=APPROVED` + `applied=true` 필터를 빼먹지 말 것
 - **식사별 구조 마이그레이션**: `20260611000001`(MealKind에 LUNCH 추가, enum) + `20260611000002`(Meal/MealDate 테이블 4종 생성 + 구 데이터 백필, 멱등 `ON CONFLICT`). 구 컬럼(type, applyStart/End 등)·구 테이블(MealApplicationDate/MealRegistrationDate) 정리는 `20260611000003`(nullable 완화) + `20260611000004`(DROP) 두 단계로 완료
 - **라이트모드 전용 운영**: `globals.css` 의 `@custom-variant dark` 는 `dark:` 유틸리티가 `prefers-color-scheme` 미디어쿼리로 fallback 하지 않도록 의도적으로 유지 (`.dark` 클래스는 어디서도 부여되지 않음). 다크모드 재도입 금지.
-- **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트
+- **테스트**: `vitest`. `npm test` 로 실행. `src/lib/__tests__/` 에 메모리 mock 기반 단위 테스트. 학년도 명부 통합 테스트는 별도(아래 항목)
 - **User.gender 운영 영향**: 시트 임포트(`/api/admin/import`) 학생 행은 6번째 열 `gender`(남/여 등 `normalizeGender` 허용 값)가 **필수**. 기존 운영용 Google Sheet 학생 시트에 gender 컬럼을 추가해야 재임포트가 실패하지 않음. 교사 시트는 영향 없음(옵셔널)
 - **관리자 대리 신청 표시**: `MealRegistration.addedBy="ADMIN"` + `updatedAt` 이 관리자 대리 신청의 근거. 관리자가 학생 신청을 생성/수정하면 `addedBy`가 ADMIN으로 기록됨(의도된 동작). `AdminApplyDialog`는 신청기간(`applyStartAt/EndAt`) 검사를 우회한다
 - **관리자 사용자 관리 inline 편집**: `/admin` 사용자관리 탭은 Edit Dialog 없이 표 셀 클릭 → `EditableTextCell`/`EditableSelectCell` 로 직접 편집(학생 7컬럼, 교사 8컬럼). 부분 PUT은 `/api/admin/users` 가 Prisma `undefined = skip` 동작으로 변경된 필드만 반영하는 것에 의존. 관리 셀은 🗑️ 삭제 버튼만 남음(편집 버튼 제거)
@@ -344,6 +419,13 @@ public/
 - **로컬 모드 임베딩 보관 정책**: 서버 운영 모드가 `local`일 때 동기화로 등록자 전원의 임베딩이 키오스크 IndexedDB `faceProfiles`에 내려감. 서버 모드가 `online`으로 확인되면(`fetchKioskSettings`/`performKioskSync`) 자동 삭제, `/check` [초기화](`clearAllData`)로도 삭제. 로컬 저장 체크인은 업로드 시 `source: LOCAL_SYNC`(얼굴/QR 구분 없음)
 - **`CheckInSource` 확장 시 3곳 동시 갱신 필요** (수동 유니온, 자동 동기화 없음): `src/lib/checkin-source.ts`(`sourceLabel`) · `src/app/api/admin/export/route.ts`(Row.source 타입) · `src/app/admin/page.tsx`(배지 색상 분기)
 - **얼굴 매칭 임계값**: `SystemSetting` 키 `face_match_threshold`/`face_match_margin` (기본 0.55/0.05, `face-constants.ts` DEFAULT_* 참조; DB 행이 있으면 그 값이 우선. 2026-09-06 부자 간 0.48이 0.45를 넘어 오인식돼 0.55로 상향). `/facecheck` 상태바에 직전 판정의 `유사도 1위/2위`가 표시되고 `/api/facecheck`·로컬 결과에 `similarity/runnerUp`이 실려 현장 튜닝 근거로 사용, `settings-cache.ts`가 30s 캐시. 임계값/마진은 관리자 `/admin` 설정 탭 "안면인식 임계값" 카드(`face-match-validation.ts`, 0.30~0.90 / 0~0.30)에서 저장 → `PUT /api/system/settings` `{faceMatchThreshold, faceMatchMargin}`(서버 허용: threshold 0<x≤1, margin 0≤x≤0.5). 키오스크는 페이지 로드 시 `fetchKioskSettings`로 다시 받으므로 새로고침만으로 적용
+- **학년도 명부 잠금 순서**: 항상 `RosterControl`(id=1) 행 먼저, 그다음 `User` 행. 전환·Excel 확정(`withAcademicMutation`)과 백필(`backfill2026`)은 `FOR UPDATE`, 셀/계정 변경(`withUserMutation`)과 호환 쓰기(`withCompatUserWrite`)는 `FOR SHARE` 후 필요한 User 행을 `FOR UPDATE`. 체크인·신청 경로는 이 행을 잠그지 않는다
+- **`needsReview`는 Release A 동안 파생값**: 백필과 미러(`mirrorUsersToActiveYear`)만 기록하고 공용 식은 `roster-sql.ts`의 `NEEDS_REVIEW_EXPR`(필수값 누락·좌석 중복·정규화 이메일 중복). 매번 전체 재계산해도 사람 판단을 지우지 않는다는 전제이므로, 수동 검토 도구(사람이 세우는 플래그)를 도입할 때 이 전제를 먼저 재검토
+- **이용 중단 시 FaceProfile 삭제**: `deactivateUsers`/`changeAccess(INACTIVE)`가 얼굴 등록을 지우고 캐시를 무효화한다. 재개해도 되살리지 않으며 본인이 다시 동의·등록해야 함. 사용자 삭제(`DELETE /api/admin/users`)는 409로 막혀 있고 이용 중단이 대체 수단
+- **`User` 명부 필드 쓰기는 반드시 `withCompatUserWrite` 경유**: 이름·학년/반/번호·성별·교과·담임·직책·이메일·역할을 쓰는 새 경로를 만들면 이 wrapper 안에서 쓰고 변경된 id를 돌려줘 ACTIVE 학년도 기록·명부에 미러되게 할 것(현재 사용처: `/api/admin/users` POST/PUT, `/api/admin/import`)
+- **학년도 명부 통합 테스트**: `npm run academic:test-db -- up|migrate|down` 으로 전용 PG를 켜고(`compose.academic-year-test.yml`의 Docker, 없으면 embedded-postgres 폴백) `npm run test:academic`(`vitest.integration.config.ts`, `tests/integration/`) 실행. 대상은 `127.0.0.1:55439` 전용이며 identity marker는 `academic_meta` 스키마에 둔다(public이 비어 있어야 `migrate deploy`가 P3005 없이 동작). 운영 `DATABASE_URL`로 fallback하지 않음
+- **`RosterControl.mode=PREPARING`**: 새 학년도 기능 API(명부·Excel·전환·검토 — `requireAcademicReady`)만 막는다. 기존 사용자 관리·신청·체크인 쓰기는 영향 없음. READY 전환은 MAIN만, 백필 VERIFIED + 잔여 충돌 0일 때(`enableAcademicMode`)
+- **기존 schema drift(이 작업과 무관)**: `MealRegistration.updatedAt`은 마이그레이션 `20260502090000`이 `DEFAULT CURRENT_TIMESTAMP`로 만들었지만 schema는 `@updatedAt`(기본값 없음)이라 `migrate diff`에 `DROP DEFAULT`가 나타난다. 학년도 명부 마이그레이션에 섞지 말 것
 
 ## §13 Project-Map Maintenance
 
@@ -360,4 +442,11 @@ Codex 기준 맵은 `.codex/PROJECT_MAP.md`. `project-map-updater`가 git diff�
 - `.agents/skills/`: 프로젝트 안내 제작 스킬. `guide-page`가 전체 흐름을 연결하며 `remotion-best-practices` 등 Remotion 13종과 `mlx-voice-clone`(`mlx-audio==0.5.3`)을 사용한다.
 - `.agents/skills/guide-page/assets/demo-video/`: 독립 Remotion 제작 템플릿. `src/guide/`·`src/components/`의 공용 장면/목업, `src/setup-check/` 환경 확인 샘플, `scripts/`의 음성 생성·전사 검수·스틸 추출·환경 점검을 포함한다. 의존성은 미설치이며 루트 타입·린트는 `.agents/**`를 제외한다.
 - `.codex/GUIDE_PAGES.md`: PosanMeal 대상 화면, 영상·스틸의 장면 재사용, 로컬 복제 음성, 제작·검증·가이드 연결 기준과 진행 현황.
-- 현재는 스킬·템플릿 이관 상태다. 루트 `demo-video/`, 앱 `/help`, 공용 가이드 UI와 실제 안내 영상은 아직 생성·구현하지 않았다. 실제 제작 요청 때 템플릿을 복사·설치한다.
+- `demo-video/`: 템플릿에서 복사·설치한 독립 Remotion 4.0.518 작업 공간. 자체 Node 의존성과 `.venv-tts/`(`mlx-audio==0.5.3`)를 사용한다. 루트 TypeScript·ESLint와 Tailwind 소스 탐색에서 제외한다.
+- `demo-video/src/Root.tsx`: 학생 본편 `StudentGuide`, 장면별 `Student-*`, 환경 점검용 `SetupCheck` 컴포지션 등록.
+- `demo-video/src/student/`: 학생 안내 16장면·46문장. `scenes/`와 `scenes.ts`는 인트로/주소/로그인/계정 복구/탭/식단/신청/서명/수정·취소/QR/인쇄/얼굴 인식 소개/얼굴 등록/키오스크/기록/마무리 순서다. `Intro.tsx`는 포산밀 학생 사용안내 타이틀·인사, `FaceOption.tsx`는 휴대전화·인쇄 QR 휴대가 어려운 학생에게 얼굴 인식 베타를 선택지로 소개하며 `Print`와 `Enroll` 사이에 배치한다. `Closing.tsx`는 물음표 아이콘으로 학생 안내 페이지를 다시 확인하는 아웃트로를 포함한다. `StudentMockups.tsx`·`data.ts`는 예시 데이터 기반 학생·키오스크 목업, `SceneLayout.tsx`·`style.ts`는 화면 구성과 스타일이다.
+- `demo-video/src/student/narration.ts`·`timing.ts`·`narration-durations.json`: 자막 원고·발음 대체문·문장별 실측 길이와 장면 타이밍. 말끝 보존 후 1초 여유와 0.35초 페이드아웃을 적용한다. `scripts/narrate.mjs --guide student`가 생성·전사 검수를 수행하며 생성 음성은 `public/narration/student/`에 둔다.
+- `demo-video/scripts/student-deliverables.mjs`: 장면 ID별 제목과 실측 타이밍에서 SRT 자막·챕터 메타데이터/목록·`student-timeline.json`을 생성한다.
+- `demo-video/src/stills/student.ts`: 본편과 같은 장면의 스틸 15장 추출 지점·크롭 정의. `scripts/guide-stills.mjs --page student --out out/guide-stills`로 장면을 렌더하거나, `scripts/student-previews.mjs`로 최종 MP4에서 장면별 검토 프레임·첫 장면 썸네일·가이드 스틸을 추출한다. 렌더·검수 산출물은 `demo-video/out/`, 생성 음성·가상환경·산출물은 Git 제외 대상이다.
+- `docs/video/student-guide-storyboard.md`: 학생 안내 구성과 실제 UI에 근거한 설명 기준. 최종 음성·영상 검증 상태는 제작 기록으로 별도 확인한다.
+- 앱 `/help`와 공용 가이드 UI는 아직 구현하지 않았다. 영상의 물음표 아이콘·학생 안내 페이지 설명은 후속 앱 구현을 전제로 하며, 영상·스틸 제작을 앱 가이드 공개·배포 완료로 간주하지 않는다.
