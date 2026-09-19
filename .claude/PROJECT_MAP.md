@@ -2,7 +2,11 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-18 (키오스크 `/check`·`/facecheck`를 `100dvh` 단일 화면으로 재구성: 중앙 `object-contain` 영상, 하단 1행 결과, 성공/중복/미신청/오류의 두꺼운 4색 테두리. `QRScanner`는 실제 스캔 윤곽을 외부 overlay에 렌더하고 React StrictMode에서 이전 스트림이 새 스트림을 끄지 않도록 시작을 지연. `FaceEnroll`은 전면 카메라를 미러링하고, 등록 전 얼굴 크기·프레임 경계·라디안 yaw/pitch/roll 자세를 검사하는 `face-quality.ts`를 적용. 기존 모델·DB·매칭·사운드 흐름은 유지)
+> 마지막 업데이트: 2026-09-19 (`/check`·`/facecheck` 공용 `KioskViewport` 추가: 실제 가시 높이와 화면 복귀·회전 대응, 확대 중 재배치 방지. `globals.css`의 `.kiosk-*`로 결과·하단 조작부를 축소하고 로컬 동기화 상세를 별도 행에 배치)
+>
+> 이전 업데이트: 2026-09-19 (`/facecheck` 학생·교사 확인 후 저장: geometry 품질 검사·동일 대상 연속 3회 매칭, 10초 무응답 취소. 온라인·로컬 `confirmation` 대상/날짜/식사 재검증. Human 로드·추론 전역 직렬화와 모드 전환 시 세션·요청 정리. 모델·임계값·사운드 유지)
+>
+> 이전 업데이트: 2026-09-18 (키오스크 `/check`·`/facecheck`를 `100dvh` 단일 화면으로 재구성: 중앙 `object-contain` 영상, 하단 1행 결과, 성공/중복/미신청/오류의 두꺼운 4색 테두리. `QRScanner`는 실제 스캔 윤곽을 외부 overlay에 렌더하고 React StrictMode에서 이전 스트림이 새 스트림을 끄지 않도록 시작을 지연. `FaceEnroll`은 전면 카메라를 미러링하고, 등록 전 얼굴 크기·프레임 경계·라디안 yaw/pitch/roll 자세를 검사하는 `face-quality.ts`를 적용. 기존 모델·DB·매칭·사운드 흐름은 유지)
 >
 > 이전 업데이트: 2026-09-06 (관리자 설정 탭 안면인식 임계값 카드 `face-match-validation.ts`; 미등록 얼굴 거부 카드·오류음 `unmatched-tracker.ts`, `/api/facecheck`·로컬 결과 `errorCode: UNMATCHED`; 기본 threshold 0.45→0.55: 부자 간 0.48 오인식 관측; 2026-09-05 안면인식 식별 모델 교체 — FaceRes(1024)→insightface-mobilenet-emore(256), `FACE_MODEL_VERSION` 상승·현재 버전 프로필만 후보, `rankCandidates/decideMatch/scoreSummary`, `/api/facecheck`·로컬 결과에 `similarity/runnerUp`, `/facecheck` 상태바 유사도 표시, `FaceEnroll` 재등록 안내)
 >
@@ -47,8 +51,8 @@ src/
 ├── app/
 │   ├── layout.tsx               # Root layout (SwUpdater, AuthProvider)
 │   ├── page.tsx                 # 랜딩 (Google 로그인)
-│   ├── check/page.tsx           # QR 키오스크 (공개) — 100dvh 중앙 contain 영상·하단 1행 4색 결과, 모드 해석 kiosk-sync.ts·로컬 판정 qr-checkin-local.ts
-│   ├── facecheck/page.tsx       # 얼굴 키오스크 (공개, 온라인·로컬) — 100dvh 중앙 contain 영상·하단 1행 4색 결과 + 페이지 내 QR 모드
+│   ├── check/page.tsx           # QR 키오스크 (공개) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과, 모드 해석 kiosk-sync.ts·로컬 판정 qr-checkin-local.ts
+│   ├── facecheck/page.tsx       # 얼굴 키오스크 (공개, 온라인·로컬) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과 + 페이지 내 QR 모드
 │   ├── student/page.tsx         # 학생 4탭 (QR, 신청, 개인정보, 확인)
 │   ├── teacher/page.tsx         # 교사 탭 (담임: 6탭, 비담임: 4탭)
 │   ├── admin/
@@ -80,8 +84,8 @@ public/
 | 경로 | 파일 | 접근 | 설명 |
 |------|------|------|------|
 | `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
-| `/check` | `src/app/check/page.tsx` | 공개 | QR 키오스크 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). `100dvh` 화면의 중앙에는 `object-contain` 영상과 실제 QR 윤곽 overlay를, 하단에는 한 줄 결과를 둔다. 결과는 성공/중복/미신청/오류별 두꺼운 초록/파랑/빨강/주황 테두리. 하단 왼쪽은 로컬 동기화 그룹, 오른쪽 [얼굴로 체크인]은 SW 오프라인 응답을 위한 의도적 전체 이동 `<a href="/facecheck">` |
-| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 키오스크 — 중앙 `object-contain` 영상과 하단 1행 4색 결과를 쓰며, 학생은 즉시 체크인하고 교사는 근무/개인/취소 선택(10초 미선택 시 자동 "개인"). 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·IDB 저장. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽 버튼이 [QR로 체크인]↔[얼굴로 체크인]을 전환하며 `giveUpFace`도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`, 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
+| `/check` | `src/app/check/page.tsx` | 공개 | QR 키오스크 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). `KioskViewport` 화면의 중앙에는 `object-contain` 영상과 실제 QR 윤곽 overlay를, 하단에는 한 줄 결과를 둔다. 결과는 성공/중복/미신청/오류별 두꺼운 초록/파랑/빨강/주황 테두리. 하단 왼쪽은 로컬 동기화 그룹, 오른쪽 [얼굴로 체크인]은 SW 오프라인 응답을 위한 의도적 전체 이동 `<a href="/facecheck">` |
+| `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 키오스크 — `KioskViewport` 내 중앙 `object-contain` 영상과 하단 1행 4색 결과를 쓰며, 얼굴 크기·경계·자세 검사와 동일 사용자·날짜·식사의 연속 3회 유효 매칭(`face-stability.ts`) 후 확인창을 연다. 학생은 학번·이름 확인/취소, 교사는 근무/개인/취소를 선택하며 모두 10초 무응답 시 취소한다. 확인 전 매칭은 읽기 전용이고 명시적 확인 후에만 저장한다. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·확인 후 IDB 저장. 얼굴↔QR 전환·언마운트 시 세션 세대, busy, 확인 대기, 재개/결과 타이머를 정리하고 요청·감지 호출을 AbortSignal로 취소한다. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽 버튼이 [QR로 체크인]↔[얼굴로 체크인]을 전환하며 `giveUpFace`도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`, 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
 | `/student` | `src/app/student/page.tsx` | 학생 | 4탭: QR, 신청, 개인정보, 확인 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭 |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
@@ -108,7 +112,7 @@ public/
 | `/api/users/me` | GET/PUT | 학생/교사 | 본인 프로필 조회/수정 — GET이 `todayMeals`(오늘 자격 식사 목록) 반환, 구 `registrations` 필드 제거됨 |
 | `/api/users/me/photo` | POST/DELETE | 학생/교사 | 사진 업로드/삭제 — POST 저장 경로 `UPLOAD_DIR`(Railway Volume) 우선, photoUrl `/api/uploads/{id}.webp?t=...` 발급 |
 | `/api/users/me/face` | GET/POST/DELETE | 학생/교사 | 안면인식 등록 관리 — GET 등록 여부/모델버전/동의일시, POST `faceEnrollSchema`(embeddings 3~5개, consentVersion) upsert, DELETE 완전 삭제. 모두 `invalidateFaceCache()` 호출 |
-| `/api/facecheck` | POST | 공개(키오스크 키) | 얼굴 임베딩 1:N 매칭 체크인 — `faceCheckSchema`({embedding,type?}), `rankCandidates`+`decideMatch`로 사용자 특정 후 체크인, 모든 응답에 `similarity/runnerUp`(1·2위 유사도). 헤더 `x-kiosk-key`가 `FACECHECK_KIOSK_KEY`와 일치해야 함(불일치 401, 미설정 503), IP당 분당 120회 레이트리밋(429). 교사는 type 없으면 `needType:true` 응답(2단계 무상태), 학생은 `isStudentEligibleToday` 자격 검증, source="FACE" |
+| `/api/facecheck` | POST | 공개(키오스크 키) | 얼굴 임베딩 1:N 매칭 체크인 — `faceCheckSchema`({embedding,type?,confirmation?}), `confirmation={userId,mealKind,date}`. `rankCandidates`+`decideMatch`로 사용자 특정 후 확인 전에는 `needConfirmation:true`와 대상·식사·KST 날짜를 반환(저장 없음). 확인 요청은 임베딩 재매칭 후 동일 대상/현재 날짜/식사를 검증하며 불일치 시 `CONFIRMATION_CHANGED`. 확인 후 중복·학생 자격 검증과 체크인. 매칭 결과에 `similarity/runnerUp`(1·2위 유사도). 헤더 `x-kiosk-key`가 `FACECHECK_KIOSK_KEY`와 일치해야 함(불일치 401, 미설정 503), IP당 분당 120회 레이트리밋(429). 교사는 type 없으면 `needConfirmation:true,needType:true` 응답(2단계 무상태), 학생은 `isStudentEligibleToday` 자격 검증, source="FACE" |
 | `/api/uploads/[filename]` | GET | 공개 | `runtime=nodejs`, `UPLOAD_DIR`에서 readFile 스트리밍 (없으면 `/uploads/` 정적 폴백) |
 | `/api/meals` | GET | 공개 | NEIS API 급식 메뉴 조회 (?date=YYYYMMDD) |
 | `/api/applications` | GET | 로그인 | 신청 가능한 공고 목록 (현재 OPEN, 기간 내) |
@@ -196,11 +200,13 @@ public/
 | `MealMenu` | `src/components/MealMenu.tsx` | NEIS API 급식 메뉴 표시 |
 | `SwUpdater` | `src/components/SwUpdater.tsx` | Service Worker 등록·갱신 (SKIP_WAITING 트리거) — SW 본체는 `public/sw.js`(`posanmeal-v7`, 캐시 전략은 §12) |
 | `ResetOnQuery` | `src/components/ResetOnQuery.tsx` | ?reset=1 쿼리 시 브라우저 캐시·IDB·SW 전체 초기화 |
+| `KioskViewport` | `src/components/KioskViewport.tsx` | `/check`·`/facecheck` 공용 화면: `innerHeight`·`visualViewport.height`의 유효 최솟값을 `--kiosk-height`에 반영(기본 `100dvh`). resize·pageshow·orientationchange·visibilitychange 시 재측정하며 확대 중에는 높이를 유지. `globals.css`의 `.kiosk-*`가 safe-area, 축소된 1행 결과, 44px 조작 영역과 별도 동기화 상세 행을 담당 |
 | `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 |
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
 | `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
 | `EditableCell` | `src/components/EditableCell.tsx` | 관리자 표 inline 편집 셀 — `EditableTextCell` / `EditableSelectCell` named export, `SaveResult` 타입; blur·Enter 저장, Escape 취소, committingRef 이중 fire 방지, role="button"+tabIndex 접근성 |
 | `FaceEnroll` | `src/components/FaceEnroll.tsx` | 학생·교사 개인정보 탭의 얼굴 등록/재등록/삭제 — 동의 모달 → 3장 자동 캡처. 전면 카메라는 미러링하며 기본 품질 필터와 얼굴 크기·경계·자세(`face-quality.ts`)를 통과한 임베딩만 POST `/api/users/me/face`. `/student`·`/teacher` 개인정보 탭에 연결됨 |
+| `DateCheckboxList` / `MealKindBadge` | `src/components/DateCheckboxList.tsx`, `src/components/MealKindBadge.tsx` | 현재 어디서도 import 되지 않는 잔존 컴포넌트(2026-09-19 확인). 재사용 전 최신 meal/ UI와 중복 여부 확인 |
 
 ### 식사별 공고·신청 UI (`src/components/meal/`)
 
@@ -247,18 +253,19 @@ public/
 | `src/lib/meal-template-columns.ts` | 일괄신청 양식 컬럼 단일 진실 — `TemplateColumn` 타입(YN/DATE/WEEKDAY), `buildTemplateColumns`, `columnHeader`("중식-7월 5일"/"조식-월요일"), `parseColumnHeader`(months 기반 연도 복원). export/import 라우트 공유 (테스트 `__tests__/meal-template-columns.test.ts`) |
 | `src/lib/qr-card.ts` | 담임 QR 카드 출력용: `buildCardQrString(studentId, generation)`(고정 로컬 QR `posanmeal:{id}:{generation}:STUDENT` 생성) + `chunk<T>(items, size)` 페이지 분할 유틸 (테스트 `__tests__/qr-card.test.ts`) |
 | `src/lib/face-constants.ts` | 안면인식 상수: `FACE_EMBEDDING_DIM`(256), `FACE_MIN/MAX_EMBEDDINGS`(3~5), `FACE_MODEL_VERSION`(insightface-mobilenet-emore@human3.3.6), `FACE_MODEL_PATH`, `DEFAULT_FACE_MATCH_THRESHOLD/MARGIN`(0.55/0.05) |
-| `src/lib/face-quality.ts` | 등록 전 얼굴 geometry 판정 순수 함수: 프레임 내 경계, 짧은 변의 절대/상대 최소 크기, 라디안 yaw/pitch/roll 허용치를 검사해 `clipped`/`tooSmall`/`turned` 반환 (테스트 `__tests__/face-quality.test.ts`) |
+| `src/lib/face-quality.ts` | 등록·키오스크 인식 전 얼굴 geometry 판정 순수 함수: 프레임 내 경계, 짧은 변의 절대/상대 최소 크기, 라디안 yaw/pitch/roll 허용치를 검사해 `clipped`/`tooSmall`/`turned` 반환 (테스트 `__tests__/face-quality.test.ts`) |
+| `src/lib/face-stability.ts` | `FaceStabilityTracker`: 동일 사용자·날짜/식사 문맥의 유효 매칭 3회(최소 간격 200ms)를 모아 확인창 진입을 결정. 대상/문맥 변경·3초 초과 공백·시간 역행·명시적 reset 시 초기화 (테스트 `__tests__/face-stability.test.ts`) |
 | `src/lib/face-match.ts` | 순수 함수: `cosineSimilarity(a,b)`, `rankCandidates(embedding, candidates)`(사용자별 최고 유사도 내림차순, 차원이 다른 구 모델 임베딩 제외), `decideMatch(ranked,{threshold,margin})`, `findBestMatch`(둘의 합성), `scoreSummary(ranked)`(1·2위 소수 3자리 `MatchScore`) (테스트 `__tests__/face-match.test.ts`) |
 | `src/lib/unmatched-tracker.ts` | `UnmatchedTracker.observe(embedding, now)` → `pending`/`confirm`/`suppressed`. 미등록 얼굴은 같은 얼굴(cos≥0.6)이 3초 안에 두 번 보여야 확정(주황 카드+오류음), 확정 후 10초 억제. `/facecheck` `applyResult`가 `errorCode: "UNMATCHED"`일 때 사용 |
 | `src/lib/face-match-validation.ts` | 관리자 설정 탭 "안면인식 임계값" 폼 검증: `parseFaceMatchForm`(threshold 0.30~0.90, margin 0~0.30, 소수 둘째 자리 반올림) / `toFaceMatchForm` |
-| `src/lib/schemas/face.ts` | zod 스키마: `faceEnrollSchema`(embeddings 3~5개×1024차원, consentVersion) / `faceCheckSchema`(embedding, type?) (테스트 `__tests__/face-schema.test.ts`) |
+| `src/lib/schemas/face.ts` | zod 스키마: `faceEnrollSchema`(embeddings 3~5개×256차원, consentVersion) / `faceCheckSchema`(embedding, type?, confirmation?) / `faceConfirmationSchema`·`FaceConfirmation`(userId, mealKind, date) (테스트 `__tests__/face-schema.test.ts`) |
 | `src/lib/face-consent.ts` | `FACE_CONSENT_VERSION` + `FACE_CONSENT_TEXT`(안면인식정보 수집·이용 동의문 전문) |
 | `src/lib/face-embedding-cache.ts` | `FaceProfile` 60s 인메모리 캐시: `getFaceCandidates()`(`modelVersion = FACE_MODEL_VERSION`인 프로필만, Json embeddings → Float32Array 변환), `invalidateFaceCache()` (테스트 `__tests__/face-embedding-cache.test.ts`) |
-| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman(candidates: FaceBackend[] = ["webgl"])`: 후보를 순서대로 새 Human 인스턴스로 load+warmup(`warmup:"face"`)까지 시도해 첫 성공을 채택(실제 백엔드는 `human.tf.getBackend()`로 확인, `getActiveFaceBackend()`). 임베딩에 영향 주는 단계(detector/mesh/rotation/equalization/cacheSensitivity 0)는 백엔드와 무관하게 고정(`modelBasePath: "/models/"`, load/warmup 90s 타임아웃 + `human.models.loaded()`로 필수 모델(blazeface/facemesh/insightface/antispoof/liveness) 검증; `description`(faceres)은 끄고 `insightface.modelPath = FACE_MODEL_PATH`). `detectFaces(human, video)`는 5s 타임아웃과 none/multiple/face 판별에 더해 등록 화면용 frame·box·라디안 pose geometry를 반환하며, `qualityIssue(face)`/`FACE_QUALITY`/`withTimeout()` 제공 |
+| `src/lib/human-client.ts` | 클라이언트 전용 Human 로더(`import "client-only"`) — `loadHuman(candidates: FaceBackend[] = ["webgl"])`: 후보를 순서대로 새 Human 인스턴스로 load+warmup(`warmup:"face"`)까지 시도해 첫 성공을 채택(실제 백엔드는 `human.tf.getBackend()`로 확인, `getActiveFaceBackend()`). 임베딩에 영향 주는 단계(detector/mesh/rotation/equalization/cacheSensitivity 0)는 백엔드와 무관하게 고정(`modelBasePath: "/models/"`, load/warmup 90s 타임아웃 + `human.models.loaded()`로 필수 모델(blazeface/facemesh/insightface/antispoof/liveness) 검증; `description`(faceres)은 끄고 `insightface.modelPath = FACE_MODEL_PATH`). `detectFaces(human, video, signal?)`는 5s 타임아웃과 none/multiple/face 판별에 더해 frame·box·라디안 pose geometry를 반환. 로드·warmup·추론은 인스턴스 간 전역 직렬화하며 호출자 타임아웃/취소 후에도 원본 연산 종료까지 잠금을 유지한다. AbortSignal로 대기 중 감지를 제거하고 영상 준비 상태는 실행 시 재검사. `qualityIssue(face)`/`FACE_QUALITY`/`withTimeout()` 제공 (테스트 `__tests__/human-client.test.ts`) |
 | `src/lib/checkin-sounds.ts` | 체크인 사운드 4종 + 클릭(`playSuccess` 상승 2음 / `playDuplicate` 하강 2음 사각파 / `playDenied` 저음 버저 / `playError` 고음 3연타 / `playLockClick`), 어택·릴리즈 램프로 최대 음량 — `/check`·`/facecheck` 공용 |
 | `src/lib/checkin-result-style.ts` | 결과 분류 `resultCategory(r)`(success/duplicate/notApplicant/error)와 배경·문구·두꺼운 테두리 색 매핑 `RESULT_BG_CLASS`/`RESULT_TEXT_CLASS`/`RESULT_BORDER_CLASS`(초록/파랑/빨강/주황) — `/check`·`/facecheck` 공용 (테스트 `__tests__/checkin-result-style.test.ts`) |
 | `src/lib/face-pacing.ts` | 순수 함수: `resolveFaceBackends(override, hasWebGpu)`(webgpu→webgl 후보 순서), `nextDetectDelay(lastDetectMs)`(직전 검출/3, 30~200ms 클램프) (테스트 `__tests__/face-pacing.test.ts`) |
-| `src/lib/facecheck-local.ts` | 로컬 모드 판정 엔진 `runLocalFaceCheckIn(input, repo)` — `/api/facecheck`와 같은 순서(식사시간→`findBestMatch`→IDB 사용자→중복→교사 needType→학생 자격→`addCheckIn(synced:0)`)로 API와 같은 모양의 `FaceCheckResult` 반환(저장소 주입으로 테스트 가능). `toFaceCandidates`, `localDateKey`, `FaceCheckResult`/`FaceCheckUser` 타입 (테스트 `__tests__/facecheck-local.test.ts`) |
+| `src/lib/facecheck-local.ts` | 로컬 모드 판정 엔진 `runLocalFaceCheckIn(input, repo)` — `/api/facecheck`와 같은 순서(KST 식사시간→`rankCandidates`/`decideMatch`→IDB 사용자·역할→confirmation 대상/날짜/식사 검증→미확인 응답→중복→학생 자격→`addCheckIn(synced:0)`)로 `FaceCheckResult` 반환. 미확인 요청은 읽기 전용이며 교사는 type도 필수(저장소 주입으로 테스트 가능). `toFaceCandidates`, `localDateKey`, `FaceCheckResult`/`FaceCheckUser` 타입 (테스트 `__tests__/facecheck-local.test.ts`) |
 | `src/lib/qr-checkin-local.ts` | 인쇄 카드·로컬 QR(`posanmeal:{id}:{gen}:{type}[:{mealKind}]`) 판정 엔진 — `isLocalQR(data)`(접두어만 검사), `parseLocalQR(data)`(4·5-part), `runLocalQrCheckIn({data,now,mealWindows}, repo)`: 형식→세대(IDB `qrGeneration`과 비교, 저장값 없으면 생략)→명단→역할·유형→식사 시간(QR에 실린 mealKind 우선)→학생 자격→중복→`addCheckIn(synced:0)` 순으로 `CheckInResult`(`checkin-client.ts`) 반환. 저장소 주입 `LocalQrRepo{getSetting,getUser,isEligible,getCheckIn,addCheckIn}`. 원래 `/check` 안에 있던 로직을 분리해 `/check`·`/facecheck` QR 모드 공용 (테스트 `__tests__/qr-checkin-local.test.ts`) |
 | `src/lib/kiosk-sync.ts` | `/check`·`/facecheck` 키오스크 설정·로컬 모드 동기화: `fetchKioskSettings()`(`/api/system/settings`를 `AbortSignal.timeout(5000)`으로 조회→IDB settings 저장; 오프라인·타임아웃·비2xx면 null — Wi-Fi는 잡히지만 서버에 닿지 않는 키오스크가 "모드 확인 중"에 갇히지 않도록; 서버 모드 online이면 `clearFaceProfiles`), `loadSavedKioskSettings()`, `performKioskSync()`(미전송 업로드 `/api/sync/upload` → `/api/sync/download?faces=1` → users/eligibleEntries/faceProfiles/settings/lastSyncAt 갱신; 401/403이면 관리자 로그인 안내) |
 
@@ -292,6 +299,8 @@ public/
 > `AUTH_URL`, `DATABASE_PUBLIC_URL`, `RAILWAY_VOLUME_MOUNT_PATH` 는 Railway 서비스 환경에서 추가 설정.
 
 ## §11 브랜치 / 배포 (2026-06-16 단일 서비스)
+
+> 주의(2026-09-19): 아래는 6월 기록이다. 9월 메모리(`.codex/memory/legacy/mac/railway-facecheck-test-service.md`)에 별도 `dinner-facecheck` 서비스/`feat/facecheck` 연결 기록이 있어 "단일 서비스·feature push 미배포"를 현재 상태로 단정할 수 없다. 실제 서비스·브랜치·DB·Volume 연결은 배포 작업 시 읽기 전용으로 확인(`.codex/rules/railway-stack.md`). GitHub Actions는 없으며 배포는 Railway의 브랜치 watch로만 일어난다(`railway.json`: RAILPACK 빌드, 시작 시 `prisma migrate deploy`).
 
 | 브랜치 | 환경 | 도메인 | Railway 서비스 |
 |--------|------|--------|----------------|

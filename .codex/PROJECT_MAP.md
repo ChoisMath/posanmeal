@@ -208,6 +208,7 @@ public/
 | `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
 | `EditableCell` | `src/components/EditableCell.tsx` | 관리자 표 inline 편집 셀 — `EditableTextCell` / `EditableSelectCell` named export, `SaveResult` 타입; blur·Enter 저장, Escape 취소, committingRef 이중 fire 방지, role="button"+tabIndex 접근성 |
 | `FaceEnroll` | `src/components/FaceEnroll.tsx` | 학생·교사 개인정보 탭의 얼굴 등록/재등록/삭제 — 동의 모달 → 3장 자동 캡처. 전면 카메라는 미러링하며 기본 품질 필터와 얼굴 크기·경계·자세(`face-quality.ts`)를 통과한 임베딩만 POST `/api/users/me/face`. `/student`·`/teacher` 개인정보 탭에 연결됨 |
+| `DateCheckboxList` / `MealKindBadge` | `src/components/DateCheckboxList.tsx`, `src/components/MealKindBadge.tsx` | 현재 어디서도 import 되지 않는 잔존 컴포넌트(2026-09-19 확인). 재사용 전 최신 meal/ UI와 중복 여부 확인 |
 
 ### 식사별 공고·신청 UI (`src/components/meal/`)
 
@@ -356,3 +357,7 @@ Codex 기준 맵은 `.codex/PROJECT_MAP.md`. `project-map-updater`가 git diff�
 - `.codex/agents/`: 위 역할의 프로젝트 전용 지침.
 - `.codex/memory/MEMORY.md`: 인계 색인; legacy 하위는 Claude 메모리의 역사적 사본.
 - `.codex/README.md`: 시작 명령과 이관 내역.
+- `.agents/skills/`: 프로젝트 안내 제작 스킬. `guide-page`가 전체 흐름을 연결하며 `remotion-best-practices` 등 Remotion 13종과 `mlx-voice-clone`(`mlx-audio==0.5.3`)을 사용한다.
+- `.agents/skills/guide-page/assets/demo-video/`: 독립 Remotion 제작 템플릿. `src/guide/`·`src/components/`의 공용 장면/목업, `src/setup-check/` 환경 확인 샘플, `scripts/`의 음성 생성·전사 검수·스틸 추출·환경 점검을 포함한다. 의존성은 미설치이며 루트 타입·린트는 `.agents/**`를 제외한다.
+- `.codex/GUIDE_PAGES.md`: PosanMeal 대상 화면, 영상·스틸의 장면 재사용, 로컬 복제 음성, 제작·검증·가이드 연결 기준과 진행 현황.
+- 현재는 스킬·템플릿 이관 상태다. 루트 `demo-video/`, 앱 `/help`, 공용 가이드 UI와 실제 안내 영상은 아직 생성·구현하지 않았다. 실제 제작 요청 때 템플릿을 복사·설치한다.
