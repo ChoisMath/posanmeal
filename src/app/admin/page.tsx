@@ -15,8 +15,9 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, ScanFace, Settings, ChevronLeft, ChevronRight, AlertTriangle, Database, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
-import { useAccountRows } from "@/hooks/useAcademicRoster";
+import { useAccountRows, useAcademicYears } from "@/hooks/useAcademicRoster";
 import { RosterManager } from "@/components/admin-roster/RosterManager";
+import { CheckInReviewPanel } from "@/components/admin-roster/CheckInReviewPanel";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
@@ -48,6 +49,7 @@ interface MealAppMealItem {
 
 interface MealAppItem {
   id: number;
+  academicYear: number | null;
   title: string;
   description: string | null;
   status: string;
@@ -93,6 +95,7 @@ export default function AdminPage() {
   const { mutate } = useSWRConfig();
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const { users, mutate: refreshUsers } = useAccountRows(userFilter);
+  const { years: academicYears, notReady: academicNotReady, error: academicError, isLoading: academicLoading, mutate: refreshAcademicYears } = useAcademicYears();
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardDate, setDashboardDate] = useState<string>(() => todayKST());
 
@@ -107,6 +110,8 @@ export default function AdminPage() {
   // 진입 시 ?tab= 쿼리 반영 (공고 저장 후 /admin?tab=applications 복귀 등)
   // SSR과 첫 클라이언트 렌더를 "users"로 일치시키고 마운트 후 전환 (hydration mismatch 방지)
   const [activeTab, setActiveTab] = useState("users");
+  const [mealView, setMealView] = useState("monthly");
+  const [reviewPending, setReviewPending] = useState(false);
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
     const valid = ["users", "applications", "meals", "dashboard", "settings"];
@@ -682,6 +687,7 @@ export default function AdminPage() {
           value={activeTab}
           className="flex flex-col flex-1 min-h-0"
           onValueChange={(v) => {
+            if (reviewPending) return;
             setActiveTab(v);
             if (v === "dashboard") fetchDashboard(dashboardDate);
             if (v === "applications") fetchApps();
@@ -941,18 +947,29 @@ export default function AdminPage() {
                     </Button>
                   </Link>
                 </div>
+                {academicError && <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 text-sm text-destructive">
+                  <p className="break-keep">학년도 상태를 불러오지 못했습니다.</p>
+                  <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => void refreshAcademicYears()}>학년도 다시 불러오기</Button>
+                </div>}
                 {apps.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8">등록된 공고가 없습니다.</p>
                 ) : (
                   <div className="space-y-3">
                     {apps.map((app) => {
-                      const nowKst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+                      const nowKst = new Date();
                       const applyStart = app.applyStartAt ? new Date(app.applyStartAt) : null;
                       const applyEnd = app.applyEndAt ? new Date(app.applyEndAt) : null;
+                      const yearState = academicYears.find((year) => year.year === app.academicYear)?.state;
 
                       let statusBadge: React.ReactNode;
                       if (app.status === "CLOSED") {
                         statusBadge = <Badge className="text-xs bg-red-500 hover:bg-red-600 whitespace-nowrap">마감</Badge>;
+                      } else if (yearState === "DRAFT") {
+                        statusBadge = <Badge variant="secondary" className="text-xs whitespace-nowrap">접수 전 · 준비 학년도</Badge>;
+                      } else if (yearState === "ARCHIVED") {
+                        statusBadge = <Badge variant="secondary" className="text-xs whitespace-nowrap">지난 학년도</Badge>;
+                      } else if (!yearState && !academicNotReady) {
+                        statusBadge = <Badge variant="outline" className="text-xs whitespace-nowrap">{academicLoading ? "학년도 조회 중" : academicError ? "학년도 조회 실패" : "학년도 확인 필요"}</Badge>;
                       } else if (applyStart && applyEnd && nowKst >= applyStart && nowKst <= applyEnd) {
                         statusBadge = <Badge className="text-xs bg-green-600 hover:bg-green-700 whitespace-nowrap">신청중</Badge>;
                       } else if (applyStart && nowKst < applyStart) {
@@ -964,11 +981,12 @@ export default function AdminPage() {
                       const totalOpenDateCount = app.meals.reduce((s, m) => s + m.openDateCount, 0);
 
                       return (
-                        <div key={app.id} className="card-elevated rounded-2xl border-0 p-4 space-y-2">
+                        <div key={app.id} className="card-elevated rounded-2xl border-0 p-2 sm:p-3 lg:p-4 space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             {statusBadge}
-                            <span className="font-semibold">{app.title}</span>
+                            <span className="min-w-0 truncate font-semibold" title={app.title}>{app.title}</span>
                           </div>
+                          <p className="whitespace-nowrap text-xs text-muted-foreground">{app.academicYear === null ? "학년도 확인 필요" : `${app.academicYear}학년도`}</p>
                           {(applyStart || applyEnd) && (
                             <p className="text-xs text-muted-foreground whitespace-nowrap">
                               {applyStart ? formatDateTimeKST(applyStart) : "—"} ~ {applyEnd ? formatDateTimeKST(applyEnd) : "—"}
@@ -1001,12 +1019,12 @@ export default function AdminPage() {
                           </p>
                           <div className="flex flex-wrap gap-2 pt-1">
                             <Link href={`/admin/applications/${app.id}/stats`}>
-                              <Button variant="outline" size="sm" className="min-h-9 whitespace-nowrap">
+                              <Button variant="outline" size="sm" className="min-h-11 min-w-11 whitespace-nowrap">
                                 <ExternalLink className="h-3.5 w-3.5 mr-1" /> 통계·명단
                               </Button>
                             </Link>
                             <Link href={`/admin/applications/${app.id}/edit`}>
-                              <Button variant="outline" size="sm" className="min-h-9 whitespace-nowrap">
+                              <Button variant="outline" size="sm" className="min-h-11 min-w-11 whitespace-nowrap">
                                 수정
                               </Button>
                             </Link>
@@ -1014,7 +1032,7 @@ export default function AdminPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="min-h-9 whitespace-nowrap"
+                                className="min-h-11 min-w-11 whitespace-nowrap"
                                 onClick={async () => {
                                   if (!confirm(`"${app.title}" 공고를 마감하시겠습니까?`)) return;
                                   const res = await fetch(`/api/admin/applications/${app.id}/close`, { method: "POST" });
@@ -1028,7 +1046,7 @@ export default function AdminPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="min-h-9 whitespace-nowrap text-destructive hover:text-destructive"
+                              className="min-h-11 min-w-11 whitespace-nowrap text-destructive hover:text-destructive"
                               onClick={() => handleDeleteApp(app)}
                             >
                               <Trash2 className="h-3.5 w-3.5 mr-1" /> 삭제
@@ -1047,7 +1065,20 @@ export default function AdminPage() {
           <TabsContent value="meals" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
-                <AdminMealTable readonly={adminPerm.isSubadmin} />
+                <Tabs value={mealView} onValueChange={(value) => { if (!reviewPending) setMealView(value); }} className="h-full min-h-0 gap-2">
+                  <div className="shrink-0 overflow-x-auto">
+                    <TabsList className="w-full min-w-max gap-2 group-data-horizontal/tabs:h-auto">
+                      <TabsTrigger value="monthly" disabled={reviewPending} className="min-h-11 min-w-11 whitespace-nowrap px-3">월별 기록</TabsTrigger>
+                      <TabsTrigger value="reviews" className="min-h-11 min-w-11 whitespace-nowrap px-3">체크인 검토</TabsTrigger>
+                    </TabsList>
+                  </div>
+                  <TabsContent value="monthly" className="min-h-0 overflow-hidden">
+                    <AdminMealTable readonly={!adminPerm.canWrite} />
+                  </TabsContent>
+                  <TabsContent value="reviews" className="min-h-0 overflow-hidden">
+                    <CheckInReviewPanel canWrite={adminPerm.canWrite} onPendingChange={setReviewPending} />
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           </TabsContent>

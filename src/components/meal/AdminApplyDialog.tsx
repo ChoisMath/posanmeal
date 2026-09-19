@@ -26,6 +26,8 @@ import {
 import type { MealKind, MealApplyMethod } from "@/lib/meal-plan";
 import { formatDateTimeKST } from "@/lib/timezone";
 import { fetcher, errorTextOf } from "@/lib/fetcher";
+import { useAcademicYears, useRoster } from "@/hooks/useAcademicRoster";
+import { useAdminPermission } from "@/hooks/useAdminPermission";
 
 interface TargetUser {
   id: number;
@@ -41,6 +43,9 @@ export type AdminApplyMode =
 
 interface AppDetailResponse {
   application: {
+    academicYear: number | null;
+    resolvedAcademicYear: number;
+    academicYearState: "ACTIVE" | "DRAFT" | "ARCHIVED";
     startYear: number;
     startMonth: number;
     monthCount: number;
@@ -78,6 +83,8 @@ export function AdminApplyDialog({
   onClose,
   onSaved,
 }: AdminApplyDialogProps) {
+  const { canWrite } = useAdminPermission();
+  const yearState = useAcademicYears();
   const [pickedUser, setPickedUser] = useState<TargetUser | null>(null);
   const [filterGrade, setFilterGrade] = useState("all");
   const [filterClass, setFilterClass] = useState("all");
@@ -87,17 +94,24 @@ export function AdminApplyDialog({
   const isEdit = mode?.type === "edit";
   const targetUser = isEdit ? mode.user : pickedUser;
 
-  const { data: appData } = useSWR<AppDetailResponse>(
+  const { data: appData, error: appError } = useSWR<AppDetailResponse>(
     open ? `/api/admin/applications/${applicationId}` : null,
     fetcher,
   );
 
-  const { data: usersData } = useSWR<{ users: TargetUser[] }>(
-    open && mode?.type === "add" ? `/api/admin/users?role=STUDENT` : null,
+  const academicYear = appData?.application.resolvedAcademicYear ?? null;
+  const applicationYearState = appData?.application.academicYearState;
+  const registrationAllowed = canWrite && (isEdit
+    ? applicationYearState === "ACTIVE" || applicationYearState === "ARCHIVED"
+    : applicationYearState === "ACTIVE");
+  const roster = useRoster(open && mode?.type === "add" && !yearState.notReady ? academicYear : null,
+    "STUDENT", { includeEntryless: true });
+  const { data: usersData, error: usersError, isLoading: usersLoading } = useSWR<{ users: TargetUser[] }>(
+    open && mode?.type === "add" && yearState.notReady ? `/api/admin/users?role=STUDENT${academicYear === null ? "" : `&academicYear=${academicYear}`}` : null,
     fetcher,
   );
 
-  const { data: regData } = useSWR<RegDetailResponse>(
+  const { data: regData, error: regError } = useSWR<RegDetailResponse>(
     open && isEdit
       ? `/api/admin/applications/${applicationId}/registrations/${mode.registrationId}`
       : null,
@@ -143,7 +157,7 @@ export function AdminApplyDialog({
   const showPicker = mode?.type === "add" && pickedUser === null;
 
   async function handleSubmit(mealsBody: RegistrationMealBody[]) {
-    if (!targetUser) return;
+    if (!targetUser || !registrationAllowed || saving) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/admin/applications/${applicationId}/registrations`, {
@@ -168,7 +182,10 @@ export function AdminApplyDialog({
   }
 
   // ── 학생 선택 단계 (add 모드) ──
-  const allStudents = usersData?.users ?? [];
+  const allStudents: TargetUser[] = yearState.notReady ? usersData?.users ?? [] : roster.rows
+    .filter((row) => row.userId !== null && row.memberState === "ENROLLED" && row.accessState === "ACTIVE")
+    .map((row) => ({ id: row.userId!, name: row.profile.name, grade: row.profile.grade,
+      classNum: row.profile.classNum, number: row.profile.number }));
   const gradeOptions = [...new Set(allStudents.map((u) => u.grade).filter((g): g is number => g != null))].sort();
   const classOptions = filterGrade === "all"
     ? []
@@ -181,7 +198,7 @@ export function AdminApplyDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90dvh] overflow-y-auto">
+      <DialogContent showCloseButton={!saving} className="w-full max-w-[calc(100%-1rem)] p-2 sm:p-3 sm:max-w-2xl max-h-[calc(100svh-1rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="whitespace-nowrap overflow-hidden text-ellipsis">
             {showPicker
@@ -189,13 +206,24 @@ export function AdminApplyDialog({
               : `${targetUser?.name ?? ""} 대리 신청`}
           </DialogTitle>
         </DialogHeader>
+        {academicYear !== null && <p className="text-sm font-medium whitespace-nowrap">{academicYear}학년도 최종 소속 기준</p>}
 
-        {showPicker ? (
+        {appError || regError || usersError || roster.error || yearState.error ? (
+          <p role="alert" className="text-sm text-destructive break-keep">신청 자료를 불러오지 못했습니다. 창을 닫고 다시 시도해주세요.</p>
+        ) : !canWrite ? (
+          <p className="text-sm whitespace-nowrap">조회 전용입니다.</p>
+        ) : applicationYearState === "DRAFT" ? (
+          <p className="text-sm text-amber-700 break-keep">준비 중 · 접수 전입니다. 학년도 전환 후 신청할 수 있습니다.</p>
+        ) : !isEdit && applicationYearState === "ARCHIVED" ? (
+          <p className="text-sm text-amber-700 break-keep">지난 학년도에는 새로 신청할 수 없습니다. 기존 신청은 명단에서 수정하세요.</p>
+        ) : targetUser && targetUser.grade === null ? (
+          <p role="alert" className="text-sm text-amber-700 break-keep">학년도 정보 확인 필요: 해당 학년도의 학생 학년을 먼저 확인해주세요.</p>
+        ) : showPicker ? (
           <div className="space-y-3">
             {/* 학년/반 필터 */}
             <div className="flex gap-2">
               <Select value={filterGrade} onValueChange={(v) => { setFilterGrade(v ?? "all"); setFilterClass("all"); }}>
-                <SelectTrigger className="w-24">
+                <SelectTrigger className="min-h-11 w-24">
                   <SelectValue placeholder="학년">{(v: string) => (v === "all" ? "전체" : `${v}학년`)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
@@ -207,7 +235,7 @@ export function AdminApplyDialog({
               </Select>
               {filterGrade !== "all" && (
                 <Select value={filterClass} onValueChange={(v) => setFilterClass(v ?? "all")}>
-                  <SelectTrigger className="w-20">
+                  <SelectTrigger className="min-h-11 w-20">
                     <SelectValue placeholder="반">{(v: string) => (v === "all" ? "전체" : `${v}반`)}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -222,26 +250,30 @@ export function AdminApplyDialog({
 
             {/* 학생 목록 */}
             <div className="border rounded-xl overflow-y-auto overflow-x-auto max-h-64">
-              {filteredStudents.length === 0 ? (
+              {!appData || yearState.isLoading || roster.isLoading || usersLoading ? (
+                <p className="text-sm text-muted-foreground p-3 text-center">불러오는 중...</p>
+              ) : filteredStudents.length === 0 ? (
                 <p className="text-sm text-muted-foreground p-3 text-center">학생 없음</p>
               ) : (
                 <ul>
                   {filteredStudents.map((u) => {
                     const alreadyRegistered = existingUserIds.has(u.id);
+                    const missingGrade = u.grade === null;
                     return (
                       <li key={u.id}>
                         <button
                           type="button"
                           onClick={() => !alreadyRegistered && setPickedUser(u)}
                           className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 transition-colors min-h-11 ${
-                            alreadyRegistered ? "opacity-40 cursor-not-allowed" : "hover:bg-muted"
+                            alreadyRegistered || missingGrade ? "opacity-40 cursor-not-allowed" : "hover:bg-muted"
                           }`}
-                          disabled={alreadyRegistered}
+                          disabled={alreadyRegistered || missingGrade || !registrationAllowed}
                         >
                           <span className="text-muted-foreground min-w-12 whitespace-nowrap">
                             {u.grade}{u.classNum?.toString().padStart(2, "0")}{u.number?.toString().padStart(2, "0")}
                           </span>
                           <span className="whitespace-nowrap">{u.name}</span>
+                          {missingGrade && <span className="text-xs text-amber-700 whitespace-nowrap">학년도 정보 확인 필요</span>}
                           {alreadyRegistered && (
                             <span className="ml-auto text-xs text-muted-foreground whitespace-nowrap" title="이미 신청된 학생입니다. 명단에서 행을 클릭해 수정하세요.">이미 신청</span>
                           )}
@@ -260,6 +292,7 @@ export function AdminApplyDialog({
             key={`${applicationId}:${targetUser!.id}`}
             application={formApplication!}
             initialMeals={initialMeals}
+            disabled={!registrationAllowed || saving}
             footer={({ buildMealsBody }) => (
               <>
                 {/* 관리자 대리 신청 안내 */}
@@ -283,7 +316,7 @@ export function AdminApplyDialog({
                   </Button>
                   <Button
                     className="rounded-lg min-h-11 whitespace-nowrap"
-                    disabled={saving}
+                    disabled={saving || !registrationAllowed}
                     onClick={() => handleSubmit(buildMealsBody())}
                   >
                     {saving ? "처리 중..." : isEdit ? "신청 수정" : "신청 등록"}

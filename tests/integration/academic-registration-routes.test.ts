@@ -69,6 +69,8 @@ describe("registration route guards", () => {
     adminImport: typeof import("@/app/api/admin/applications/[id]/import/route");
     adminClose: typeof import("@/app/api/admin/applications/[id]/close/route");
     studentApplications: typeof import("@/app/api/applications/route");
+    studentDetail: typeof import("@/app/api/applications/[id]/route");
+    adminDetail: typeof import("@/app/api/admin/applications/[id]/route");
   };
 
   beforeAll(async () => {
@@ -83,6 +85,8 @@ describe("registration route guards", () => {
       adminImport: await import("@/app/api/admin/applications/[id]/import/route"),
       adminClose: await import("@/app/api/admin/applications/[id]/close/route"),
       studentApplications: await import("@/app/api/applications/route"),
+      studentDetail: await import("@/app/api/applications/[id]/route"),
+      adminDetail: await import("@/app/api/admin/applications/[id]/route"),
     };
   });
 
@@ -153,6 +157,62 @@ describe("registration route guards", () => {
   }
 
   const appParams = () => ({ params: Promise.resolve({ id: String(fx.applicationId) }) });
+
+  it("학생 공고 상세는 현재 학급 대신 공고 학년도 프로필을 반환한다", async () => {
+    const student = await db.user.update({ where: { id: fx.studentId }, data: { name: "현재이름", grade: 3, classNum: 9, number: 99 } });
+    asUser(student);
+    const response = await routes.studentDetail.GET(new Request("http://localhost/api"), appParams());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      application: { academicYear: 2026, academicYearState: "ACTIVE" },
+      applicantProfile: { name: "학생테스트", grade: 1, classNum: 1, number: 1 },
+    });
+  });
+
+  it("학생 상세는 PREPARING의 기존 공고와 프로필 폴백을 유지한다", async () => {
+    await db.rosterControl.update({ where: { id: 1 }, data: { mode: "PREPARING" } });
+    await db.mealApplication.update({ where: { id: fx.applicationId }, data: { academicYear: null, startMonth: 1 } });
+    await db.userAcademicRecord.delete({ where: { year_userId: { year: 2026, userId: fx.studentId } } });
+    asUser(await db.user.findUniqueOrThrow({ where: { id: fx.studentId } }));
+    const response = await routes.studentDetail.GET(new Request("http://localhost/api"), appParams());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      application: { academicYear: 2026, academicYearState: "ACTIVE" },
+      applicantProfile: { name: "학생테스트", grade: 1, classNum: 1, number: 1 },
+    });
+  });
+
+  it("학생 상세는 OPEN 공고라도 DRAFT 학년도 상태를 전달한다", async () => {
+    await db.academicYear.update({ where: { year: 2026 }, data: { state: "DRAFT" } });
+    asUser(await db.user.findUniqueOrThrow({ where: { id: fx.studentId } }));
+    const response = await routes.studentDetail.GET(new Request("http://localhost/api"), appParams());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ application: { academicYear: 2026, academicYearState: "DRAFT", status: "OPEN" } });
+    asAdmin();
+    const statistics = await routes.adminRegistrations.GET(new Request("http://localhost/api"), appParams());
+    expect(statistics.status).toBe(200);
+    expect(await statistics.json()).toMatchObject({ academicYear: 2026, academicYearState: "DRAFT" });
+  });
+
+  it("관리자 상세는 PREPARING의 1월 null 공고도 운영 연도로 해석한다", async () => {
+    await db.rosterControl.update({ where: { id: 1 }, data: { mode: "PREPARING" } });
+    await db.mealApplication.update({ where: { id: fx.applicationId }, data: { academicYear: null, startMonth: 1 } });
+    const response = await routes.adminDetail.GET(new Request("http://localhost/api"), appParams());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ application: {
+      academicYear: null, resolvedAcademicYear: 2026, academicYearState: "ACTIVE", registrationCount: 1,
+    } });
+    const statistics = await routes.adminRegistrations.GET(new Request("http://localhost/api"), appParams());
+    expect(statistics.status).toBe(200);
+    expect(await statistics.json()).toMatchObject({ academicYear: 2026, academicYearState: "ACTIVE" });
+  });
+
+  it("관리자 공고 상세는 취소된 신청도 학년도 잠금 건수에 포함한다", async () => {
+    await db.mealRegistration.update({ where: { id: fx.registrationId }, data: { status: "CANCELLED" } });
+    const response = await routes.adminDetail.GET(new Request("http://localhost/api"), appParams());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ application: { academicYear: 2026, registrationCount: 1 } });
+  });
 
   it("초안 학년도에만 있는 학생은 네 CREATE/RESTORE 경로 모두에서 거절된다", async () => {
     const draftOnly = await makeDraftOnlyStudent();

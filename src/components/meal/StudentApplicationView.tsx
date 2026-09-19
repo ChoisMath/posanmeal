@@ -13,11 +13,12 @@ import {
 } from "./ApplicationApplyForm";
 import { studentNumberOf } from "@/lib/meal-plan";
 import { formatDateTimeKST } from "@/lib/timezone";
-import { useUser } from "@/hooks/useUser";
 import { errorTextOf } from "@/lib/fetcher";
 
 interface ApplicationDetail {
   id: number;
+  academicYear: number;
+  academicYearState: "ACTIVE" | "DRAFT" | "ARCHIVED";
   title: string;
   description: string | null;
   startYear: number;
@@ -36,29 +37,27 @@ interface MyRegistration {
   meals: InitialRegistrationMeal[];
 }
 
+interface ApplicantProfile {
+  name: string;
+  grade: number | null;
+  classNum: number | null;
+  number: number | null;
+}
+
 interface StudentApplicationViewProps {
   applicationId: number;
   onBack: () => void;
   onSubmitted: () => void;
 }
 
-function formatApplyDateTime(iso: string): string {
-  const d = new Date(iso);
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
-  return `${mm}-${dd} ${hh}시${min}분`;
-}
 
 export function StudentApplicationView({
   applicationId,
   onBack,
   onSubmitted,
 }: StudentApplicationViewProps) {
-  const { user } = useUser();
-
   const [loading, setLoading] = useState(true);
+  const [applicantProfile, setApplicantProfile] = useState<ApplicantProfile | null>(null);
   const [application, setApplication] = useState<ApplicationDetail | null>(null);
   const [registrationCount, setRegistrationCount] = useState(0);
   const [myReg, setMyReg] = useState<MyRegistration | null>(null);
@@ -77,6 +76,7 @@ export function StudentApplicationView({
         }
         const json = await res.json();
         setApplication(json.application);
+        setApplicantProfile(json.applicantProfile);
         setRegistrationCount(json.registrationCount ?? 0);
         setMyReg(json.myRegistration ?? null);
       } finally {
@@ -148,13 +148,14 @@ export function StudentApplicationView({
 
   const now = new Date();
   const isApplyOpen =
+    application.academicYearState === "ACTIVE" &&
     application.status === "OPEN" &&
     now >= new Date(application.applyStartAt) &&
     now <= new Date(application.applyEndAt);
 
   const studentNumber =
-    user?.grade && user?.classNum && user?.number
-      ? studentNumberOf(user.grade, user.classNum, user.number)
+    applicantProfile?.grade != null && applicantProfile.classNum != null && applicantProfile.number != null
+      ? studentNumberOf(applicantProfile.grade, applicantProfile.classNum, applicantProfile.number)
       : null;
 
   return (
@@ -163,17 +164,18 @@ export function StudentApplicationView({
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors text-sm min-h-11"
+        className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors text-sm min-h-11 min-w-11 whitespace-nowrap"
       >
         <ChevronLeft className="size-4" />
         <span>목록으로</span>
       </button>
 
       {/* 상단 정보 표 */}
-      <div className="card-elevated rounded-2xl border-0 p-4 space-y-3">
+      <div className="card-elevated rounded-2xl border-0 p-2 sm:p-3 space-y-3">
         <h2 className="font-bold text-base whitespace-nowrap overflow-hidden text-ellipsis" title={application.title}>{application.title}</h2>
+        <p className="text-sm font-medium whitespace-nowrap">{application.academicYear}학년도 최종 소속 기준</p>
         {application.description && (
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap break-keep">
             {application.description}
           </p>
         )}
@@ -181,25 +183,25 @@ export function StudentApplicationView({
           <table className="w-full text-sm">
             <tbody>
               <tr className="border-b border-border/50">
-                <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap w-24">신청 기간</td>
+                <td className="sticky left-0 z-[3] bg-card py-2 pr-3 text-muted-foreground whitespace-nowrap w-24">신청 기간</td>
                 <td className="py-2 font-medium whitespace-nowrap">
-                  {formatApplyDateTime(application.applyStartAt)} ~ {formatApplyDateTime(application.applyEndAt)}
+                  {formatDateTimeKST(new Date(application.applyStartAt))} ~ {formatDateTimeKST(new Date(application.applyEndAt))}
                 </td>
               </tr>
               <tr className="border-b border-border/50">
-                <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">신청 인원</td>
+                <td className="sticky left-0 z-[3] bg-card py-2 pr-3 text-muted-foreground whitespace-nowrap">신청 인원</td>
                 <td className="py-2 font-medium whitespace-nowrap">{registrationCount}명</td>
               </tr>
-              {user && (
+              {applicantProfile && (
                 <>
                   <tr className="border-b border-border/50">
-                    <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">이름</td>
-                    <td className="py-2 font-medium whitespace-nowrap">{user.name}</td>
+                    <td className="sticky left-0 z-[3] bg-card py-2 pr-3 text-muted-foreground whitespace-nowrap">이름</td>
+                    <td className="py-2 font-medium whitespace-nowrap">{applicantProfile.name}</td>
                   </tr>
                   <tr>
-                    <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">학번</td>
+                    <td className="sticky left-0 z-[3] bg-card py-2 pr-3 text-muted-foreground whitespace-nowrap">학번</td>
                     <td className="py-2 font-medium whitespace-nowrap">
-                      {studentNumber != null ? studentNumber : `${user.grade}학년 ${user.classNum}반 ${user.number}번`}
+                      {studentNumber ?? "학년도 정보 확인 필요"}
                     </td>
                   </tr>
                 </>
@@ -213,8 +215,10 @@ export function StudentApplicationView({
           </div>
         )}
         {!isApplyOpen && (
-          <p className="text-sm text-amber-600 dark:text-amber-400 font-medium whitespace-nowrap">
-            {application.status !== "OPEN"
+          <p className="text-sm text-amber-600 dark:text-amber-400 font-medium break-keep">
+            {application.academicYearState === "DRAFT" ? "준비 중 · 접수 전입니다."
+              : application.academicYearState === "ARCHIVED" ? "지난 학년도 공고는 직접 수정할 수 없습니다."
+              : application.status !== "OPEN"
               ? "마감된 공고입니다."
               : "신청 기간이 아닙니다."}
           </p>

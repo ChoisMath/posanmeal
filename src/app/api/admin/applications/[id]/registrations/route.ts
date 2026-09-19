@@ -16,6 +16,7 @@ import {
   getReportProfiles,
 } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
+import { readYearState } from "@/lib/academic-year/roster-service";
 import { z } from "zod";
 
 // Admin body: no signature, just userId + meals
@@ -64,6 +65,7 @@ async function listRegistrations(
 
   const mode = await rosterMode(prisma);
   const academicYear = await resolveApplicationYear(prisma, mode, application.academicYear);
+  const academicYearState = await readYearState(prisma, academicYear);
 
   const registrationRows = await prisma.mealRegistration.findMany({
     where: { applicationId },
@@ -141,7 +143,7 @@ async function listRegistrations(
       };
     });
 
-  return NextResponse.json({ application, academicYear, registrations });
+  return NextResponse.json({ application, academicYear, academicYearState, registrations });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {

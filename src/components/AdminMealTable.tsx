@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, type CSSProperties } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { errorTextOf, fetcher } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
@@ -33,6 +33,7 @@ interface UserRecord {
   subject: string | null;
   homeroom: string | null;
   profileWarning?: string;
+  currentClass?: string;
   checkIns: CheckInRecord[];
 }
 
@@ -46,9 +47,11 @@ const CATEGORIES: Array<{ value: Category; label: string }> = [
 ];
 const EMPTY_USERS: UserRecord[] = [];
 
-function MealGrid({ category, year, month, readonly = false }: { category: Category; year: number; month: number; readonly?: boolean }) {
+function MealGrid({ category, year, month, includeCurrent, readonly = false }: { category: Category; year: number; month: number; includeCurrent: boolean; readonly?: boolean }) {
+  const { mutate } = useSWRConfig();
+  const gridKey = `/api/admin/checkins?year=${year}&month=${month}&category=${category}`;
   const { data, error, isLoading, mutate: mutateGrid } = useSWR(
-    `/api/admin/checkins?year=${year}&month=${month}&category=${category}`,
+    `${gridKey}${includeCurrent ? "&includeCurrent=1" : ""}`,
     fetcher,
     { revalidateOnFocus: false }
   );
@@ -116,7 +119,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
         body: JSON.stringify({ userId, date: column.date, mealKind: column.mealKind, action }),
       });
       if (res.ok) {
-        mutateGrid();
+        await mutate((key) => typeof key === "string" && (key === gridKey || key.startsWith(`${gridKey}&`)));
       } else {
         const data = await res.json().catch(() => null);
         toast.error(errorTextOf(data, "체크인 변경에 실패했습니다."));
@@ -151,6 +154,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
             <th className="sticky top-0 left-0 z-[4] bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[100px] text-fit-sm">
               {isTeacher || needsProfile ? "이름" : "반 번호 이름"}
             </th>
+            {includeCurrent && <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r">현재 학급·상태</th>}
             {mealColumns.map((column) => {
               const weekend = isWeekend(column.day);
               const mealHeaderClass =
@@ -214,6 +218,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   </div>
                   {user.profileWarning && <p className="whitespace-nowrap text-xs text-amber-700">{user.profileWarning}</p>}
                 </td>
+                {includeCurrent && <td className="border-b border-r px-2 py-1.5 text-muted-foreground">{user.currentClass ?? "확인 필요"}</td>}
                 {mealColumns.map((column) => {
                   const checkIn = checkedDaysMap.get(column.key);
                   const weekend = isWeekend(column.day);
@@ -243,10 +248,10 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                       title={
                         clickable
                           ? checkIn
-                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} (클릭하여 ${isTeacher ? "변경" : "삭제"})`
+                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })} (클릭하여 ${isTeacher ? "변경" : "삭제"})`
                             : `${column.label} 클릭하여 추가`
                           : checkIn
-                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`
+                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })}`
                             : undefined
                       }
                       onClick={clickable ? () => handleCellClick(user.id, column) : undefined}
@@ -282,6 +287,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
             <>
               <tr>
                 <td className="sticky left-0 z-[3] bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
+                {includeCurrent && <td className="border-t border-r bg-blue-50 dark:bg-blue-950" />}
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
@@ -303,6 +309,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
               </tr>
               <tr>
                 <td className="sticky left-0 z-[3] bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
+                {includeCurrent && <td className="border-t border-r bg-green-50 dark:bg-green-950" />}
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
@@ -324,6 +331,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
               </tr>
               <tr>
                 <td className="sticky left-0 z-[3] bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+                {includeCurrent && <td className="border-t border-r bg-muted" />}
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
@@ -349,6 +357,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
           ) : (
             <tr>
               <td className="sticky left-0 z-[3] bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+              {includeCurrent && <td className="border-t border-r bg-muted" />}
               {dailyTotals.map((d, i) => (
                 <td key={mealColumns[i]?.key ?? i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
                   {d.total || ""}
@@ -371,6 +380,7 @@ export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}
   const [month, setMonth] = useState(Number(today.slice(5, 7)));
   const [tab, setTab] = useState<Category>("teacher");
   const [exporting, setExporting] = useState(false);
+  const [includeCurrent, setIncludeCurrent] = useState(false);
   const academicYear = academicYearOfDate(`${year}-${String(month).padStart(2, "0")}-01`);
 
   const prevMonth = () => {
@@ -386,7 +396,7 @@ export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}
   async function handleExport() {
     setExporting(true);
     try {
-      const res = await fetch(`/api/admin/export?year=${year}&month=${month}`);
+      const res = await fetch(`/api/admin/export?year=${year}&month=${month}${includeCurrent ? "&includeCurrent=1" : ""}`);
       if (!res.ok) {
         toast.error(errorTextOf(await res.json().catch(() => null), "내려받기에 실패했습니다."));
         return;
@@ -427,12 +437,18 @@ export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}
                 <Download className="h-4 w-4 mr-1" /> Excel
               </Button>
             </div>
-            <p className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{academicYear}학년도 최종 소속 기준</p>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+              <p className="whitespace-nowrap text-xs text-muted-foreground">{academicYear}학년도 최종 소속 기준</p>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 whitespace-nowrap text-sm">
+                <input type="checkbox" className="size-5 shrink-0" checked={includeCurrent} onChange={(event) => setIncludeCurrent(event.target.checked)} />
+                현재 학급도 함께 표시
+              </label>
+            </div>
             {cat === "unknown" && <p className="shrink-0 break-keep rounded-lg bg-amber-50 p-2 text-sm text-amber-800">
               해당 학년도 표시 정보가 없는 식사 기록입니다. 현재 학급으로 대신 표시하지 않습니다.
               사용자 관리에서 해당 학년도 정보를 확인해 주세요. 이 목록에서는 체크인을 변경할 수 없습니다.
             </p>}
-            <MealGrid category={cat} year={year} month={month} readonly={readonly} />
+            <MealGrid category={cat} year={year} month={month} includeCurrent={includeCurrent} readonly={readonly} />
           </TabsContent>
         ))}
       </Tabs>

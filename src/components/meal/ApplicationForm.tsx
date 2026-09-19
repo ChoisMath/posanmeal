@@ -29,6 +29,9 @@ import {
 } from "@/lib/meal-plan";
 import { todayKST } from "@/lib/timezone";
 import { errorTextOf } from "@/lib/fetcher";
+import { useAcademicYears } from "@/hooks/useAcademicRoster";
+import { useAdminPermission } from "@/hooks/useAdminPermission";
+import { isWithinAcademicYear, YEAR_SPAN_MESSAGE } from "@/lib/schemas/meal-plan";
 
 interface ApplicationFormProps {
   applicationId?: number;
@@ -109,10 +112,17 @@ const CURRENT_YEAR = new Date().getFullYear();
 export default function ApplicationForm({ applicationId }: ApplicationFormProps) {
   const router = useRouter();
   const isEdit = applicationId != null;
+  const { canWrite } = useAdminPermission();
+  const yearState = useAcademicYears();
 
   const today = todayKST();
 
   const [subject, setSubject] = useState("급식신청");
+  const [academicYear, setAcademicYear] = useState<number | null>(null);
+  const [storedYear, setStoredYear] = useState<number | null>(null);
+  const [storedYearState, setStoredYearState] = useState<string | null>(null);
+  const [registrationCount, setRegistrationCount] = useState(0);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [description, setDescription] = useState("");
   const [startYear, setStartYear] = useState(CURRENT_YEAR);
   const [startMonth, setStartMonth] = useState(new Date().getMonth() + 1);
@@ -139,10 +149,15 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
       try {
         const res = await fetch(`/api/admin/applications/${applicationId}`);
         if (!res.ok) {
+          setLoadFailed(true);
           toast.error("공고를 불러오지 못했습니다.");
           return;
         }
         const { application } = await res.json();
+        setStoredYear(application.academicYear);
+        setAcademicYear(application.resolvedAcademicYear);
+        setStoredYearState(application.academicYearState);
+        setRegistrationCount(application.registrationCount);
 
         // subject: "YYYY년 MM월 " 접두사 제거
         const rawSubject: string = application.title ?? "";
@@ -178,6 +193,9 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
           };
         }
         setMeals(nextMeals);
+      } catch {
+        setLoadFailed(true);
+        toast.error("공고를 불러오지 못했습니다.");
       } finally {
         setLoading(false);
       }
@@ -217,7 +235,23 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
     }));
   }
 
+  const selectedYear = academicYear;
+  const usesPreparingDefault = !isEdit && yearState.notReady;
+  const selectedYearState = yearState.years.find((row) => row.year === selectedYear)?.state
+    ?? (isEdit && (selectedYear === storedYear || storedYear === null) ? storedYearState : undefined);
+  const academicYearOptions = yearState.years.filter((row) => row.state !== "ARCHIVED" || row.year === storedYear);
+  const yearLocked = isEdit && registrationCount > 0;
+
   async function handleSave() {
+    if (!canWrite || loadFailed || saving) return;
+    if (!usesPreparingDefault && (selectedYear === null || !Number.isInteger(selectedYear) || selectedYear < 2000 || selectedYear > 2100)) {
+      toast.error("학년도를 입력해주세요.");
+      return;
+    }
+    if (!isEdit && selectedYearState === "ARCHIVED") {
+      toast.error("지난 학년도에는 새 공고를 만들 수 없습니다.");
+      return;
+    }
     // 클라 검증
     if (!applyStart.date || !applyEnd.date) {
       toast.error("신청 기간 날짜를 입력해주세요.");
@@ -244,6 +278,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
     }
 
     const body = {
+      academicYear: usesPreparingDefault ? undefined : selectedYear,
       subject,
       description,
       startYear,
@@ -265,6 +300,11 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               }),
       })),
     };
+
+    if (selectedYear !== null && !isWithinAcademicYear(selectedYear, body)) {
+      toast.error(YEAR_SPAN_MESSAGE);
+      return;
+    }
 
     setSaving(true);
     try {
@@ -296,7 +336,8 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
 
   const months = monthsOf(startYear, startMonth, monthCount);
 
-  const yearOptions = [CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1];
+  const yearOptions = [...new Set([CURRENT_YEAR - 1, CURRENT_YEAR, CURRENT_YEAR + 1, startYear,
+    ...(selectedYear === null ? [] : [selectedYear, selectedYear + 1])])].sort((a, b) => a - b);
   const hourOptions = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
   const minuteOptions = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
 
@@ -327,6 +368,37 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
       {/* 본문 스크롤 영역 */}
       <div className="flex-1 overflow-y-auto p-2 space-y-3">
 
+        <div className="card-elevated rounded-2xl border-0 p-2 sm:p-3 space-y-2">
+          <Label htmlFor="application-academic-year" className="text-sm font-semibold whitespace-nowrap">공고 학년도</Label>
+          {yearState.notReady ? (
+            <p id="application-academic-year" className="flex min-h-11 items-center text-sm whitespace-nowrap">
+              {selectedYear === null ? "현재 운영 학년도 (서버에서 적용)" : `${selectedYear}학년도`}
+            </p>
+          ) : (
+            <Select value={selectedYear === null ? null : String(selectedYear)} disabled={yearLocked || !canWrite || yearState.isLoading || Boolean(yearState.error)}
+              onValueChange={(value) => {
+                if (!value) return;
+                const year = Number(value);
+                setAcademicYear(year);
+                handleRangeChange(year + (startMonth < 3 ? 1 : 0), startMonth, monthCount);
+              }}>
+              <SelectTrigger id="application-academic-year" aria-label="공고 학년도" className="min-h-11 w-full sm:w-64">
+                <SelectValue placeholder="학년도를 선택하세요">{selectedYear === null ? undefined : `${selectedYear}학년도`}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>{academicYearOptions.map((row) => (
+                <SelectItem key={row.year} value={String(row.year)}>{row.year}학년도 · {row.state === "DRAFT" ? "준비 중 · 접수 전" : row.state === "ACTIVE" ? "운영 중" : "지난 학년도"}</SelectItem>
+              ))}</SelectContent>
+            </Select>
+          )}
+          <p className="text-xs text-muted-foreground break-keep">학년도는 3월부터 다음 해 2월까지입니다. 공고 기간과 개설일을 같은 학년도 안에서 설정하세요.</p>
+          {selectedYearState === "DRAFT" && <p role="status" className="text-sm font-medium text-amber-700 break-keep">준비 중인 학년도 공고입니다. 접수 전 상태로 준비하며, 학년도 전환이 끝난 뒤 신청을 받을 수 있습니다.</p>}
+          {yearLocked && <p className="text-xs text-muted-foreground break-keep">취소를 포함한 신청 {registrationCount}건이 있어 학년도를 바꿀 수 없습니다.</p>}
+          {yearState.notReady && <p className="text-xs text-muted-foreground break-keep">명부 전환 준비 중에는 기존 운영 학년도를 사용합니다. 학년도 선택은 준비가 끝나면 열립니다.</p>}
+          {yearState.error && <p role="alert" className="text-sm text-destructive break-keep">학년도 목록을 불러오지 못했습니다.</p>}
+          {loadFailed && <p role="alert" className="text-sm text-destructive break-keep">기존 공고를 불러오지 못해 저장할 수 없습니다.</p>}
+          {!canWrite && <p className="text-sm text-muted-foreground whitespace-nowrap">조회 전용</p>}
+        </div>
+
         {/* 1. 제목줄: 년도 + 월 + N개월간 + 제목 */}
         <div className="card-elevated rounded-2xl border-0 p-3 space-y-2">
           <Label className="text-sm font-semibold">공고 기간 및 제목</Label>
@@ -335,7 +407,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               value={String(startYear)}
               onValueChange={(v) => handleRangeChange(Number(v), startMonth, monthCount)}
             >
-              <SelectTrigger className="w-24">
+              <SelectTrigger className="min-h-11 w-24">
                 <SelectValue>{(v: string) => `${v}년`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -351,7 +423,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               value={String(startMonth)}
               onValueChange={(v) => handleRangeChange(startYear, Number(v), monthCount)}
             >
-              <SelectTrigger className="w-20">
+              <SelectTrigger className="min-h-11 w-20">
                 <SelectValue>{(v: string) => `${v}월`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -369,7 +441,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
               value={String(monthCount)}
               onValueChange={(v) => handleRangeChange(startYear, startMonth, Number(v))}
             >
-              <SelectTrigger className="w-24">
+              <SelectTrigger className="min-h-11 w-24">
                 <SelectValue>{(v: string) => `${v}개월간`}</SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -382,13 +454,13 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
             </Select>
 
             <Input
-              className="flex-1 min-w-32"
+              className="min-h-11 flex-1 min-w-32"
               placeholder="제목 (예: 급식신청)"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
             />
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground break-keep">
             저장 시 제목: <span className="font-medium">{startYear}년 {String(startMonth).padStart(2, "0")}월 {subject}</span>
           </p>
         </div>
@@ -419,7 +491,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                 <span className="text-sm text-muted-foreground whitespace-nowrap w-8">{label}</span>
                 <Input
                   type="date"
-                  className="w-36"
+                  className="min-h-11 w-36"
                   value={state.date}
                   onChange={(e) => setter((prev) => ({ ...prev, date: e.target.value }))}
                 />
@@ -427,7 +499,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   value={state.hour}
                   onValueChange={(v) => { if (v) setter((prev) => ({ ...prev, hour: v })); }}
                 >
-                  <SelectTrigger className="w-16">
+                  <SelectTrigger className="min-h-11 w-16">
                     <SelectValue>{(v: string) => `${v}시`}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -442,7 +514,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   value={state.minute}
                   onValueChange={(v) => { if (v) setter((prev) => ({ ...prev, minute: v })); }}
                 >
-                  <SelectTrigger className="w-16">
+                  <SelectTrigger className="min-h-11 w-16">
                     <SelectValue>{(v: string) => `${v}분`}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -477,7 +549,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                 <div className="flex items-center gap-1 flex-1 min-w-36">
                   <Input
                     inputMode="numeric"
-                    className="w-28 text-right"
+                    className="min-h-11 w-28 text-right"
                     value={m.price}
                     onChange={(e) => {
                       const v = e.target.value.replace(/[^\d]/g, "");
@@ -494,7 +566,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                     updateMeal(kind, "exemptionSelectable", v === "true")
                   }
                 >
-                  <SelectTrigger className="w-28">
+                  <SelectTrigger className="min-h-11 w-28">
                     <SelectValue>{(v: string) => (v === "true" ? "선택가능" : "선택불가")}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -508,7 +580,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
                   value={m.method}
                   onValueChange={(v) => updateMeal(kind, "method", v as MealApplyMethod)}
                 >
-                  <SelectTrigger className="w-28">
+                  <SelectTrigger className="min-h-11 w-28">
                     <SelectValue>{(v: string) => METHOD_LABEL[v as MealApplyMethod]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -552,7 +624,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
           </Link>
           <Button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !canWrite || loadFailed || (!usesPreparingDefault && selectedYear === null) || (!isEdit && Boolean(yearState.error))}
             className="min-h-11 whitespace-nowrap"
           >
             {saving ? "저장 중..." : "저장"}

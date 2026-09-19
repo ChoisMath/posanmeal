@@ -2,7 +2,7 @@
 
 import { Fragment, useState, useRef } from "react";
 import Link from "next/link";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import { AdminApplyDialog, type AdminApplyMode } from "./AdminApplyDialog";
 import { MEAL_THEME } from "@/components/meal/meal-ui";
 import { genderLabel } from "@/lib/gender";
 import { formatDateTimeKST } from "@/lib/timezone";
+import { useAdminPermission } from "@/hooks/useAdminPermission";
+import { useAcademicYears } from "@/hooks/useAcademicRoster";
 import { fetcher, errorTextOf } from "@/lib/fetcher";
 
 // ---------- Types ----------
@@ -35,6 +37,7 @@ interface AppMealConfig {
 interface ApplicationInfo {
   id: number;
   title: string;
+  academicYear: number | null;
   startYear: number;
   startMonth: number;
   monthCount: number;
@@ -67,9 +70,13 @@ interface Registration {
   addedBy: string | null;
   user: RegUser;
   meals: RegMeal[];
+  currentClass?: string;
+  profileWarning?: string;
 }
 
 interface StatsData {
+  academicYear: number;
+  academicYearState?: "ACTIVE" | "DRAFT" | "ARCHIVED";
   application: ApplicationInfo;
   registrations: Registration[];
 }
@@ -101,8 +108,12 @@ interface ApplicationStatsProps {
 }
 
 export default function ApplicationStats({ applicationId }: ApplicationStatsProps) {
-  const { data, mutate, isLoading } = useSWR<StatsData>(
-    `/api/admin/applications/${applicationId}/registrations`,
+  const { canWrite } = useAdminPermission();
+  const yearState = useAcademicYears();
+  const { mutate: mutateCache } = useSWRConfig();
+  const [includeCurrent, setIncludeCurrent] = useState(false);
+  const { data, isLoading, error } = useSWR<StatsData>(
+    `/api/admin/applications/${applicationId}/registrations${includeCurrent ? "?includeCurrent=1" : ""}`,
     fetcher,
   );
 
@@ -116,6 +127,15 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
 
   const application = data?.application;
   const registrations = data?.registrations ?? [];
+  const academicYear = data?.academicYear;
+  const applicationYearState = data?.academicYearState ?? yearState.years.find((row) => row.year === academicYear)?.state;
+  const canRegister = canWrite && applicationYearState === "ACTIVE";
+  const canEdit = canWrite && (applicationYearState === "ACTIVE" || applicationYearState === "ARCHIVED");
+
+  async function refreshRegistrations() {
+    const base = `/api/admin/applications/${applicationId}/registrations`;
+    await Promise.all([mutateCache(base), mutateCache(`${base}?includeCurrent=1`)]);
+  }
 
   // Active meals (method !== NONE)
   const activeMeals = application?.meals.filter((m) => m.method !== "NONE") ?? [];
@@ -172,6 +192,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
   const grades = [1, 2, 3].filter((g) => approvedRegs.some((r) => r.user.grade === g));
 
   async function handleImport(file: File) {
+    if (!canRegister || importing) return;
     setImporting(true);
     try {
       const formData = new FormData();
@@ -188,7 +209,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
       toast.success(
         `추가 ${json.added ?? 0} · 갱신 ${json.updated ?? 0} · 미발견 ${json.skippedNotFound ?? 0} · 오류 ${json.skippedInvalid ?? 0} · 무시된 표시 ${json.ignoredMarks ?? 0}`,
       );
-      mutate();
+      await refreshRegistrations();
     } catch {
       toast.error("네트워크 오류가 발생했습니다.");
     } finally {
@@ -198,6 +219,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
   }
 
   async function handleStatusToggle(reg: Registration) {
+    if (!canEdit || (reg.status === "CANCELLED" && !canRegister)) return;
     const nextStatus = reg.status === "APPROVED" ? "CANCELLED" : "APPROVED";
     try {
       const res = await fetch(
@@ -214,13 +236,14 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
         return;
       }
       toast.success(nextStatus === "CANCELLED" ? "신청이 취소되었습니다." : "신청이 복원되었습니다.");
-      mutate();
+      await refreshRegistrations();
     } catch {
       toast.error("네트워크 오류가 발생했습니다.");
     }
   }
 
   async function handleDelete(reg: Registration) {
+    if (!canWrite) return;
     if (!confirm(`${reg.user.name} 학생의 신청을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`)) return;
     try {
       const res = await fetch(
@@ -233,7 +256,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
         return;
       }
       toast.success("신청이 삭제되었습니다.");
-      mutate();
+      await refreshRegistrations();
     } catch {
       toast.error("네트워크 오류가 발생했습니다.");
     }
@@ -254,7 +277,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
   if (!application) {
     return (
       <div className="h-dvh flex items-center justify-center">
-        <p className="text-muted-foreground text-sm">공고를 찾을 수 없습니다.</p>
+        <p className="text-muted-foreground text-sm">{error ? "통계를 불러오지 못했습니다." : "공고를 찾을 수 없습니다."}</p>
       </div>
     );
   }
@@ -281,13 +304,15 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
         {/* 상단 바: 공고 정보 + 액션 버튼 */}
         <div className="card-elevated rounded-2xl border-0 p-3 space-y-2">
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="font-semibold text-sm truncate">{application.title}</p>
+            <div className="min-w-0 max-w-full overflow-x-auto">
+              <p className="font-semibold text-sm truncate" title={application.title}>{application.title}</p>
+              <p className="text-sm font-medium whitespace-nowrap">{academicYear}학년도 최종 소속 기준</p>
+              {applicationYearState === "DRAFT" && <p className="text-sm text-amber-700 whitespace-nowrap">준비 중 · 접수 전</p>}
               <p className="text-xs text-muted-foreground whitespace-nowrap">
                 신청기간: {formatApplyRange(application.applyStartAt, application.applyEndAt)}
               </p>
             </div>
-            <div className="flex flex-wrap gap-1.5 shrink-0">
+            {canWrite && <div className="flex w-full flex-wrap gap-2 sm:w-auto">
               <a
                 href={`/api/admin/applications/${applicationId}/export?template=true`}
                 download
@@ -297,39 +322,45 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
               </a>
 
               {/* 일괄 업로드 */}
-              <label className="inline-flex items-center justify-center min-h-11 px-3 py-1.5 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors whitespace-nowrap cursor-pointer">
+              {canRegister && <label className="inline-flex items-center justify-center min-h-11 px-3 py-1.5 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors whitespace-nowrap cursor-pointer">
                 {importing ? "업로드 중..." : "일괄 업로드"}
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".xlsx,.xls"
                   className="sr-only"
+                  disabled={importing}
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) handleImport(file);
                   }}
                 />
-              </label>
+              </label>}
 
               <a
-                href={`/api/admin/applications/${applicationId}/export`}
+                href={`/api/admin/applications/${applicationId}/export${includeCurrent ? "?includeCurrent=1" : ""}`}
                 download
                 className="inline-flex items-center justify-center min-h-11 px-3 py-1.5 text-sm font-medium rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors whitespace-nowrap"
               >
                 엑셀저장
               </a>
 
-              <Button
+              {canRegister && <Button
                 variant="default"
                 size="sm"
                 className="min-h-11 whitespace-nowrap"
                 onClick={() => setDialogMode({ type: "add" })}
               >
                 신청 추가
-              </Button>
-            </div>
+              </Button>}
+            </div>}
           </div>
         </div>
+
+        <label className="flex min-h-11 items-center gap-2 px-1 text-sm whitespace-nowrap">
+          <input type="checkbox" className="size-5 shrink-0" checked={includeCurrent} onChange={(event) => setIncludeCurrent(event.target.checked)} />
+          현재 학급도 함께 표시
+        </label>
 
         {/* 필터 행 */}
         <div className="card-elevated rounded-2xl border-0 p-3">
@@ -341,7 +372,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                 setFilterClass("all");
               }}
             >
-              <SelectTrigger className="w-24">
+              <SelectTrigger className="min-h-11 w-24">
                 <SelectValue placeholder="학년">{(v: string) => (v === "all" ? "전체학년" : `${v}학년`)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -357,7 +388,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
               onValueChange={(v) => setFilterClass(v ?? "all")}
               disabled={filterGrade === "all"}
             >
-              <SelectTrigger className="w-20">
+              <SelectTrigger className="min-h-11 w-20">
                 <SelectValue placeholder="반">{(v: string) => (v === "all" ? "전체반" : `${v}반`)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
@@ -372,7 +403,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
               placeholder="이름 검색"
               value={filterName}
               onChange={(e) => setFilterName(e.target.value)}
-              className="w-32"
+              className="min-h-11 w-32"
             />
 
             <label className="flex items-center gap-1.5 text-sm cursor-pointer whitespace-nowrap min-h-11 px-1">
@@ -397,31 +428,32 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-muted/80 border-b">
-                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">#</th>
-                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">입력시간</th>
-                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">아이디</th>
-                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">학번</th>
-                  <th className="sticky top-0 left-0 z-40 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">이름</th>
-                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">성별</th>
+                  <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">#</th>
+                  <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">입력시간</th>
+                  <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">아이디</th>
+                  <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">{academicYear}학년도 학번</th>
+                  {includeCurrent && <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">현재 학급</th>}
+                  <th className="sticky top-0 left-0 z-[4] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">이름</th>
+                  <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-semibold whitespace-nowrap text-xs">성별</th>
                   {mealColumns.map(({ kind, type }) => {
                     const theme = MEAL_THEME[kind];
                     return (
                       <th
                         key={`${kind}-${type}`}
-                        className={`sticky top-0 z-20 px-2 py-2 text-center font-semibold whitespace-nowrap text-xs ${theme.head} ${theme.text}`}
+                        className={`sticky top-0 z-[2] px-2 py-2 text-center font-semibold whitespace-nowrap text-xs ${theme.head} ${theme.text}`}
                       >
                         {MEAL_SHORT[kind]}{type === "exempt" ? " 면제" : " 신청일수"}
                       </th>
                     );
                   })}
-                  <th className="sticky top-0 z-20 bg-muted px-2 py-2 text-center font-semibold whitespace-nowrap text-xs">관리</th>
+                  <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-center font-semibold whitespace-nowrap text-xs">관리</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6 + mealColumns.length + 1}
+                      colSpan={7 + mealColumns.length + (includeCurrent ? 1 : 0)}
                       className="px-3 py-6 text-center text-sm text-muted-foreground"
                     >
                       신청 데이터가 없습니다.
@@ -430,16 +462,17 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                 ) : (
                   filtered.map((reg, idx) => {
                     const isCancelled = reg.status === "CANCELLED";
+                    const canEditRegistration = canEdit && !reg.profileWarning && reg.user.grade !== null && (!isCancelled || canRegister);
                     const rowCls = isCancelled
                       ? "bg-muted/40 text-muted-foreground"
                       : "bg-background hover:bg-muted/30 transition-colors";
                     return (
                       <tr
                         key={reg.id}
-                        onClick={() =>
-                          setDialogMode({ type: "edit", registrationId: reg.id, user: reg.user })
+                        onClick={canEditRegistration ? () =>
+                          setDialogMode({ type: "edit", registrationId: reg.id, user: reg.user }) : undefined
                         }
-                        className={`border-b last:border-0 cursor-pointer ${rowCls}`}
+                        className={`border-b last:border-0 ${canEditRegistration ? "cursor-pointer" : ""} ${rowCls}`}
                       >
                         <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">
                           {idx + 1}
@@ -456,8 +489,10 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                         <td className="px-2 py-1.5 whitespace-nowrap tabular-nums">
                           {studentNo(reg.user)}
                         </td>
-                        <td className={`sticky left-0 z-30 px-2 py-1.5 whitespace-nowrap font-medium ${isCancelled ? "bg-muted" : "bg-background"}`}>
+                        {includeCurrent && <td className="px-2 py-1.5 whitespace-nowrap">{reg.currentClass ?? "—"}</td>}
+                        <td className={`sticky left-0 z-[3] px-2 py-1.5 whitespace-nowrap font-medium ${isCancelled ? "bg-muted" : "bg-background"}`}>
                           {reg.user.name}
+                          {reg.profileWarning && <span className="block text-xs font-normal text-amber-700 whitespace-nowrap">{reg.profileWarning}</span>}
                           {reg.addedBy === "ADMIN" && (
                             <span className="ml-1 inline-flex items-center px-1 py-0 text-[10px] rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 font-medium whitespace-nowrap">관리자</span>
                           )}
@@ -486,21 +521,23 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                           );
                         })}
                         <td className="px-2 py-1.5 whitespace-nowrap">
-                          <div className="flex items-center gap-1 justify-center">
+                          {canWrite ? <div className="flex items-center gap-2 justify-center">
                             <button
                               type="button"
+                              disabled={!canEditRegistration}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setDialogMode({ type: "edit", registrationId: reg.id, user: reg.user });
                               }}
-                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 transition-colors"
+                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 min-w-11 disabled:opacity-50 bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 transition-colors"
                             >
                               수정
                             </button>
                             <button
                               type="button"
+                              disabled={!canEdit || Boolean(reg.profileWarning) || (isCancelled && !canRegister)}
                               onClick={(e) => { e.stopPropagation(); handleStatusToggle(reg); }}
-                              className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 transition-colors ${
+                              className={`px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 min-w-11 disabled:opacity-50 transition-colors ${
                                 isCancelled
                                   ? "bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300"
                                   : "bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300"
@@ -511,11 +548,11 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleDelete(reg); }}
-                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
+                              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap min-h-11 min-w-11 disabled:opacity-50 bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 transition-colors"
                             >
                               삭제
                             </button>
-                          </div>
+                          </div> : <span className="text-xs text-muted-foreground">조회 전용</span>}
                         </td>
                       </tr>
                     );
@@ -529,11 +566,11 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
         {/* 하단 합계 */}
         {approvedRegs.length > 0 && (
           <div className="card-elevated rounded-2xl border-0 overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="max-h-80 overflow-auto">
               <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-muted/80 border-b">
-                    <th className="px-3 py-2 text-left font-semibold whitespace-nowrap text-xs">구분</th>
+                <thead className="sticky top-0 z-[4] bg-muted">
+                  <tr className="bg-muted border-b">
+                    <th className="sticky left-0 z-[4] bg-muted px-3 py-2 text-left font-semibold whitespace-nowrap text-xs">구분</th>
                     <th className="px-3 py-2 text-right font-semibold whitespace-nowrap text-xs">신청자</th>
                     {activeMeals.map((m) => {
                       const theme = MEAL_THEME[m.mealKind];
@@ -550,7 +587,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                   </tr>
                   {activeMeals.some((m) => m.exemptionSelectable) && (
                     <tr className="bg-muted/60 border-b">
-                      <th className="px-3 py-1" />
+                      <th className="sticky left-0 z-[4] bg-muted px-3 py-1 whitespace-nowrap" />
                       <th className="px-3 py-1" />
                       {activeMeals.map((m) => {
                         const theme = MEAL_THEME[m.mealKind];
@@ -572,7 +609,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                     const s = gradeSummary(g);
                     return (
                       <tr key={g} className="border-b bg-background">
-                        <td className="px-3 py-1.5 font-medium whitespace-nowrap text-xs">{g}학년</td>
+                        <td className="sticky left-0 z-[3] bg-background px-3 py-1.5 font-medium whitespace-nowrap text-xs">{g}학년</td>
                         <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums text-xs">
                           {s.count}명 <span className="text-muted-foreground">(남 {s.maleCount}/여 {s.femaleCount})</span>
                         </td>
@@ -598,7 +635,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
                     const s = gradeSummary("all");
                     return (
                       <tr className="bg-muted/40 font-semibold">
-                        <td className="px-3 py-1.5 whitespace-nowrap text-xs">전체</td>
+                        <td className="sticky left-0 z-[3] bg-muted px-3 py-1.5 whitespace-nowrap text-xs">전체</td>
                         <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums text-xs">
                           {s.count}명 <span className="font-normal text-muted-foreground">(남 {s.maleCount}/여 {s.femaleCount})</span>
                         </td>
@@ -628,11 +665,12 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
       </div>
 
       <AdminApplyDialog
+        key={dialogMode?.type === "edit" ? `edit:${dialogMode.registrationId}` : "add"}
         applicationId={applicationId}
         mode={dialogMode}
         existingUserIds={existingUserIds}
         onClose={() => setDialogMode(null)}
-        onSaved={() => mutate()}
+        onSaved={() => void refreshRegistrations()}
       />
     </div>
   );

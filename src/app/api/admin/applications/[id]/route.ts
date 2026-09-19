@@ -5,6 +5,8 @@ import { saveApplication, toDateKey } from "@/lib/meal-plan-server";
 import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
 import { requireActor } from "@/lib/academic-year/request-actor";
+import { resolveApplicationYear, rosterMode } from "@/lib/academic-year/registration-context";
+import { readYearState } from "@/lib/academic-year/roster-service";
 
 export async function GET(
   _request: Request,
@@ -18,6 +20,7 @@ export async function GET(
       where: { id: applicationId },
       include: {
         meals: true,
+        _count: { select: { registrations: true } },
         mealDates: { orderBy: [{ mealKind: "asc" }, { grade: "asc" }, { date: "asc" }] },
       },
     });
@@ -26,10 +29,16 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
+    const resolvedAcademicYear = await resolveApplicationYear(prisma, await rosterMode(prisma), app.academicYear);
+    const academicYearState = await readYearState(prisma, resolvedAcademicYear);
+
     return NextResponse.json({
       application: {
         id: app.id,
         academicYear: app.academicYear,
+        resolvedAcademicYear,
+        academicYearState,
+        registrationCount: app._count.registrations,
         title: app.title,
         description: app.description,
         status: app.status,

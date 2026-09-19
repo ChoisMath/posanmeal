@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { toDateKey } from "@/lib/meal-plan-server";
 import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
-import { getAcademicProfiles } from "@/lib/academic-year/profile-service";
+import { getReportProfiles } from "@/lib/academic-year/report-profile";
+import { readYearState } from "@/lib/academic-year/roster-service";
 import {
   gradeFor,
   resolveApplicationYear,
@@ -30,11 +31,13 @@ export async function GET(
 
     const mode = await rosterMode(prisma);
     const year = await resolveApplicationYear(prisma, mode, stored.academicYear);
-    const profiles = await getAcademicProfiles(prisma, [userId], year);
-    if (!profiles.get(userId) && mode === "READY") {
+    const profiles = await getReportProfiles(prisma, [userId], year, false);
+    const applicantProfile = profiles.get(userId)?.historical ?? null;
+    if (!applicantProfile && mode === "READY") {
       throw new DomainError("MISSING_PROFILE", "해당 학년도의 학적 정보가 없습니다.");
     }
-    const grade = await gradeFor(prisma, mode, profiles.get(userId), userId);
+    const grade = await gradeFor(prisma, mode, applicantProfile ?? undefined, userId);
+    const academicYearState = await readYearState(prisma, year);
 
     const [app, registrationCount, myRegistration] = await Promise.all([
       prisma.mealApplication.findUnique({
@@ -65,6 +68,8 @@ export async function GET(
 
     const application = {
       id: app.id,
+      academicYear: year,
+      academicYearState,
       title: app.title,
       description: app.description,
       startYear: app.startYear,
@@ -115,6 +120,12 @@ export async function GET(
     return NextResponse.json({
       application,
       registrationCount,
+      applicantProfile: applicantProfile ? {
+        name: applicantProfile.name,
+        grade: applicantProfile.grade,
+        classNum: applicantProfile.classNum,
+        number: applicantProfile.number,
+      } : null,
       myRegistration: myRegistrationResult,
     });
   });
