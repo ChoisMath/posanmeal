@@ -2,6 +2,11 @@
 
 2026-09-18 Claude → Codex 이관. 상세 현재 상태는 [현재 인계](current-state.md), 작업 명령은 [시작 안내](../README.md), 구조는 [프로젝트 맵](../PROJECT_MAP.md).
 
+## 활성 작업 기록
+
+- [2026-09-19 얼굴 확인 후 저장·모드 복귀 수정](2026-09-19-facecheck-confirmation.md): 학생/교사 명시적 확인·10초 자동 취소, geometry/연속 3회 매칭, 온라인·로컬 저장 가드, 이전 요청 정리·Human 직렬화 완료. 테스트 284개·브라우저 19개·build 통과; 전체 lint/type 기존 오류와 실기기 검증은 남음. 미배포·미커밋.
+- [2026-09-19 얼굴 → QR → 얼굴 복귀 점검](2026-09-19-facecheck-reentry-review.md): 수정 전 busy 잔존·Human 추론 중첩 진단과 재현 근거. 후속 수정은 위 완료 기록 참조.
+
 ## 관련 작업 때만 읽을 과거 자료
 
 - [얼굴 모델 선택·사용자 결정](legacy/mac/facecheck-embedding-model-decision.md): FaceRes 폐기 근거, 2D 웹캠/threshold 0.55 운영 결정. 실제 설정은 코드 및 DB 설정과 구분한다.

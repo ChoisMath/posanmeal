@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ success: false, error: "잘못된 요청입니다." }, { status: 400 });
     }
-    const { embedding, type } = parsed.data;
+    const { embedding, type, confirmation } = parsed.data;
 
     const settings = await getCachedSettings();
     const mealKind = resolveMealKind(nowKST(), settings.mealWindows);
@@ -90,17 +90,35 @@ export async function POST(request: Request) {
       });
     }
 
-    const todayDate = new Date(todayKST());
-    const [user, existing] = await Promise.all([
-      prisma.user.findUnique({ where: { id: match.userId }, select: USER_SELECT }),
-      prisma.checkIn.findFirst({
-        where: { userId: match.userId, date: todayDate, mealKind: mealKind as MealKind },
-      }),
-    ]);
+    const date = todayKST();
+    const todayDate = new Date(date);
+    const user = await prisma.user.findUnique({ where: { id: match.userId }, select: USER_SELECT });
 
     if (!user) {
       return NextResponse.json({ success: false, error: "사용자를 찾을 수 없습니다." }, { status: 404 });
     }
+
+    if (user.role !== "STUDENT" && user.role !== "TEACHER") {
+      return NextResponse.json({ success: false, error: "체크인할 수 없는 사용자입니다.", errorCode: "ROLE_NOT_ALLOWED" }, { status: 403 });
+    }
+
+    if (confirmation && (confirmation.userId !== user.id || confirmation.mealKind !== mealKind || confirmation.date !== date)) {
+      return NextResponse.json({
+        success: false, matched: true, ...score,
+        error: "확인 대상이 변경되었습니다. 얼굴을 다시 인식해 주세요.", errorCode: "CONFIRMATION_CHANGED",
+      });
+    }
+
+    if (!confirmation || (user.role === "TEACHER" && !type)) {
+      return NextResponse.json({
+        success: false, matched: true, needConfirmation: true, needType: user.role === "TEACHER",
+        user, mealKind, date, ...score,
+      });
+    }
+
+    const existing = await prisma.checkIn.findFirst({
+      where: { userId: user.id, date: todayDate, mealKind: mealKind as MealKind },
+    });
 
     if (existing) {
       return NextResponse.json({
@@ -117,10 +135,7 @@ export async function POST(request: Request) {
 
     let checkInType: "STUDENT" | "WORK" | "PERSONAL";
     if (user.role === "TEACHER") {
-      if (!type) {
-        return NextResponse.json({ success: false, matched: true, needType: true, user, mealKind, ...score });
-      }
-      checkInType = type;
+      checkInType = type!;
     } else {
       const eligible = await isStudentEligibleToday(user.id, mealKind as MealKind, todayDate);
       if (!eligible) {

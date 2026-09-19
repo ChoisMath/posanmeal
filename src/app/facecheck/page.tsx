@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Human } from "@vladmandic/human";
 import { QRScanner } from "@/components/QRScanner";
 import { BrandMark } from "@/components/BrandMark";
-import { MEAL_LABEL } from "@/lib/meal-plan";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { MEAL_LABEL, studentNumberOf } from "@/lib/meal-plan";
 import { DEFAULT_MEAL_WINDOWS, type MealKind } from "@/lib/meal-kind-local";
 import { postCheckInWithRetry } from "@/lib/checkin-client";
 import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
@@ -13,6 +14,8 @@ import { RESULT_BORDER_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/ch
 import { UnmatchedTracker } from "@/lib/unmatched-tracker";
 import { detectFaces, getActiveFaceBackend, loadHuman, qualityIssue } from "@/lib/human-client";
 import { nextDetectDelay, resolveFaceBackends } from "@/lib/face-pacing";
+import { enrollmentQualityIssue } from "@/lib/face-quality";
+import { FaceStabilityTracker } from "@/lib/face-stability";
 import {
   runLocalFaceCheckIn,
   toFaceCandidates,
@@ -37,11 +40,14 @@ import {
 import type { FaceCandidate, MatchScore } from "@/lib/face-match";
 import { LoaderCircle, QrCode, RefreshCw, ScanFace, Wifi, WifiOff } from "lucide-react";
 
-interface PendingTeacher {
+interface PendingConfirmation {
   user: FaceCheckUser;
   mealKind: MealKind;
+  date: string;
   embedding: number[];
   gen: number;
+  expiresAt: number;
+  local: boolean;
 }
 
 // 얼굴 루프의 화면 표시용 단계. busyRef(루프 정지 플래그)와 반드시 함께 바뀐다.
@@ -79,7 +85,9 @@ function PhaseIndicator({ phase, className = "" }: { phase: ScanPhase; className
 }
 
 const RESULT_DISPLAY_MS = 2000;
-const TEACHER_TIMEOUT_S = 10;
+const CONFIRMATION_TIMEOUT_S = 10;
+const REQUEST_TIMEOUT_MS = 10_000;
+const STABILITY_COOLDOWN_MS = 200;
 const KIOSK_KEY_STORAGE = "facecheck.kioskKey";
 const BACKEND_STORAGE = "facecheck.backend";
 const MAX_LOOP_FAILURES = 3;
@@ -91,7 +99,7 @@ const RESULT_SUPPRESS_MS = 10_000;
 const UNMATCHED_SAME_FACE_SIM = 0.6;
 const UNMATCHED_CONFIRM_WINDOW_MS = 3000;
 const UNMATCHED_PENDING_COOLDOWN_MS = 300;
-const TEACHER_CANCEL_SUPPRESS_MS = 15_000;
+const CANCEL_SUPPRESS_MS = 15_000;
 const BUSY_POLL_MS = 100;
 const PERF_UPDATE_MS = 500;
 
@@ -107,8 +115,8 @@ export default function FaceCheckPage() {
   const [mode, setMode] = useState<"face" | "qr">("face");
   const [isFrontFacing, setIsFrontFacing] = useState(true);
   const [result, setResult] = useState<FaceCheckResult | null>(null);
-  const [pending, setPending] = useState<PendingTeacher | null>(null);
-  const [countdown, setCountdown] = useState(TEACHER_TIMEOUT_S);
+  const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  const [countdown, setCountdown] = useState(CONFIRMATION_TIMEOUT_S);
   const [status, setStatus] = useState("카메라 준비 중...");
   const [phase, setPhase] = useState<ScanPhase>("loading");
   const [settings, setSettings] = useState<KioskSettings | null>(null);
@@ -121,9 +129,11 @@ export default function FaceCheckPage() {
   // 직전 판정의 1·2위 유사도 — 현장에서 임계값을 조정할 때 참고한다
   const [lastScore, setLastScore] = useState<MatchScore | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const modeButtonRef = useRef<HTMLButtonElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const busyRef = useRef(false); // API 호출·선택 대기 중 스캔 정지 — pauseScan/resumeScan으로만 변경
-  const pendingRef = useRef<PendingTeacher | null>(null);
+  const busyRef = useRef(false);
+  const pendingRef = useRef<PendingConfirmation | null>(null);
   const kioskKeyRef = useRef<string | null>(null);
   const kioskBlockedRef = useRef(false); // 키오스크 키 거부됨 — 카메라는 유지, POST만 중단
   const suppressRef = useRef<Map<number, number>>(new Map()); // userId → 억제 만료 시각(ms)
@@ -136,13 +146,29 @@ export default function FaceCheckPage() {
   // 모드가 바뀌거나 언마운트되면 세대를 올려, 그 이전 세대에서 시작된 fetch가
   // 뒤늦게 응답으로 돌아와도 화면(setPending/setResult 등)을 침범하지 못하게 한다.
   const modeGenRef = useRef(0);
+  const modeRef = useRef(mode);
+  const stabilityRef = useRef(new FaceStabilityTracker());
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestsRef = useRef(new Set<AbortController>());
   const isLocal = settings?.operationMode === "local";
 
-  useEffect(() => {
-    return () => {
-      modeGenRef.current += 1;
-    };
-  }, [mode]);
+  const resetScanSession = useCallback(() => {
+    modeGenRef.current += 1;
+    busyRef.current = false;
+    pendingRef.current = null;
+    stabilityRef.current.reset();
+    unmatchedRef.current = null;
+    resultGenRef.current += 1;
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+    resumeTimerRef.current = null;
+    resultTimerRef.current = null;
+    requestsRef.current.forEach((controller) => controller.abort());
+    requestsRef.current.clear();
+  }, []);
+
+  useEffect(() => resetScanSession, [mode, resetScanSession]);
 
   // 키오스크 키·백엔드 고정: URL 쿼리로 최초 접속 시 localStorage에 저장하고 주소창에서 지운다.
   useEffect(() => {
@@ -169,7 +195,57 @@ export default function FaceCheckPage() {
 
   const resumeScan = useCallback(() => {
     busyRef.current = false;
-    setPhase("scanning");
+    setPhase(kioskBlockedRef.current && modeRef.current === "face" ? "blocked" : "scanning");
+  }, []);
+
+  const scheduleResume = useCallback((delay: number) => {
+    const gen = modeGenRef.current;
+    busyRef.current = true;
+    setPhase("waiting");
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => {
+      if (modeGenRef.current !== gen) return;
+      resumeTimerRef.current = null;
+      resumeScan();
+    }, delay);
+  }, [resumeScan]);
+
+  const changeMode = useCallback((next: "face" | "qr") => {
+    resetScanSession();
+    modeRef.current = next;
+    setPending(null);
+    setResult(null);
+    setLastScore(null);
+    setPhase(next === "face" ? "loading" : "scanning");
+    updateStatus(next === "face" ? "카메라 준비 중..." : "카메라에 QR 코드를 보여주세요");
+    setMode(next);
+  }, [resetScanSession, updateStatus]);
+
+  const runRequest = useCallback(async <T,>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+    const controller = new AbortController();
+    requestsRef.current.add(controller);
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      return await operation(controller.signal);
+    } finally {
+      clearTimeout(timer);
+      requestsRef.current.delete(controller);
+    }
+  }, []);
+
+  const postFaceCheck = useCallback((body: object) => runRequest(async (signal) => {
+    const res = await fetch("/api/facecheck", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-kiosk-key": kioskKeyRef.current ?? "" },
+      body: JSON.stringify(body),
+      signal,
+    });
+    return await res.json() as FaceCheckResult;
+  }), [runRequest]);
+
+  const refreshUnsyncedCount = useCallback(async (gen: number) => {
+    const count = await getUnsyncedCount();
+    if (modeGenRef.current === gen) setUnsyncedCount(count);
   }, []);
 
   // --- 운영 모드·로컬 동기화 ---
@@ -247,15 +323,15 @@ export default function FaceCheckPage() {
     if (json.errorCode === "RATE_LIMITED") {
       updateStatus(json.error || "요청이 너무 많습니다. 잠시 후 다시 시도하세요.");
       setPhase("waiting");
-      setTimeout(resumeScan, RATE_LIMIT_COOLDOWN_MS);
+      scheduleResume(RATE_LIMIT_COOLDOWN_MS);
       return true;
     }
     return false;
-  }, [resumeScan, updateStatus]);
+  }, [scheduleResume, updateStatus]);
 
   // --- 결과 처리 (학생 성공/중복/미자격/미매칭 공용) ---
   const applyResult = useCallback((json: FaceCheckResult, embedding?: ArrayLike<number>) => {
-    if (json.needType && json.user && json.mealKind) return; // 교사 분기에서 별도 처리
+    if (json.needConfirmation || json.needType) return;
     if (!json.matched && !json.success) {
       if (json.errorCode === "UNMATCHED" && embedding) {
         const tracker = (unmatchedRef.current ??= new UnmatchedTracker({
@@ -267,13 +343,13 @@ export default function FaceCheckPage() {
         if (verdict === "pending") {
           updateStatus("확인 중...");
           setPhase("waiting");
-          setTimeout(resumeScan, UNMATCHED_PENDING_COOLDOWN_MS);
+          scheduleResume(UNMATCHED_PENDING_COOLDOWN_MS);
           return;
         }
         if (verdict === "suppressed") {
           updateStatus("미등록 사용자 — 다음 분 서 주세요");
           setPhase("waiting");
-          setTimeout(resumeScan, SUPPRESSED_COOLDOWN_MS);
+          scheduleResume(SUPPRESSED_COOLDOWN_MS);
           return;
         }
         // confirm: 아래 공용 경로에서 주황 카드 + 오류음
@@ -282,7 +358,7 @@ export default function FaceCheckPage() {
         const cooldown = json.errorCode === "NO_MEAL_WINDOW" ? NO_MEAL_WINDOW_COOLDOWN_MS : QUIET_COOLDOWN_MS;
         updateStatus(json.error || "인식되지 않았습니다. 다시 서 주세요.");
         setPhase("waiting");
-        setTimeout(resumeScan, cooldown);
+        scheduleResume(cooldown);
         return;
       }
     }
@@ -297,41 +373,53 @@ export default function FaceCheckPage() {
     else playError();
     // 결과 카드는 남겨 두고 스캔은 즉시 재개 — 다음 사람을 바로 인식한다.
     resumeScan();
-    setTimeout(() => {
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+    resultTimerRef.current = setTimeout(() => {
       if (resultGenRef.current === gen) setResult(null);
     }, RESULT_DISPLAY_MS);
-  }, [resumeScan, updateStatus]);
+  }, [resumeScan, scheduleResume, updateStatus]);
 
-  // 매칭 응답 공용 처리(온라인·로컬): 억제 확인 → 교사 선택 대기 → 결과 표시
   const handleMatchedResponse = useCallback(
     (json: FaceCheckResult, embedding: number[], gen: number) => {
       setLastScore(json.similarity === undefined ? null : { similarity: json.similarity, runnerUp: json.runnerUp });
-      const uid = json.user?.id;
-      if (uid !== undefined) {
-        const suppressedUntil = suppressRef.current.get(uid);
-        if (suppressedUntil !== undefined) {
-          if (suppressedUntil > Date.now()) {
-            // 방금 처리된 사람이 프레임에 남아 있음 — 재요청을 잠시 멈추고 안내만 한다.
-            updateStatus("처리된 분입니다 — 다음 분 서 주세요");
-            setPhase("waiting");
-            setTimeout(resumeScan, SUPPRESSED_COOLDOWN_MS);
-            return;
-          }
-          suppressRef.current.delete(uid);
-        }
+      if (!json.needConfirmation || !json.user || !json.mealKind || !json.date) {
+        stabilityRef.current.reset();
+        applyResult(json, embedding);
+        return;
       }
-      if (json.needType && json.user && json.mealKind) {
-        const p = { user: json.user, mealKind: json.mealKind, embedding, gen };
-        pendingRef.current = p;
-        setPending(p);
-        setCountdown(TEACHER_TIMEOUT_S);
-        setPhase("waiting");
-        updateStatus("근무/개인 선택 대기 중");
-        return; // busyRef 유지 — 선택 대기
+      const uid = json.user.id;
+      const suppressedUntil = suppressRef.current.get(uid);
+      if (suppressedUntil !== undefined && suppressedUntil > Date.now()) {
+        stabilityRef.current.reset();
+        updateStatus("처리 또는 취소된 분입니다 — 잠시 후 다시 서 주세요");
+        scheduleResume(SUPPRESSED_COOLDOWN_MS);
+        return;
       }
-      applyResult(json, embedding);
+      suppressRef.current.delete(uid);
+      const observation = stabilityRef.current.observe(uid, Date.now(), `${json.date}:${json.mealKind}`);
+      if (!observation.ready) {
+        updateStatus(`얼굴 확인 중 (${observation.count}/3) — 정면을 바라봐 주세요`);
+        scheduleResume(STABILITY_COOLDOWN_MS);
+        return;
+      }
+      stabilityRef.current.reset();
+      const confirmation: PendingConfirmation = {
+        user: json.user,
+        mealKind: json.mealKind,
+        date: json.date,
+        embedding,
+        gen,
+        expiresAt: Date.now() + CONFIRMATION_TIMEOUT_S * 1000,
+        local: settingsRef.current?.operationMode === "local",
+      };
+      pendingRef.current = confirmation;
+      setResult(null);
+      setPending(confirmation);
+      setCountdown(CONFIRMATION_TIMEOUT_S);
+      pauseScan("waiting");
+      updateStatus("학번과 이름을 확인해 주세요");
     },
-    [applyResult, resumeScan, updateStatus],
+    [applyResult, pauseScan, scheduleResume, updateStatus],
   );
 
   // --- 1단계 호출 ---
@@ -343,7 +431,7 @@ export default function FaceCheckPage() {
         if (candidatesRef.current.length === 0) {
           updateStatus("얼굴 명단이 없습니다 — [동기화]를 눌러 주세요");
           setPhase("waiting");
-          setTimeout(resumeScan, NO_MEAL_WINDOW_COOLDOWN_MS);
+          scheduleResume(NO_MEAL_WINDOW_COOLDOWN_MS);
           return;
         }
         try {
@@ -351,121 +439,110 @@ export default function FaceCheckPage() {
             { embedding, candidates: candidatesRef.current, faceMatch: s.faceMatch, now: new Date(), mealWindows: s.mealWindows },
             localRepo,
           );
-          if (modeGenRef.current !== gen) {
-            resumeScan();
-            return;
-          }
+          if (modeGenRef.current !== gen) return;
           handleMatchedResponse(json, embedding, gen);
-          if (json.success) setUnsyncedCount(await getUnsyncedCount());
+          if (json.success) await refreshUnsyncedCount(gen);
         } catch (err) {
+          if (modeGenRef.current !== gen) return;
+          stabilityRef.current.reset();
           console.error("local facecheck error:", err);
-          if (modeGenRef.current !== gen) {
-            resumeScan();
-            return;
-          }
           updateStatus("로컬 저장 오류 — 다시 시도해 주세요");
           setPhase("waiting");
-          setTimeout(resumeScan, 1500);
+          scheduleResume(1500);
         }
         return;
       }
       try {
-        const res = await fetch("/api/facecheck", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-kiosk-key": kioskKeyRef.current ?? "" },
-          body: JSON.stringify({ embedding }),
-        });
-        const json: FaceCheckResult = await res.json();
-        if (modeGenRef.current !== gen) {
-          // 응답 도착 전에 모드가 전환됨 — 화면을 건드리지 않고 조용히 버린다.
-          resumeScan();
-          return;
-        }
+        const json = await postFaceCheck({ embedding });
+        if (modeGenRef.current !== gen) return;
         if (handleGateErrors(json)) return;
         handleMatchedResponse(json, embedding, gen);
       } catch {
-        if (modeGenRef.current !== gen) {
-          resumeScan();
-          return;
-        }
+        if (modeGenRef.current !== gen) return;
+        stabilityRef.current.reset();
         updateStatus("서버 연결 오류 — 잠시 후 다시 시도됩니다");
         setPhase("waiting");
-        setTimeout(resumeScan, 1500);
+        scheduleResume(1500);
       }
     },
-    [handleGateErrors, handleMatchedResponse, resumeScan, updateStatus],
+    [handleGateErrors, handleMatchedResponse, postFaceCheck, refreshUnsyncedCount, scheduleResume, updateStatus],
   );
 
-  // --- 2단계 호출 (교사 type 확정 / 자동 개인) ---
-  const submitTeacherType = useCallback(
-    async (type: "WORK" | "PERSONAL") => {
-      const p = pendingRef.current;
-      pendingRef.current = null;
-      setPending(null);
-      if (!p) return;
-      setPhase("processing");
-      updateStatus("확인 중...");
-      const s = settingsRef.current;
-      const local = s?.operationMode === "local";
-      try {
-        let json: FaceCheckResult;
-        if (local) {
-          json = await runLocalFaceCheckIn(
-            { embedding: p.embedding, candidates: candidatesRef.current, faceMatch: s.faceMatch, now: new Date(), mealWindows: s.mealWindows, type },
-            localRepo,
-          );
-        } else {
-          const res = await fetch("/api/facecheck", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-kiosk-key": kioskKeyRef.current ?? "" },
-            body: JSON.stringify({ embedding: p.embedding, type }),
-          });
-          json = await res.json();
-        }
-        if (modeGenRef.current !== p.gen) {
-          resumeScan();
-          return;
-        }
-        if (!local && handleGateErrors(json)) return;
-        applyResult(json, p.embedding);
-        if (local && json.success) setUnsyncedCount(await getUnsyncedCount());
-      } catch (err) {
-        console.error("teacher type submit error:", err);
-        if (modeGenRef.current !== p.gen) {
-          resumeScan();
-          return;
-        }
-        updateStatus(local ? "로컬 저장 오류" : "서버 연결 오류");
-        setPhase("waiting");
-        setTimeout(resumeScan, 1500);
-      }
-    },
-    [applyResult, handleGateErrors, resumeScan, updateStatus],
-  );
-
-  const cancelTeacher = useCallback(() => {
-    if (!pendingRef.current) return;
-    suppressRef.current.set(pendingRef.current.user.id, Date.now() + TEACHER_CANCEL_SUPPRESS_MS);
+  const cancelConfirmation = useCallback(() => {
+    const current = pendingRef.current;
+    if (!current) return;
     pendingRef.current = null;
     setPending(null);
+    if (current.gen !== modeGenRef.current) return;
+    suppressRef.current.set(current.user.id, Date.now() + CANCEL_SUPPRESS_MS);
+    stabilityRef.current.reset();
+    updateStatus("취소했습니다 — 식사 기록은 저장하지 않았습니다");
     resumeScan();
-  }, [resumeScan]);
+  }, [resumeScan, updateStatus]);
 
-  // --- 교사 10초 카운트다운 → 자동 "개인" ---
-  useEffect(() => {
-    if (!pending) return;
-    if (countdown <= 0) {
-      submitTeacherType("PERSONAL");
+  const submitConfirmation = useCallback(async (type?: "WORK" | "PERSONAL") => {
+    const current = pendingRef.current;
+    if (!current) return;
+    if (current.expiresAt <= Date.now()) {
+      cancelConfirmation();
       return;
     }
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [pending, countdown, submitTeacherType]);
+    pendingRef.current = null;
+    setPending(null);
+    if (modeGenRef.current !== current.gen || modeRef.current !== "face") return;
+    if (current.local !== (settingsRef.current?.operationMode === "local")) {
+      updateStatus("운영 모드가 변경되었습니다 — 다시 인식해 주세요");
+      resumeScan();
+      return;
+    }
+    pauseScan("processing");
+    updateStatus("확인 중...");
+    const confirmation = { userId: current.user.id, mealKind: current.mealKind, date: current.date };
+    try {
+      const settings = settingsRef.current;
+      const json = current.local && settings
+        ? await runLocalFaceCheckIn({
+            embedding: current.embedding, candidates: candidatesRef.current,
+            faceMatch: settings.faceMatch, now: new Date(), mealWindows: settings.mealWindows,
+            type, confirmation,
+          }, localRepo)
+        : await postFaceCheck({ embedding: current.embedding, type, confirmation });
+      if (modeGenRef.current !== current.gen) return;
+      if (!current.local && handleGateErrors(json)) return;
+      if (json.needConfirmation || json.errorCode === "CONFIRMATION_CHANGED") {
+        stabilityRef.current.reset();
+        updateStatus("인식 정보가 변경되었습니다 — 다시 인식해 주세요");
+        scheduleResume(QUIET_COOLDOWN_MS);
+        return;
+      }
+      applyResult(json, current.embedding);
+      if (current.local && json.success) await refreshUnsyncedCount(current.gen);
+    } catch (err) {
+      if (modeGenRef.current !== current.gen) return;
+      console.error("face confirmation error:", err);
+      updateStatus(current.local ? "로컬 저장 오류 — 다시 시도해 주세요" : "서버 연결 오류 — 다시 인식해 주세요");
+      scheduleResume(1500);
+    }
+  }, [applyResult, cancelConfirmation, handleGateErrors, pauseScan, postFaceCheck, refreshUnsyncedCount, resumeScan, scheduleResume, updateStatus]);
+
+  useEffect(() => {
+    if (!pending) return;
+    const tick = () => {
+      if (pendingRef.current !== pending) return;
+      const remaining = Math.max(0, Math.ceil((pending.expiresAt - Date.now()) / 1000));
+      setCountdown(remaining);
+      if (remaining === 0) cancelConfirmation();
+    };
+    const timer = setInterval(tick, 200);
+    tick();
+    return () => clearInterval(timer);
+  }, [pending, cancelConfirmation]);
 
   // --- 얼굴 감지 루프 ---
   useEffect(() => {
     if (mode !== "face") return;
     let cancelled = false;
+    const controller = new AbortController();
 
     const stopCamera = () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -476,8 +553,8 @@ export default function FaceCheckPage() {
     // 안면인식을 더 쓸 수 없을 때는 온라인·로컬 모두 이 페이지의 QR 모드로 전환한다.
     const giveUpFace = (reason: string) => {
       stopCamera();
+      changeMode("qr");
       updateStatus(`${reason} — QR 모드로 전환합니다`);
-      setMode("qr");
     };
 
     (async () => {
@@ -527,8 +604,8 @@ export default function FaceCheckPage() {
       if (cancelled) return;
       setPerf({ backend: getActiveFaceBackend(), detectMs: null });
 
-      updateStatus("얼굴을 화면에 보여주세요");
-      setPhase("scanning");
+      updateStatus(kioskBlockedRef.current ? "키오스크 키를 확인해 주세요" : "얼굴을 화면에 보여주세요");
+      setPhase(kioskBlockedRef.current ? "blocked" : "scanning");
 
       let failures = 0;
       let downgraded = false;
@@ -538,12 +615,12 @@ export default function FaceCheckPage() {
         const idle = busyRef.current || kioskBlockedRef.current;
         await new Promise((r) => setTimeout(r, idle ? BUSY_POLL_MS : nextDetectDelay(lastDetectMs)));
         if (cancelled) break;
-        if (idle) continue;
+        if (busyRef.current || kioskBlockedRef.current) continue;
         const currentVideo = videoRef.current;
         if (!currentVideo) continue;
         try {
           const t0 = performance.now();
-          const outcome = await detectFaces(human, currentVideo);
+          const outcome = await detectFaces(human, currentVideo, controller.signal);
           lastDetectMs = performance.now() - t0;
           if (cancelled) break;
           failures = 0;
@@ -552,20 +629,33 @@ export default function FaceCheckPage() {
             setPerf({ backend: getActiveFaceBackend(), detectMs: Math.round(lastDetectMs) });
           }
           if (outcome.kind === "none") {
+            stabilityRef.current.reset();
             updateStatus("얼굴을 화면에 보여주세요");
             continue;
           }
           if (outcome.kind === "multiple") {
+            stabilityRef.current.reset();
             updateStatus("한 분씩 서 주세요");
             continue;
           }
           const issue = qualityIssue(outcome.face);
           if (issue === "spoof") {
+            stabilityRef.current.reset();
             updateStatus("실제 얼굴로 인식해 주세요");
             continue;
           }
           if (issue === "lowScore") {
+            stabilityRef.current.reset();
             updateStatus("정면을 바라봐 주세요");
+            continue;
+          }
+          const geometry = outcome.face.geometry;
+          const geometryIssue = geometry ? enrollmentQualityIssue(geometry) : "turned";
+          if (geometryIssue) {
+            stabilityRef.current.reset();
+            updateStatus(geometryIssue === "tooSmall"
+              ? "카메라에 조금 더 가까이 서 주세요"
+              : geometryIssue === "clipped" ? "얼굴 전체가 화면 안에 들어오도록 서 주세요" : "정면을 바라봐 주세요");
             continue;
           }
           pauseScan("processing");
@@ -573,6 +663,8 @@ export default function FaceCheckPage() {
           await submitEmbedding(outcome.face.embedding);
           if (cancelled) break;
         } catch (err) {
+          if (cancelled) break;
+          stabilityRef.current.reset();
           failures += 1;
           if (failures === 1) console.error("face loop error:", err);
           if (failures < MAX_LOOP_FAILURES) continue;
@@ -599,14 +691,15 @@ export default function FaceCheckPage() {
 
     return () => {
       cancelled = true;
+      controller.abort();
       stopCamera();
     };
-  }, [mode, pauseScan, submitEmbedding, updateStatus]);
+  }, [mode, changeMode, pauseScan, submitEmbedding, updateStatus]);
 
   // --- QR 모드: 인쇄 카드 QR·로컬 모드는 기기 IndexedDB(/check와 같은 판정), 그 외는 서버 JWT 검증 ---
   const handleQrScan = useCallback(
     async (data: string) => {
-      if (busyRef.current) return;
+      if (modeRef.current !== "qr" || busyRef.current) return;
       pauseScan("processing");
       const gen = modeGenRef.current;
       const s = settingsRef.current;
@@ -614,19 +707,15 @@ export default function FaceCheckPage() {
       try {
         const json = useLocal
           ? await runLocalQrCheckIn({ data, now: new Date(), mealWindows: s?.mealWindows ?? DEFAULT_MEAL_WINDOWS }, localQrRepo)
-          : await postCheckInWithRetry(data);
-        if (modeGenRef.current !== gen) {
-          resumeScan();
-          return;
-        }
+          : await runRequest((signal) => postCheckInWithRetry(data, {
+              fetchFn: (url, init) => fetch(url, { ...init, signal }),
+            }));
+        if (modeGenRef.current !== gen) return;
         applyResult({ ...json, matched: true });
-        if (useLocal && json.success) setUnsyncedCount(await getUnsyncedCount());
+        if (useLocal && json.success) await refreshUnsyncedCount(gen);
       } catch (err) {
         console.error("qr checkin error:", err);
-        if (modeGenRef.current !== gen) {
-          resumeScan();
-          return;
-        }
+        if (modeGenRef.current !== gen) return;
         applyResult({
           success: false,
           matched: true,
@@ -634,7 +723,7 @@ export default function FaceCheckPage() {
         });
       }
     },
-    [applyResult, pauseScan, resumeScan],
+    [applyResult, pauseScan, refreshUnsyncedCount, runRequest],
   );
 
   const formatCheckedAt = (checkedAt: string) => {
@@ -652,17 +741,14 @@ export default function FaceCheckPage() {
     return "";
   };
 
-  const switchMode = () => {
-    if (mode === "face") {
-      updateStatus("카메라에 QR 코드를 보여주세요");
-      setMode("qr");
-    } else {
-      setPhase("loading");
-      setMode("face");
-    }
-  };
+  const switchMode = () => changeMode(mode === "face" ? "qr" : "face");
 
   const borderClass = result ? RESULT_BORDER_CLASS[resultCategory(result)] : "border-slate-700";
+  const pendingIdentity = pending
+    ? pending.user.role === "TEACHER" ? `${pending.user.name} 선생님`
+      : `${pending.user.grade != null && pending.user.classNum != null && pending.user.number != null
+        ? `${studentNumberOf(pending.user.grade, pending.user.classNum, pending.user.number)} ` : ""}${pending.user.name}`
+    : "";
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-gray-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white">
@@ -779,10 +865,14 @@ export default function FaceCheckPage() {
         </div>
       </main>
 
-      {/* 교사 근무/개인/취소 선택 오버레이 */}
       {pending && (
-        <div className="fixed inset-0 z-30 bg-black/70 flex items-center justify-center p-2 sm:p-4">
-          <div className="glass card-elevated rounded-2xl p-4 sm:p-6 w-full max-w-md text-center space-y-4">
+        <Dialog open onOpenChange={(open) => { if (!open) cancelConfirmation(); }}>
+          <DialogContent
+            showCloseButton={false}
+            initialFocus={cancelButtonRef}
+            finalFocus={modeButtonRef}
+            className="max-h-[calc(100dvh-1rem)] max-w-[calc(100%-1rem)] overflow-auto rounded-2xl bg-white p-4 text-slate-900 shadow-xl sm:max-w-md sm:p-6 text-center"
+          >
             {pending.user.photoUrl ? (
               <img
                 src={pending.user.photoUrl}
@@ -795,33 +885,41 @@ export default function FaceCheckPage() {
               </div>
             )}
             <div>
-              <p className="text-fit-lg font-bold whitespace-nowrap">{pending.user.name} 선생님</p>
-              <p className="text-fit-sm text-muted-foreground mt-1 whitespace-nowrap">
-                {MEAL_LABEL[pending.mealKind]} 체크인 — 근무/개인을 선택하세요
-              </p>
+              <DialogTitle className="overflow-x-auto text-fit-lg font-bold whitespace-nowrap">{pendingIdentity}</DialogTitle>
+              <p className="mt-1 text-sm whitespace-nowrap">위 사용자로 인식했습니다.</p>
+              <DialogDescription className="overflow-x-auto text-fit-sm text-muted-foreground mt-1 whitespace-nowrap">
+                이 이름으로 {MEAL_LABEL[pending.mealKind]} 체크인하시겠습니까?
+              </DialogDescription>
+              <p className="mt-2 text-sm text-slate-500 whitespace-nowrap">선택하지 않으면 {countdown}초 후 취소됩니다.</p>
             </div>
             <div className="flex gap-2">
+              {pending.user.role === "TEACHER" ? (
+                <>
+                  <button
+                    onClick={() => submitConfirmation("WORK")}
+                    className="flex-1 min-h-14 rounded-xl bg-blue-600 text-white text-lg font-bold whitespace-nowrap"
+                  >근무</button>
+                  <button
+                    onClick={() => submitConfirmation("PERSONAL")}
+                    className="flex-1 min-h-14 rounded-xl bg-emerald-600 text-white text-lg font-bold whitespace-nowrap"
+                  >개인</button>
+                </>
+              ) : (
+                <button
+                  onClick={() => submitConfirmation()}
+                  className="flex-1 min-h-14 rounded-xl bg-emerald-600 text-white text-lg font-bold whitespace-nowrap"
+                >확인</button>
+              )}
               <button
-                onClick={() => submitTeacherType("WORK")}
-                className="flex-1 min-h-14 rounded-xl bg-blue-600 text-white text-lg font-bold whitespace-nowrap"
-              >
-                근무
-              </button>
-              <button
-                onClick={() => submitTeacherType("PERSONAL")}
-                className="flex-1 min-h-14 rounded-xl bg-emerald-600 text-white text-lg font-bold whitespace-nowrap"
-              >
-                개인 ({countdown})
-              </button>
-              <button
-                onClick={cancelTeacher}
+                ref={cancelButtonRef}
+                onClick={cancelConfirmation}
                 className="flex-1 min-h-14 rounded-xl bg-gray-500 text-white text-lg font-bold whitespace-nowrap"
               >
                 취소
               </button>
             </div>
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* 하단 바: 로컬 동기화 + 모드 전환 */}
@@ -845,6 +943,7 @@ export default function FaceCheckPage() {
           </div>
         )}
         <button
+          ref={modeButtonRef}
           onClick={switchMode}
           className="min-h-11 px-5 rounded-full bg-white/90 dark:bg-black/70 text-gray-900 dark:text-white font-semibold text-sm shadow-lg flex items-center gap-2 whitespace-nowrap shrink-0"
         >

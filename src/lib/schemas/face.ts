@@ -14,7 +14,16 @@ export const faceEnrollSchema = z.object({
   consentVersion: z.string().min(1),
 });
 
+export const faceConfirmationSchema = z.object({
+  userId: z.number().int().positive(),
+  mealKind: z.enum(["BREAKFAST", "LUNCH", "DINNER"]),
+  date: z.iso.date(),
+});
+
+export type FaceConfirmation = z.infer<typeof faceConfirmationSchema>;
+
 export const faceCheckSchema = z.object({
   embedding: embeddingSchema,
   type: z.enum(["WORK", "PERSONAL"]).optional(),
+  confirmation: faceConfirmationSchema.optional(),
 });

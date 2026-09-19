@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FACE_EMBEDDING_DIM } from "@/lib/face-constants";
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +31,7 @@ vi.mock("@/lib/meal-kind", async (importOriginal) => {
 const emb = Array.from({ length: FACE_EMBEDDING_DIM }, (_, i) => (i === 0 ? 1 : 0));
 
 const STUDENT = { id: 1, name: "김학생", role: "STUDENT", grade: 2, classNum: 3, number: 7, photoUrl: null };
+const confirmation = { userId: 1, mealKind: "DINNER", date: "2026-09-02" };
 const TEACHER = { id: 9, name: "박교사", role: "TEACHER", grade: null, classNum: null, number: null, photoUrl: null };
 
 function request(body: unknown, headers: Record<string, string> = {}) {
@@ -53,7 +54,9 @@ const OPEN_SETTINGS = {
 
 describe("/api/facecheck", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-02T09:00:00Z"));
     process.env.FACECHECK_KIOSK_KEY = "test-key";
     mocks.getCachedSettings.mockResolvedValue(OPEN_SETTINGS);
     mocks.getFaceCandidates.mockResolvedValue([
@@ -63,6 +66,8 @@ describe("/api/facecheck", () => {
     mocks.isStudentEligibleToday.mockResolvedValue(true);
     mocks.checkInCreate.mockResolvedValue({ checkedAt: new Date("2026-09-02T09:00:00Z") });
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it("잘못된 바디 400", async () => {
     const { POST } = await import("@/app/api/facecheck/route");
@@ -103,7 +108,7 @@ describe("/api/facecheck", () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
     const { POST } = await import("@/app/api/facecheck/route");
     const matched = await (await POST(request({ embedding: emb }))).json();
-    expect(matched.success).toBe(true);
+    expect(matched.needConfirmation).toBe(true);
     expect(matched.similarity).toBeCloseTo(1);
     expect(matched.runnerUp).toBeCloseTo(0);
 
@@ -111,13 +116,13 @@ describe("/api/facecheck", () => {
     expect(unmatched.matched).toBe(false);
     expect(unmatched.errorCode).toBe("UNMATCHED");
     expect(unmatched.similarity).toBeCloseTo(0);
-    expect(mocks.checkInCreate).toHaveBeenCalledTimes(1);
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
 
-  it("학생 매칭 → source FACE, type STUDENT로 즉시 체크인", async () => {
+  it("학생 확인 → source FACE, type STUDENT로 체크인", async () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
     const { POST } = await import("@/app/api/facecheck/route");
-    const body = await (await POST(request({ embedding: emb }))).json();
+    const body = await (await POST(request({ embedding: emb, confirmation }))).json();
     expect(body.success).toBe(true);
     expect(mocks.checkInCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -130,7 +135,7 @@ describe("/api/facecheck", () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
     mocks.isStudentEligibleToday.mockResolvedValue(false);
     const { POST } = await import("@/app/api/facecheck/route");
-    const body = await (await POST(request({ embedding: emb }))).json();
+    const body = await (await POST(request({ embedding: emb, confirmation }))).json();
     expect(body.notApplicant).toBe(true);
     expect(body.error).toBe("오늘 석식 신청자가 아닙니다.");
     expect(body.user.name).toBe("김학생");
@@ -141,7 +146,7 @@ describe("/api/facecheck", () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
     mocks.checkInFindFirst.mockResolvedValue({ checkedAt: new Date() });
     const { POST } = await import("@/app/api/facecheck/route");
-    const body = await (await POST(request({ embedding: emb }))).json();
+    const body = await (await POST(request({ embedding: emb, confirmation }))).json();
     expect(body.duplicate).toBe(true);
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
@@ -158,17 +163,17 @@ describe("/api/facecheck", () => {
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
 
-  it("교사 + type WORK → WORK로 체크인", async () => {
+  it.each(["WORK", "PERSONAL"])("교사 확인 + type %s → 선택한 유형으로 체크인", async (type) => {
     mocks.getFaceCandidates.mockResolvedValue([
       { userId: 9, embeddings: [Float32Array.from(emb)] },
     ]);
     mocks.userFindUnique.mockResolvedValue(TEACHER);
     const { POST } = await import("@/app/api/facecheck/route");
-    const body = await (await POST(request({ embedding: emb, type: "WORK" }))).json();
+    const body = await (await POST(request({ embedding: emb, type, confirmation: { ...confirmation, userId: 9 } }))).json();
     expect(body.success).toBe(true);
     expect(mocks.checkInCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ userId: 9, type: "WORK", source: "FACE" }),
+        data: expect.objectContaining({ userId: 9, type, source: "FACE" }),
       }),
     );
   });
@@ -176,7 +181,7 @@ describe("/api/facecheck", () => {
   it("학생에게 type이 와도 STUDENT로 저장", async () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
     const { POST } = await import("@/app/api/facecheck/route");
-    await POST(request({ embedding: emb, type: "WORK" }));
+    await POST(request({ embedding: emb, type: "WORK", confirmation }));
     expect(mocks.checkInCreate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ type: "STUDENT" }) }),
     );
@@ -190,10 +195,10 @@ describe("/api/facecheck", () => {
     mocks.checkInFindFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ checkedAt: new Date("2026-09-02T11:30:00Z") });
-    mocks.checkInCreate.mockRejectedValueOnce({ code: "P2002" } as any);
+    mocks.checkInCreate.mockRejectedValueOnce({ code: "P2002" });
 
     const { POST } = await import("@/app/api/facecheck/route");
-    const body = await (await POST(request({ embedding: emb }))).json();
+    const body = await (await POST(request({ embedding: emb, confirmation }))).json();
 
     expect(body.success).toBe(false);
     expect(body.matched).toBe(true);
@@ -201,6 +206,50 @@ describe("/api/facecheck", () => {
     expect(body.user.name).toBe("김학생");
     expect(body.mealKind).toBe("DINNER");
     expect(body.checkedAt).toBeDefined();
+  });
+
+  it.each([STUDENT, TEACHER])("$role 후보는 type만 보내도 저장과 자격 조회 없이 확인 요구", async (user) => {
+    mocks.userFindUnique.mockResolvedValue(user);
+    mocks.getFaceCandidates.mockResolvedValue([{ userId: user.id, embeddings: [Float32Array.from(emb)] }]);
+    mocks.checkInFindFirst.mockResolvedValue({ checkedAt: new Date() });
+    mocks.isStudentEligibleToday.mockResolvedValue(false);
+    const { POST } = await import("@/app/api/facecheck/route");
+    const body = await (await POST(request({ embedding: emb, type: "WORK" }))).json();
+    expect(body).toMatchObject({ success: false, matched: true, needConfirmation: true,
+      needType: user.role === "TEACHER", user: { id: user.id }, mealKind: "DINNER", date: "2026-09-02" });
+    expect(mocks.checkInFindFirst).not.toHaveBeenCalled();
+    expect(mocks.isStudentEligibleToday).not.toHaveBeenCalled();
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...confirmation, userId: 9 },
+    { ...confirmation, date: "2026-09-01" },
+    { ...confirmation, mealKind: "LUNCH" },
+  ])("확인 대상 또는 날짜·식사 변경 시 저장 거부: %j", async (changed) => {
+    mocks.userFindUnique.mockResolvedValue(STUDENT);
+    const { POST } = await import("@/app/api/facecheck/route");
+    const body = await (await POST(request({ embedding: emb, confirmation: changed }))).json();
+    expect(body).toMatchObject({ success: false, errorCode: "CONFIRMATION_CHANGED" });
+    expect(mocks.checkInFindFirst).not.toHaveBeenCalled();
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+  });
+
+  it("교사 확인에 type 없으면 저장 없이 다시 선택 요구", async () => {
+    mocks.userFindUnique.mockResolvedValue(TEACHER);
+    mocks.getFaceCandidates.mockResolvedValue([{ userId: 9, embeddings: [Float32Array.from(emb)] }]);
+    const { POST } = await import("@/app/api/facecheck/route");
+    const body = await (await POST(request({ embedding: emb, confirmation: { ...confirmation, userId: 9 } }))).json();
+    expect(body).toMatchObject({ needConfirmation: true, needType: true });
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+  });
+
+  it("학생·교사 외 역할은 확인 요청이 있어도 저장 거부", async () => {
+    mocks.userFindUnique.mockResolvedValue({ ...STUDENT, role: "ADMIN" });
+    const { POST } = await import("@/app/api/facecheck/route");
+    const body = await (await POST(request({ embedding: emb, confirmation }))).json();
+    expect(body).toMatchObject({ success: false, errorCode: "ROLE_NOT_ALLOWED" });
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
 
   it("키오스크 키 헤더 없음 → 401 KIOSK_UNAUTHORIZED", async () => {

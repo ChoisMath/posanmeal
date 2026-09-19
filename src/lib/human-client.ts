@@ -33,6 +33,65 @@ const BASE_CONFIG: Partial<Config> = {
 const LOAD_TIMEOUT_MS = 90_000;
 const DETECT_TIMEOUT_MS = 5_000;
 
+let operationRunning = false;
+const waitingOperations = new Set<() => void>();
+
+function runNextOperation(): void {
+  if (operationRunning) return;
+  waitingOperations.values().next().value?.();
+}
+
+// Human 인스턴스가 달라도 TF와 얼굴 모델 상태를 공유한다. 호출자의 제한 시간이
+// 끝나도 취소할 수 없는 원본 연산이 종료되기 전에는 다음 연산을 시작할 수 없다.
+function runExclusive<T>(
+  operation: () => Promise<T>,
+  timeoutMs: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let pending = true;
+    const finish = (settle: () => void) => {
+      if (!pending) return;
+      pending = false;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      waitingOperations.delete(start);
+      settle();
+    };
+    const abort = () => finish(() => reject(new DOMException("Face operation aborted", "AbortError")));
+    const start = () => {
+      waitingOperations.delete(start);
+      operationRunning = true;
+      const release = () => {
+        operationRunning = false;
+        runNextOperation();
+      };
+      Promise.resolve().then(() => pending ? operation() : undefined).then(
+        (value) => {
+          finish(() => resolve(value as T));
+          release();
+        },
+        (error: unknown) => {
+          finish(() => reject(error));
+          release();
+        },
+      );
+    };
+    const timer = setTimeout(
+      () => finish(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`))),
+      timeoutMs,
+    );
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    waitingOperations.add(start);
+    runNextOperation();
+  });
+}
+
 // BASE_CONFIG에서 켠 파이프라인이 실제로 로드하는 Models 프로퍼티 이름
 // (node_modules/@vladmandic/human/dist/human.esm.js Models.load() 기준 — 파일명(blazeface.json 등)과는
 // 별개의 내부 키라 다를 수 있음. detector→blazeface, mesh→facemesh, insightface→insightface)
@@ -83,9 +142,12 @@ export function loadHuman(candidates: FaceBackend[] = ["webgl"]): Promise<Human>
       let lastError: unknown = null;
       for (const backend of candidates) {
         try {
-          const human = new mod.Human({ ...BASE_CONFIG, backend });
-          await withTimeout(loadAndVerify(human), LOAD_TIMEOUT_MS, `human load (${backend})`);
-          active = { human, backend: actualBackend(human) };
+          active = await runExclusive(async () => {
+            active = null;
+            const human = new mod.Human({ ...BASE_CONFIG, backend });
+            await loadAndVerify(human);
+            return { human, backend: actualBackend(human) };
+          }, LOAD_TIMEOUT_MS, `human load (${backend})`);
           return active;
         } catch (err) {
           lastError = err;
@@ -95,7 +157,7 @@ export function loadHuman(candidates: FaceBackend[] = ["webgl"]): Promise<Human>
       throw lastError ?? new Error("no face backend available");
     })
     .finally(() => {
-      if (loading?.key === key) loading = null;
+      if (loading?.promise === promise) loading = null;
     });
   loading = { key, promise };
   return promise.then((l) => l.human);
@@ -113,9 +175,8 @@ export interface DetectedFace {
   geometry: EnrollmentFaceGeometry | null;
 }
 
-function toDetected(face: FaceResult, video: HTMLVideoElement): DetectedFace | null {
+function toDetected(face: FaceResult, frame: { width: number; height: number }): DetectedFace | null {
   if (!face.embedding || face.embedding.length === 0) return null;
-  const frame = { width: video.videoWidth, height: video.videoHeight };
   const angle = face.rotation?.angle;
   const geometry = frame.width > 0 && frame.height > 0 && angle
     ? {
@@ -143,12 +204,16 @@ export type DetectOutcome =
   | { kind: "none" }
   | { kind: "multiple" };
 
-export async function detectFaces(human: Human, video: HTMLVideoElement): Promise<DetectOutcome> {
-  const result = await withTimeout(human.detect(video), DETECT_TIMEOUT_MS, "detect");
-  if (result.face.length === 0) return { kind: "none" };
-  if (result.face.length > 1) return { kind: "multiple" };
-  const face = toDetected(result.face[0], video);
-  return face ? { kind: "face", face } : { kind: "none" };
+export function detectFaces(human: Human, video: HTMLVideoElement, signal?: AbortSignal): Promise<DetectOutcome> {
+  return runExclusive(async () => {
+    if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) return { kind: "none" };
+    const frame = { width: video.videoWidth, height: video.videoHeight };
+    const result = await human.detect(video);
+    if (result.face.length === 0) return { kind: "none" };
+    if (result.face.length > 1) return { kind: "multiple" };
+    const face = toDetected(result.face[0], frame);
+    return face ? { kind: "face", face } : { kind: "none" };
+  }, DETECT_TIMEOUT_MS, "detect", signal);
 }
 
 export type QualityIssue = "spoof" | "lowScore" | null;

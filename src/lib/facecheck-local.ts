@@ -2,6 +2,8 @@ import { decideMatch, rankCandidates, scoreSummary, type FaceCandidate, type Mat
 import { resolveMealKindLocal, type MealKind, type MealWindows } from "@/lib/meal-kind-local";
 import { MEAL_LABEL } from "@/lib/meal-plan";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
+import type { FaceConfirmation } from "@/lib/schemas/face";
+import { TIMEZONE } from "@/lib/timezone";
 
 export interface FaceCheckUser {
   id: number;
@@ -20,6 +22,8 @@ export interface FaceCheckResult extends MatchScore {
   duplicate?: boolean;
   notApplicant?: boolean;
   needType?: boolean;
+  needConfirmation?: boolean;
+  date?: string;
   error?: string;
   errorCode?: string;
   user?: FaceCheckUser;
@@ -42,13 +46,11 @@ export interface LocalFaceInput {
   now: Date;
   mealWindows: MealWindows;
   type?: "WORK" | "PERSONAL";
+  confirmation?: FaceConfirmation;
 }
 
 export function localDateKey(now: Date): string {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return now.toLocaleDateString("en-CA", { timeZone: TIMEZONE });
 }
 
 export function toFaceCandidates(profiles: { userId: number; embeddings: number[][] }[]): FaceCandidate[] {
@@ -59,9 +61,9 @@ function toFaceUser(user: LocalUser): FaceCheckUser {
   return { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number };
 }
 
-// 판정 순서는 /api/facecheck와 동일: 식사 시간 → 매칭 → 사용자 → 중복 → 교사 type → 학생 자격 → 저장
 export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFaceRepo): Promise<FaceCheckResult> {
-  const mealKind = resolveMealKindLocal(input.now, input.mealWindows);
+  const kstNow = new Date(input.now.toLocaleString("en-US", { timeZone: TIMEZONE }));
+  const mealKind = resolveMealKindLocal(kstNow, input.mealWindows);
   if (!mealKind) {
     return { success: false, error: "현재 식사 시간이 아닙니다.", errorCode: "NO_MEAL_WINDOW" };
   }
@@ -75,6 +77,25 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
 
   const date = localDateKey(input.now);
   const faceUser = toFaceUser(user);
+  if (user.role !== "STUDENT" && user.role !== "TEACHER") {
+    return { success: false, error: "체크인할 수 없는 사용자입니다.", errorCode: "ROLE_NOT_ALLOWED" };
+  }
+
+  const { confirmation } = input;
+  if (confirmation && (confirmation.userId !== user.id || confirmation.mealKind !== mealKind || confirmation.date !== date)) {
+    return {
+      success: false, matched: true, ...score,
+      error: "확인 대상이 변경되었습니다. 얼굴을 다시 인식해 주세요.", errorCode: "CONFIRMATION_CHANGED",
+    };
+  }
+
+  if (!confirmation || (user.role === "TEACHER" && !input.type)) {
+    return {
+      success: false, matched: true, needConfirmation: true, needType: user.role === "TEACHER",
+      user: faceUser, mealKind, date, ...score,
+    };
+  }
+
   const existing = await repo.getCheckIn(user.id, date, mealKind);
   if (existing) {
     return {
@@ -91,8 +112,7 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
 
   let type: LocalCheckIn["type"];
   if (user.role === "TEACHER") {
-    if (!input.type) return { success: false, matched: true, needType: true, user: faceUser, mealKind, ...score };
-    type = input.type;
+    type = input.type!;
   } else {
     const eligible = await repo.isEligible(user.id, date, mealKind);
     if (!eligible) {

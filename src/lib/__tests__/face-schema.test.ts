@@ -49,3 +49,18 @@ describe("faceCheckSchema", () => {
     expect(faceCheckSchema.safeParse({ embedding: validEmbedding, type: "STUDENT" }).success).toBe(false);
   });
 });
+
+
+describe("faceCheckSchema confirmation", () => {
+  const confirmation = { userId: 1, mealKind: "DINNER", date: "2026-09-05" };
+  it("유효한 확인 대상 보존", () => {
+    expect(faceCheckSchema.parse({ embedding: validEmbedding, confirmation })).toMatchObject({ confirmation });
+  });
+  it.each([
+    { ...confirmation, userId: 0 }, { ...confirmation, userId: 1.5 },
+    { ...confirmation, mealKind: "SNACK" }, { ...confirmation, date: "2026-9-5" },
+    { ...confirmation, date: "2026-02-30" }, { userId: 1 },
+  ])("잘못된 확인 대상 거부: %j", (invalid) => {
+    expect(faceCheckSchema.safeParse({ embedding: validEmbedding, confirmation: invalid }).success).toBe(false);
+  });
+});
