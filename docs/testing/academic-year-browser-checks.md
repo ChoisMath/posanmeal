@@ -229,3 +229,16 @@ Google OAuth·실휴대전화·운영 자료를 사용하지 않았다. READ 계
 - 360/768/1280px 및 360×568px에서 표·다이얼로그를 조작했다. 짧은 화면의 최초 애니메이션 중 측정 실패는 원본 결과를 보존하고 안정화 후 재검증 통과로 구분했다.
 
 운영 서비스·실기기·외부 Google OAuth·실제 카메라 인식은 실행하지 않았다. 서버와 생성한 Chromium을 종료하고 테스트 DB 독점 사용을 해제했다. 상세 결과·스크린샷·폰트 관찰 사항은 위 scratch 경로의 `browser-14c-report.md`와 `browser-14c-summary.json`에 기록했다.
+
+
+## Task 15 후속 실제 검증 (2026-09-20)
+
+B 코드 `7cf4859` 기준. 담임 화면은 실제 컴포넌트와 SWR hook에 합성 HTTP 응답을 주었고, 서버 계약은 별도의 실제 PG 31건으로 검증했다.
+
+| 범위 | 결과 | 확인 내용 |
+| --- | --- | --- |
+| 담임 화면 | 9개 묶음 통과 | 360/768/1280px, 50자 이름, sticky·내부 스크롤·44px, 3월/2월 경계, 숨은 선택 인쇄 제외, 조식/중식 표시·KST, 오류 복구, pageerror 0 |
+| 로컬 보존·초기화 | 21개 확인 통과 | 실제 IDB 14 + ForceResetDialog 6 + pageerror 0 확인. 다른 탭 QR 저장 후 차단, 실제 XLSX 재내보내기 후 초기화 |
+| 기존 DB 업그레이드 | 18/18 통과 | v4·v5→v6 제품 handler. 원본 PK/시각/미전송 보존, snapshot 실패 후 기존 명부·기록 유지 |
+
+자료: ignored `.superpowers/sdd/2026-09-19-academic-year-roster/task15-teacher-results.json`, `task15-idb-ui-green.json`, `task15-upgrade-results.json`과 스크린샷/XLSX. 독립 Chromium에서 실행했고 Google OAuth·실기기·운영 저장소는 사용하지 않았다. 담임 harness의 최초 시간 문자열/SWR 대기 기대 오류는 최종 통과와 구분하여 로그를 보존했다. 모든 검증용 브라우저와 HTTP 서버는 실행 후 종료했다.

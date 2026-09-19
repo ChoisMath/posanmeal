@@ -950,7 +950,7 @@ v1부터 올 때 users/eligible/faces/settings 신규 store 생성도 기존 키
 - Produces: `RosterImportDialog({year,scope,onCommitted,onClose}:{year:number;scope:ImportScope;onCommitted:()=>void;onClose:()=>void})`.
 - Consumes: Task 4~13 API. 조회는 `{data,version}`, 변경은 `MutationReceipt`, 오류는 `{error:{code,message,issues?}}`로 통일한다. 서버 Actor는 세션에서만 생성한다.
 
-- [ ] **Step 1 — 서버 권한과 우회 차단 테스트.** READ_ADMIN의 POST preview/commit·셀 편집은 403, WRITE_ADMIN의 activate/delete/permissions는 403, MAIN은 허용되는 실제 handler 테스트를 추가한다. 옛 `/api/admin/import`는 인증 후 410을 반환하고 DB 쓰기를 하지 않아야 한다.
+- [x] **Step 1 — 서버 권한과 우회 차단 테스트.** READ_ADMIN의 POST preview/commit·셀 편집은 403, WRITE_ADMIN의 activate/delete/permissions는 403, MAIN은 허용되는 실제 handler 테스트를 추가한다. 옛 `/api/admin/import`는 인증 후 410을 반환하고 DB 쓰기를 하지 않아야 한다.
 
 ```ts
 const fx = await prepareAcademicFixture(db);
@@ -959,9 +959,9 @@ await expect(assertActor(db, fx.writer, "WRITE_ADMIN")).resolves.toBeUndefined()
 ```
 
 route 수준 테스트에는 NextRequest body의 가짜 actor/adminLevel을 넣어도 권한이 바뀌지 않는 경우와 모든 관리자 변경 API의 인증 없는 요청을 포함한다.
-- [ ] **Step 2 — 실패 확인.** `npm run test:academic -- academic-api-permissions.test.ts`.
-- [ ] **Step 3 — 연도별 명부 화면.** 연도 선택 옆에 `운영 중 / 준비 중 / 지난 학년도` 표시, 학생/교사 보기, 양식 다운로드의 `기존 데이터 포함` 체크박스, 과거 출력의 `현재 학급도 함께 표시` 옵션을 둔다. 선택 연도와 현재 운영 연도는 분리해 보여준다. 기존 `EditableCell`을 재사용하되 이메일은 별도 변경 다이얼로그, 교사 권한은 MAIN 전용 별도 버튼으로 분리한다.
-- [ ] **Step 4 — 업로드 상태 흐름.** `파일 선택 → 검증 중 → 미리보기 → 반영 중 → 완료`로 구성한다. 미리보기는 신규/동일/변경/확인 필요/충돌, 학생·교사 건수, 값 비우기, 전체 대조 누락을 보여준다. 충돌 행은 파일 값과 서버 현재 값을 나란히 보여주고 행마다 [파일 값 사용]/[서버 값 유지]를 고르게 하며, 선택은 즉시 서버(PATCH)에 저장한다. 신규 행 확인, FULL 누락 확인, 모든 충돌 행 선택이 없으면 확정 버튼을 활성화하지 않는다. 닫기·취소는 서버의 미리보기를 취소(DELETE)해 사본을 바로 비운다.
+- [x] **Step 2 — 실패 확인.** `npm run test:academic -- academic-api-permissions.test.ts`.
+- [x] **Step 3 — 연도별 명부 화면.** 연도 선택 옆에 `운영 중 / 준비 중 / 지난 학년도` 표시, 학생/교사 보기, 양식 다운로드의 `기존 데이터 포함` 체크박스, 과거 출력의 `현재 학급도 함께 표시` 옵션을 둔다. 선택 연도와 현재 운영 연도는 분리해 보여준다. 기존 `EditableCell`을 재사용하되 이메일은 별도 변경 다이얼로그, 교사 권한은 MAIN 전용 별도 버튼으로 분리한다.
+- [x] **Step 4 — 업로드 상태 흐름.** `파일 선택 → 검증 중 → 미리보기 → 반영 중 → 완료`로 구성한다. 미리보기는 신규/동일/변경/확인 필요/충돌, 학생·교사 건수, 값 비우기, 전체 대조 누락을 보여준다. 충돌 행은 파일 값과 서버 현재 값을 나란히 보여주고 행마다 [파일 값 사용]/[서버 값 유지]를 고르게 하며, 선택은 즉시 서버(PATCH)에 저장한다. 신규 행 확인, FULL 누락 확인, 모든 충돌 행 선택이 없으면 확정 버튼을 활성화하지 않는다. 닫기·취소는 서버의 미리보기를 취소(DELETE)해 사본을 바로 비운다.
 
 ```ts
 type ImportUiState =
@@ -973,12 +973,14 @@ type ImportUiState =
 ```
 
 파일·대상 연도·일부/전체 선택이 바뀌면 preview/확인/requestId를 초기화한다. 응답 유실 후 같은 반영을 재시도하면 같은 requestId를 재사용한다. 409는 자동 덮어쓰지 않고 최신 파일/미리보기 재생성을 안내한다. 행 오류는 시트·행·열과 한국어 사유를 표시한다.
-- [ ] **Step 5 — 전환·삭제·정정.** 전환에서 누락자 결정을 모두 받고 키오스크 업로드·일시 중지 확인, 신규/업무 변경/이용 중단 수·관리자 권한 유지 안내, 이용 중단자의 얼굴 등록 삭제 안내를 보여준다. 세 가지 전환 경고(이용 중단자의 미래 확정 식사일, 현 학년도 잔여 확정 식사일, 전년도와 학년이 같은 학생 수)는 0이 아닐 때 강조하고 확인 체크를 요구한다. 개별 이용 중단 다이얼로그에도 얼굴 등록 삭제를 명시한다. 전환 성공 후에만 새 연도 접수 기능을 활성화한다. 삭제는 대상 수와 사전 다운로드 버튼 및 설계의 보존 안내 문구를 표시한다. 과거 Profile 정정은 일반 명부 복구와 분리한다.
-- [ ] **Step 6 — 연관 화면.** 교사 자기정보의 담임·업무 직접 편집을 읽기 전용으로 바꾼다. ApplicationForm에는 학년도를 넣고 준비 연도 공고는 접수 전 상태를 명시한다. 통계에 기준 학년도와 선택 현재 학급을 표시한다. 체크인 검토 화면은 원본 발생시각·사유·승인/거절 결과를 보여주고 로컬 기록이 보존됨을 안내한다. 옛 Sheet URL 입력 UI를 제거하고 API는 410으로 닫되 code.gs/Sheet 자료는 변경하지 않는다. `tests/admin-sheet-import-guide.test.ts`가 검증하는 안내 문서는 "학년도별 Excel로 대체됨"으로 고치고 테스트 기대값을 그에 맞춘다(테스트를 지우지 않는다). 이 테스트는 기본 vitest include 밖이므로 실행 명령을 명시해 돌린다.
-- [ ] **Step 7 — 브라우저 확인·UI 검수.** `docs/testing/academic-year-browser-checks.md`에 360/768/1280px 화면에서 연도 선택, 업로드 오류→수정→미리보기, 재전송, 전환 누락 차단, 삭제 후 보고서, 교사 권한, 충돌 행 선택, 전환 경고 확인, 키오스크 `재동기화 필요` 표시·학년도 불일치 차단·내보내기 후 강제 초기화를 실제 조작 순서와 기대 결과로 기록한다. 표는 가로 스크롤·sticky 헤더, 버튼/이름/학번은 프로젝트 nowrap 규칙을 지킨다. `responsive-ui-reviewer` 검토 후 수정한다.
-- [ ] **Step 8 — 테스트·커밋.** 관련 handler 테스트·타입·lint·브라우저 확인 후 `feat: add yearly roster and Excel management workflows`.
+- [x] **Step 5 — 전환·삭제·정정.** 전환에서 누락자 결정을 모두 받고 키오스크 업로드·일시 중지 확인, 신규/업무 변경/이용 중단 수·관리자 권한 유지 안내, 이용 중단자의 얼굴 등록 삭제 안내를 보여준다. 세 가지 전환 경고(이용 중단자의 미래 확정 식사일, 현 학년도 잔여 확정 식사일, 전년도와 학년이 같은 학생 수)는 0이 아닐 때 강조하고 확인 체크를 요구한다. 개별 이용 중단 다이얼로그에도 얼굴 등록 삭제를 명시한다. 전환 성공 후에만 새 연도 접수 기능을 활성화한다. 삭제는 대상 수와 사전 다운로드 버튼 및 설계의 보존 안내 문구를 표시한다. 과거 Profile 정정은 일반 명부 복구와 분리한다.
+- [x] **Step 6 — 연관 화면.** 교사 자기정보의 담임·업무 직접 편집을 읽기 전용으로 바꾼다. ApplicationForm에는 학년도를 넣고 준비 연도 공고는 접수 전 상태를 명시한다. 통계에 기준 학년도와 선택 현재 학급을 표시한다. 체크인 검토 화면은 원본 발생시각·사유·승인/거절 결과를 보여주고 로컬 기록이 보존됨을 안내한다. 옛 Sheet URL 입력 UI를 제거하고 API는 410으로 닫되 code.gs/Sheet 자료는 변경하지 않는다. `tests/admin-sheet-import-guide.test.ts`가 검증하는 안내 문서는 "학년도별 Excel로 대체됨"으로 고치고 테스트 기대값을 그에 맞춘다(테스트를 지우지 않는다). 이 테스트는 기본 vitest include 밖이므로 실행 명령을 명시해 돌린다.
+- [x] **Step 7 — 브라우저 확인·UI 검수.** `docs/testing/academic-year-browser-checks.md`에 360/768/1280px 화면에서 연도 선택, 업로드 오류→수정→미리보기, 재전송, 전환 누락 차단, 삭제 후 보고서, 교사 권한, 충돌 행 선택, 전환 경고 확인, 키오스크 `재동기화 필요` 표시·학년도 불일치 차단·내보내기 후 강제 초기화를 실제 조작 순서와 기대 결과로 기록한다. 표는 가로 스크롤·sticky 헤더, 버튼/이름/학번은 프로젝트 nowrap 규칙을 지킨다. `responsive-ui-reviewer` 검토 후 수정한다.
+- [x] **Step 8 — 테스트·커밋.** 관련 handler 테스트·타입·lint·브라우저 확인 후 `feat: add yearly roster and Excel management workflows`.
 
 ## Task 15: 통합 회귀·복원 리허설·운영 반영 준비
+
+> 2026-09-20 재개 상태: Task 14a·14b·14c는 구현·독립 코드/UI 검토·실제 Chromium 확인을 완료했다. Task 15 앱 회귀와 검토 결과는 [검증 보고서](../../operations/academic-year-validation-report.md)에 기록한다. 실제 운영 자료 백업/복원·배포는 미실행이며 별도 대상 승인이 필요하다. Step 3은 서비스 메타데이터·실제 SQL·복원 후보까지만 확인했고 DB 연결과 복원 대상 확정은 남았다. Step 6은 실행안 작성 완료, 실제 담당자·일시·접속/차단 방법 승인 전이라 미완료로 둔다. Step 2의 기존 lint 오류와 Step 7의 역할 런타임 대체 검토는 보고서에 구분했다. 최신 AGENTS의 Claude 원본 보존 지침에 따라 맵·인계는 `.codex/`만 갱신한다.
 
 **Files**
 - Create: `docs/operations/academic-year-migration-runbook.md`, `docs/operations/academic-year-validation-report.md`
@@ -989,8 +991,8 @@ type ImportUiState =
 - Consumes: Task 1~14 서비스와 검증 명령. 새 제품 API는 추가하지 않는다.
 - Produces: 현재 commit·테스트 결과·복원 대상 검증·백업/manifest 식별자·실행 순서·중단 조건을 포함한 review 가능한 운영 실행안. 비밀값·학생 원본은 문서에 저장하지 않는다.
 
-- [ ] **Step 1 — 빠진 경로 정적 검사.** `rg`로 `user.update/delete`, `reg.user.grade`, `auth()/canWriteAdmin`, 기존 Sheet import와 `resyncRegistrations` 호출 위치를 확인한다. 직접 User 삭제·연도 없는 명부 쓰기·옛 JWT만 믿는 서버 권한·현재 grade로 과거 계산·초안 신청 경로가 남으면 소유 Task로 돌아가 회귀 테스트를 추가한다. `src/app/api/admin/**`의 기존 설정/백업 API도 최신 계정 guard를 적용한다.
-- [ ] **Step 2 — 앱 검증.** 아래를 실행해 종료 코드와 테스트 수를 기록한다. 실패를 기존 오류라고 추정하지 않으며 실패 원인·기존 여부를 확인해 구분한다.
+- [x] **Step 1 — 빠진 경로 정적 검사.** `rg`로 `user.update/delete`, `reg.user.grade`, `auth()/canWriteAdmin`, 기존 Sheet import와 `resyncRegistrations` 호출 위치를 확인한다. 직접 User 삭제·연도 없는 명부 쓰기·옛 JWT만 믿는 서버 권한·현재 grade로 과거 계산·초안 신청 경로가 남으면 소유 Task로 돌아가 회귀 테스트를 추가한다. `src/app/api/admin/**`의 기존 설정/백업 API도 최신 계정 guard를 적용한다.
+- [x] **Step 2 — 앱 검증.** 아래를 실행해 종료 코드와 테스트 수를 기록한다. 실패를 기존 오류라고 추정하지 않으며 실패 원인·기존 여부를 확인해 구분한다.
 
 ```bash
 npx prisma generate
@@ -1014,7 +1016,7 @@ pg_restore --exit-on-error --no-owner --dbname=service=posanmeal-restore "$ACADE
 `posanmeal-source`는 읽기 전용 백업 계정, `posanmeal-restore`는 새로 확인한 빈 시험 DB여야 한다. CLI wrapper는 접속 후 database/user/환경 marker를 확인해 허용 목록과 다르면 중단한다. 원본 백업과 manifest 파일은 git 밖 접근 제한 위치에 둔다. 백업 파일 생성만으로 복원 성공이라고 쓰지 않는다.
 - [ ] **Step 5 — 복원본 이전 검증.** 복원본에서 추가형 migrate → 초기 2026 copy → 원본 전체 필드/PK/FK 비교 → 예외 목록 → 예외 해결 확인 → READY 순서로 실행한다. 성별 등 비식별 기존 결측은 보완 표시, 식별/학번/귀속 불확실성은 READY 차단이다. 재실행·중간 중단·삭제 명부 재생성 금지·전환 후 과거 보고서·신청·온라인/오프라인 체크인을 검증한다. 실제 복원 데이터와 합성 테스트의 통과 결과를 별도로 적는다.
 - [ ] **Step 6 — 운영 실행안 확정.** **Release A**: 새 백업 → source manifest → `main` 반영(시작 명령의 `migrate deploy`가 추가형 SQL 적용) → 롤링 교체가 끝나 이전 컨테이너가 없음을 확인 → 운영 DB 식별 marker 생성(누가·언제·어떤 계정으로 하는지 명시) → `backfill --mode inspect` → `apply` → `verify` → `VERIFIED`. 이 동안 기존 쓰기는 막지 않으며, 롤링 교체 구간에 이전 컨테이너가 쓴 `User` 변경은 백필이 그대로 복사하므로 유실되지 않는다. 배포 직후 전원 재로그인이 1회 발생함을 공지한다. **Release B**: 승인 대상 commit/DB/서비스/Volume, 유지보수 시간, 키오스크 미전송 업로드·중지 확인, 새 백업, source manifest, migration/배포 시작 명령, copy/verify, READY 공개, 키오스크 재동기화·운영 재개 순서를 고정한다. 쓰기 중단을 DB/라우트에서 강제하고 구 앱 인스턴스가 User를 계속 쓰지 않도록 종료 여부를 확인한다. 롤백은 새 기능 공개 전/후를 구분한다. 공개 후에는 옛 백업을 자동 복원하지 않으며 추가 스키마를 이해하는 호환 앱/수정 배포로 복구할지 결정한다. 모호한 원본·비교 실패·키오스크 미전송 존재 시 해당 실행 단계에서 멈춘다.
-- [ ] **Step 7 — 최종 검토·인계·커밋.** 전체 변경의 독립 코드 리뷰, `project-map-updater`, `responsive-ui-reviewer`, `project-memory-keeper`를 수행한다. 역할별 검토 범위와 실제 미실행 항목을 기록한다. `docs: record academic year migration checks and rollout procedure`로 문서 커밋한다. 실제 운영 적용 전에는 이 구체 실행안을 사용자에게 검토받는다.
+- [x] **Step 7 — 최종 검토·인계·커밋.** 전체 변경의 독립 코드 리뷰, `project-map-updater`, `responsive-ui-reviewer`, `project-memory-keeper`를 수행한다. 역할별 검토 범위와 실제 미실행 항목을 기록한다. `docs: record academic year migration checks and rollout procedure`로 문서 커밋한다. 실제 운영 적용 전에는 이 구체 실행안을 사용자에게 검토받는다.
 
 ## 요구사항과 검증의 연결
 
