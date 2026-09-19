@@ -138,7 +138,12 @@ const REVIEW_CLEAR_SQL = `
 /**
  * 기록이 있는 사용자면 명부 항목도 따라온다. 충돌로 키를 잃은 사람의 항목은 지우지
  * 않고 그대로 두며, 키가 비어 있는 동안에는 새로 만들지도 않는다. 충돌이 풀리면
- * 이 문장이 그때 만들어 준다.
+ * 이 문장이 그때 만들어 준다 — 그래서 INSERT 쪽은 배치 밖까지 본다.
+ *
+ * 반대로 UPDATE 쪽은 이번 배치이거나 키가 실제로 달라진 항목만 건드린다.
+ * `baseUserVersion`은 Release B가 "내보낸 뒤 서버가 바뀌었는가"를 판정하는 기준선이라,
+ * 남의 편집이 지나가며 다시 찍으면 그 신호가 사라진다. Task 4의 계정 API도
+ * `profileVersion`을 올리므로 무관한 사용자의 기준선이 새 값으로 덮일 수 있었다.
  */
 const UPSERT_ENTRIES_SQL = `
   INSERT INTO "RosterEntry" ("id", "year", "userId", "emailKey", "included", "baseUserVersion", "version")
@@ -156,7 +161,9 @@ const UPSERT_ENTRIES_SQL = `
     "emailKey" = EXCLUDED."emailKey",
     "baseUserVersion" = EXCLUDED."baseUserVersion",
     "version" = "RosterEntry"."version" + 1
-  WHERE ("RosterEntry"."emailKey", "RosterEntry"."baseUserVersion")
+  WHERE ("RosterEntry"."userId" = ANY($2::int[])
+         OR "RosterEntry"."emailKey" IS DISTINCT FROM EXCLUDED."emailKey")
+    AND ("RosterEntry"."emailKey", "RosterEntry"."baseUserVersion")
         IS DISTINCT FROM (EXCLUDED."emailKey", EXCLUDED."baseUserVersion")
 `;
 
@@ -214,7 +221,7 @@ export async function mirrorUsersToActiveYear(tx: Tx, userIds: number[]): Promis
   const flagged = await tx.$executeRawUnsafe(REVIEW_SET_SQL, year);
   const cleared = await tx.$executeRawUnsafe(REVIEW_CLEAR_SQL, year);
 
-  await tx.$executeRawUnsafe(UPSERT_ENTRIES_SQL, year);
+  await tx.$executeRawUnsafe(UPSERT_ENTRIES_SQL, year, ids);
 
   if (written.length + flagged + cleared > 0) {
     await tx.$executeRaw`

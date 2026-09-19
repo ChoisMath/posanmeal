@@ -197,12 +197,18 @@ describe("compat writes mirror legacy user writes into the active year", () => {
       const existing = await record(fx.studentId);
       const before = await user(fx.studentId);
       const yearBefore = await yearVersion();
+      const entryBefore = await db.rosterEntry.findUniqueOrThrow({
+        where: { year_userId: { year: YEAR, userId: fx.studentId } },
+      });
 
       await withCompatUserWrite(db, async () => ({ value: null, userIds: [fx.studentId] }));
 
       expect((await record(fx.studentId)).version).toBe(existing.version);
       expect((await user(fx.studentId)).profileVersion).toBe(before.profileVersion);
       expect(await yearVersion()).toBe(yearBefore);
+      expect(
+        await db.rosterEntry.findUniqueOrThrow({ where: { year_userId: { year: YEAR, userId: fx.studentId } } }),
+      ).toMatchObject({ version: entryBefore.version, baseUserVersion: entryBefore.baseUserVersion });
     });
 
     it("bumps profileVersion only for the users whose record actually changed", async () => {
@@ -221,6 +227,26 @@ describe("compat writes mirror legacy user writes into the active year", () => {
         where: { year_userId: { year: YEAR, userId: fx.studentId } },
       });
       expect(entry.baseUserVersion).toBe(studentBefore.profileVersion + 1);
+    });
+
+    it("leaves another user's roster entry alone even after their profileVersion moved", async () => {
+      // 계정 API(이메일·이용 상태·권한)는 미러를 거치지 않고 profileVersion만 올린다.
+      // 그 사용자의 기준선을 남의 편집이 지나가며 새로 찍으면 안 된다.
+      await db.$executeRaw`UPDATE "User" SET "profileVersion" = "profileVersion" + 1 WHERE id = ${fx.teacherId}`;
+      const untouched = await db.rosterEntry.findUniqueOrThrow({
+        where: { year_userId: { year: YEAR, userId: fx.teacherId } },
+      });
+
+      await editUser({
+        id: fx.studentId, email: "student-test@example.posan.kr", name: "다른사람편집",
+        grade: 1, classNum: 1, number: 1,
+      });
+
+      const after = await db.rosterEntry.findUniqueOrThrow({
+        where: { year_userId: { year: YEAR, userId: fx.teacherId } },
+      });
+      expect(after.baseUserVersion).toBe(untouched.baseUserVersion);
+      expect(after.version).toBe(untouched.version);
     });
 
     it("marks every member of a seat collision for review instead of raising 23505", async () => {
