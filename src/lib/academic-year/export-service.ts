@@ -3,6 +3,7 @@ import { assertActor } from "./access";
 import type { Actor } from "./contracts";
 import type { Db } from "./db";
 import { requireAcademicReady } from "./readiness";
+import { purgeExpiredRosterCopies } from "./retention";
 import { activeYear, listRosterView, readYearState } from "./roster-service";
 import { getAcademicProfiles } from "./profile-service";
 import { buildRosterWorkbook, WORKBOOK_SCHEMA_VERSION, type WorkbookManifest } from "./workbook";
@@ -102,6 +103,8 @@ export async function exportRoster(
       },
     });
   }
+
+  await purgeExpiredRosterCopies(db, new Date());
 
   return buffer;
 }

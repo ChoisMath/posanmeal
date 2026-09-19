@@ -59,6 +59,8 @@ export type ImportPreview = {
   missingUserIds: number[];
   coveredRoles: Array<"STUDENT" | "TEACHER">;
   canCommit: boolean;
+  /** 어떤 행에도 붙일 수 없는 파일 수준 이슈(값을 읽지 못한 셀 등). 있으면 확정하지 않는다. */
+  fileIssues?: RowIssue[];
 };
 
 export type MutationReceipt = { requestId: string; version: number; changed: number };
