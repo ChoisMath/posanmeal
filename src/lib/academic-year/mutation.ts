@@ -1,10 +1,13 @@
-import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import type { MutationInput, MutationReceipt, MutationSummary, RowMutationInput } from "./contracts";
 import type { Tx } from "./db";
 import { DomainError } from "./errors";
 
 /** 전역 배타 잠금을 잡는 트랜잭션의 공통 옵션. 전환은 이 60초 안에 끝난다. */
 export const ROSTER_TX = { maxWait: 10_000, timeout: 60_000 } as const;
+
+/** 셀 편집 한 건이 control 행 공유 잠금을 오래 붙들지 않도록 더 짧게 끊는다. */
+export const USER_TX = { maxWait: 10_000, timeout: 15_000 } as const;
 
 type Summary = MutationSummary & Prisma.InputJsonObject;
 
@@ -106,17 +109,44 @@ export async function withUserMutation<T extends Summary>(
   authorize: (tx: Tx) => Promise<void>,
   write: (tx: Tx) => Promise<T>,
 ): Promise<MutationOutcome<T>> {
+  const identity = {
+    actorUserId: input.actor.userId,
+    kind: input.kind,
+    payloadHash: input.payloadHash,
+  };
+
+  try {
+    return await runUserMutation(db, input, identity, authorize, write);
+  } catch (error) {
+    // control 행을 공유 잠금만 하므로 같은 requestId의 두 트랜잭션이 나란히
+    // 재전송 검사를 통과할 수 있다. 진 쪽은 RosterMutation PK 충돌로 롤백되며,
+    // 트랜잭션이 이미 중단된 상태라 기록은 트랜잭션 밖에서 다시 읽는다.
+    if (!isRosterMutationConflict(error)) throw error;
+
+    const stored = await db.rosterMutation.findUnique({ where: { requestId: input.requestId } });
+    if (!stored) throw error;
+    return replayReceipt<T>(stored, identity);
+  }
+}
+
+function isRosterMutationConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+async function runUserMutation<T extends Summary>(
+  db: PrismaClient,
+  input: RowMutationInput,
+  identity: { actorUserId: number | null; kind: string; payloadHash: string },
+  authorize: (tx: Tx) => Promise<void>,
+  write: (tx: Tx) => Promise<T>,
+): Promise<MutationOutcome<T>> {
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR SHARE`;
     await authorize(tx);
 
     const stored = await tx.rosterMutation.findUnique({ where: { requestId: input.requestId } });
     if (stored) {
-      return replayReceipt<T>(stored, {
-        actorUserId: input.actor.userId,
-        kind: input.kind,
-        payloadHash: input.payloadHash,
-      });
+      return replayReceipt<T>(stored, identity);
     }
 
     const locked = await tx.$queryRaw<{ id: number; profileVersion: number }[]>`
@@ -153,5 +183,5 @@ export async function withUserMutation<T extends Summary>(
       result,
       receipt: { requestId: input.requestId, version: updated.profileVersion, changed: result.changed },
     };
-  }, ROSTER_TX);
+  }, USER_TX);
 }

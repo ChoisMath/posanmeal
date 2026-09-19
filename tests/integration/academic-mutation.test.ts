@@ -203,6 +203,94 @@ describe("guarded mutations", () => {
     expect(stored.version).toBe(1);
   });
 
+  it("collapses two concurrent row mutations sharing one request key into one receipt", async () => {
+    const shared = {
+      actor: MAIN,
+      requestId: "shared-key",
+      expectedRowVersion: 0,
+      kind: "EDIT",
+      payloadHash: "same-hash",
+    };
+    const outcomes = await Promise.all(
+      [fixture.studentId, fixture.teacherId].map((userId) =>
+        withUserMutation(db, { ...shared, userId }, allow, async () => ({ changed: 1, ids: [userId] })),
+      ),
+    );
+
+    expect(outcomes[0]?.receipt).toEqual(outcomes[1]?.receipt);
+    expect(await db.rosterMutation.count()).toBe(1);
+
+    const users = await db.user.findMany({
+      where: { id: { in: [fixture.studentId, fixture.teacherId] } },
+      select: { profileVersion: true },
+    });
+    expect(users.filter((user) => user.profileVersion === 1)).toHaveLength(1);
+  });
+
+  it("rejects a shared request key carrying a different payload", async () => {
+    await withUserMutation(
+      db,
+      {
+        actor: MAIN,
+        requestId: "row-reuse",
+        userId: fixture.studentId,
+        expectedRowVersion: 0,
+        kind: "EDIT",
+        payloadHash: "hash-1",
+      },
+      allow,
+      async () => ({ changed: 1, ids: [fixture.studentId] }),
+    );
+
+    await expect(
+      withUserMutation(
+        db,
+        {
+          actor: MAIN,
+          requestId: "row-reuse",
+          userId: fixture.teacherId,
+          expectedRowVersion: 0,
+          kind: "EDIT",
+          payloadHash: "hash-2",
+        },
+        allow,
+        async () => ({ changed: 1, ids: [fixture.teacherId] }),
+      ),
+    ).rejects.toMatchObject({ code: "REQUEST_REUSED" });
+  });
+
+  it("re-checks authorization before returning a replayed receipt", async () => {
+    const version = await controlVersion(db);
+    const input = {
+      actor: MAIN,
+      requestId: "replay-denied",
+      expectedVersion: version,
+      kind: "TEST",
+      payloadHash: "hash",
+    };
+    await withAcademicMutation(db, input, allow, async () => ({ changed: 1, ids: [1] }));
+
+    const deny = async () => {
+      throw new Error("forbidden");
+    };
+    await expect(
+      withAcademicMutation(db, input, deny, async () => ({ changed: 1, ids: [1] })),
+    ).rejects.toThrow("forbidden");
+
+    const rowInput = {
+      actor: MAIN,
+      requestId: "row-replay-denied",
+      userId: fixture.studentId,
+      expectedRowVersion: 0,
+      kind: "EDIT",
+      payloadHash: "hash",
+    };
+    await withUserMutation(db, rowInput, allow, async () => ({ changed: 1, ids: [fixture.studentId] }));
+    await expect(
+      withUserMutation(db, rowInput, deny, async () => ({ changed: 1, ids: [fixture.studentId] })),
+    ).rejects.toThrow("forbidden");
+  });
+
   it("does not block check-in inserts or meal registration writes while the control row is locked", async () => {
     await pgClient.query("BEGIN");
     await pgClient.query('SELECT id FROM "RosterControl" WHERE id = 1 FOR UPDATE');

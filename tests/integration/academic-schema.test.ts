@@ -189,5 +189,86 @@ describe("academic year schema constraints", () => {
     await expect(
       db.eligibilityEvent.create({ data: { scope: "SOMETHING", occurredAt: new Date() } }),
     ).rejects.toThrow();
+
+    await expect(
+      db.academicBackfill.create({
+        data: { key: "academic-year-2026", state: "STARTED", sourceManifest: {} },
+      }),
+    ).rejects.toThrow();
+    const backfill = await db.academicBackfill.create({
+      data: { key: "academic-year-2026", state: "PENDING", sourceManifest: {} },
+    });
+    expect(backfill.state).toBe("PENDING");
+  });
+
+  it("accepts the control modes PREPARING and READY only", async () => {
+    const ready = await db.rosterControl.update({ where: { id: 1 }, data: { mode: "READY" } });
+    expect(ready.mode).toBe("READY");
+
+    await expect(db.rosterControl.update({ where: { id: 1 }, data: { mode: "OPEN" } })).rejects.toThrow();
+  });
+
+  it("accepts the access states ACTIVE and INACTIVE only", async () => {
+    const userId = await makeUser(db, "access");
+    const inactive = await db.user.update({ where: { id: userId }, data: { accessState: "INACTIVE" } });
+    expect(inactive.accessState).toBe("INACTIVE");
+
+    await expect(
+      db.user.update({ where: { id: userId }, data: { accessState: "SUSPENDED" } }),
+    ).rejects.toThrow();
+
+    const event = await db.userAccessEvent.create({
+      data: { userId, state: "INACTIVE", reason: "졸업", effectiveAt: new Date() },
+    });
+    expect(event.state).toBe("INACTIVE");
+
+    await expect(
+      db.userAccessEvent.create({
+        data: { userId, state: "LEFT", reason: "잘못된값", effectiveAt: new Date() },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("constrains roster decisions to the known vocabulary", async () => {
+    const userId = await makeUser(db, "decision");
+    await expect(
+      db.rosterDecision.create({
+        data: { year: ACADEMIC_TEST_SEED_YEAR, userId, decision: "KEEP", sourceVersion: 0 },
+      }),
+    ).rejects.toThrow();
+
+    const decision = await db.rosterDecision.create({
+      data: { year: ACADEMIC_TEST_SEED_YEAR, userId, decision: "RESTORE", sourceVersion: 0 },
+    });
+    expect(decision.decision).toBe("RESTORE");
+  });
+
+  it("rejects a member state that does not belong to the role", async () => {
+    const studentId = await makeUser(db, "role-a");
+    const teacherId = await makeUser(db, "role-b");
+
+    await expect(
+      db.userAcademicRecord.create({
+        data: {
+          year: ACADEMIC_TEST_SEED_YEAR,
+          userId: studentId,
+          role: "STUDENT",
+          name: "퇴직학생",
+          memberState: "RETIRED",
+        },
+      }),
+    ).rejects.toThrow();
+
+    // 교사 TRANSFERRED(전출)는 허용된다.
+    const transferred = await db.userAcademicRecord.create({
+      data: {
+        year: ACADEMIC_TEST_SEED_YEAR,
+        userId: teacherId,
+        role: "TEACHER",
+        name: "전출교사",
+        memberState: "TRANSFERRED",
+      },
+    });
+    expect(transferred.memberState).toBe("TRANSFERRED");
   });
 });

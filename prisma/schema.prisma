@@ -67,7 +67,7 @@ model User {
   gender     Gender?
 
   emailKey       String? @unique
-  accessState    String  @default("ACTIVE") // "ACTIVE" | "SUSPENDED" | "LEFT"
+  accessState    String  @default("ACTIVE")
   sessionVersion Int     @default(0)
   profileVersion Int     @default(0)
 
@@ -214,11 +214,12 @@ model FaceProfile {
 
 // ---------------------------------------------------------------------------
 // 학년도 명부 (academic year roster)
+// 문자열 상태 컬럼의 허용 값은 마이그레이션의 SQL CHECK가 단일 근거다.
 // ---------------------------------------------------------------------------
 
 model AcademicYear {
   year                  Int       @id
-  state                 String // "DRAFT" | "ACTIVE" | "ARCHIVED"
+  state                 String
   version               Int       @default(0)
   reviewedVersion       Int?
   reviewedSourceVersion Int?
@@ -237,7 +238,7 @@ model AcademicYear {
 
 model RosterControl {
   id      Int    @id
-  mode    String @default("PREPARING") // "PREPARING" | "OPEN" | "LOCKED"
+  mode    String @default("PREPARING")
   version Int    @default(0)
 }
 
@@ -254,7 +255,7 @@ model UserAcademicRecord {
   subject     String?
   homeroom    String?
   position    String?
-  memberState String // MemberState
+  memberState String
   needsReview Boolean  @default(false)
   version     Int      @default(0)
   updatedAt   DateTime @updatedAt
@@ -299,13 +300,13 @@ model RosterFile {
 model RosterImport {
   id             String   @id @default(cuid())
   year           Int
-  scope          String // ImportScope
+  scope          String
   controlVersion Int
   yearVersion    Int
   payload        Json?
   preview        Json?
   summary        Json?
-  state          String // "PREVIEW" | "COMMITTED" | "CANCELLED" | "EXPIRED"
+  state          String
   createdAt      DateTime @default(now())
 
   academicYear AcademicYear @relation(fields: [year], references: [year])
@@ -349,7 +350,7 @@ model UserAccessEvent {
 
 model EligibilityEvent {
   id            Int      @id @default(autoincrement())
-  scope         String // "APPLICATION" | "REGISTRATION" | "ACCOUNT" | "ROLLOVER"
+  scope         String
   applicationId Int? // 논리 참조: 원본이 정리돼도 시점 증거를 남긴다
   userId        Int? // 논리 참조
   occurredAt    DateTime
@@ -390,7 +391,7 @@ model LocalCheckInReview {
   payload     Json?
   snapshotId  String? // 논리 참조: 스냅샷이 정리돼도 검토 증거를 남긴다
   reason      String
-  state       String    @default("PENDING") // "PENDING" | "ACCEPTED" | "DUPLICATE" | "REJECTED"
+  state       String    @default("PENDING")
   decision    Json?
   createdAt   DateTime  @default(now())
   resolvedAt  DateTime?

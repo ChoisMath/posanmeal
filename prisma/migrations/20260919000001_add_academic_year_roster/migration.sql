@@ -1,3 +1,7 @@
+-- 잠금 대기가 길어지면 로그인·체크인이 뒤에 줄 서므로, 이 마이그레이션의
+-- ALTER는 5초 안에 잠금을 잡지 못하면 실패하고 재시도하게 둔다.
+SET lock_timeout = '5s';
+
 -- 학년도 명부 도메인 추가. 전부 additive: 기존 컬럼 삭제·rename·기본값 없는
 -- NOT NULL 추가를 하지 않는다. 새 FK는 모두 ON DELETE RESTRICT.
 
@@ -7,7 +11,7 @@ ALTER TABLE "User" ADD COLUMN "accessState" TEXT NOT NULL DEFAULT 'ACTIVE';
 ALTER TABLE "User" ADD COLUMN "sessionVersion" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "User" ADD COLUMN "profileVersion" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "User" ADD CONSTRAINT "User_accessState_check"
-    CHECK ("accessState" IN ('ACTIVE', 'SUSPENDED', 'LEFT'));
+    CHECK ("accessState" IN ('ACTIVE', 'INACTIVE'));
 CREATE UNIQUE INDEX "User_emailKey_key" ON "User"("emailKey");
 
 -- AlterTable: MealApplication
@@ -39,7 +43,7 @@ CREATE TABLE "RosterControl" (
 
     CONSTRAINT "RosterControl_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "RosterControl_singleton" CHECK ("id" = 1),
-    CONSTRAINT "RosterControl_mode_check" CHECK ("mode" IN ('PREPARING', 'OPEN', 'LOCKED'))
+    CONSTRAINT "RosterControl_mode_check" CHECK ("mode" IN ('PREPARING', 'READY'))
 );
 
 -- CreateTable
@@ -63,7 +67,12 @@ CREATE TABLE "UserAcademicRecord" (
 
     CONSTRAINT "UserAcademicRecord_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "UserAcademicRecord_memberState_check"
-        CHECK ("memberState" IN ('ENROLLED', 'EMPLOYED', 'GRADUATED', 'TRANSFERRED', 'RETIRED'))
+        CHECK ("memberState" IN ('ENROLLED', 'EMPLOYED', 'GRADUATED', 'TRANSFERRED', 'RETIRED')),
+    -- 역할과 소속 상태의 조합을 제한한다. 교사 TRANSFERRED는 전출이다.
+    CONSTRAINT "UserAcademicRecord_role_memberState_check" CHECK (
+        ("role" = 'STUDENT' AND "memberState" IN ('ENROLLED', 'GRADUATED', 'TRANSFERRED'))
+        OR ("role" = 'TEACHER' AND "memberState" IN ('EMPLOYED', 'TRANSFERRED', 'RETIRED'))
+    )
 );
 
 CREATE UNIQUE INDEX "UserAcademicRecord_year_userId_key" ON "UserAcademicRecord"("year", "userId");
@@ -129,7 +138,9 @@ CREATE TABLE "RosterDecision" (
     "decision" TEXT NOT NULL,
     "sourceVersion" INTEGER NOT NULL,
 
-    CONSTRAINT "RosterDecision_pkey" PRIMARY KEY ("year", "userId")
+    CONSTRAINT "RosterDecision_pkey" PRIMARY KEY ("year", "userId"),
+    CONSTRAINT "RosterDecision_decision_check"
+        CHECK ("decision" IN ('GRADUATED', 'TRANSFERRED', 'RETIRED', 'RESTORE'))
 );
 
 -- CreateTable
@@ -156,7 +167,7 @@ CREATE TABLE "UserAccessEvent" (
     "requestId" TEXT,
 
     CONSTRAINT "UserAccessEvent_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "UserAccessEvent_state_check" CHECK ("state" IN ('ACTIVE', 'SUSPENDED', 'LEFT'))
+    CONSTRAINT "UserAccessEvent_state_check" CHECK ("state" IN ('ACTIVE', 'INACTIVE'))
 );
 
 CREATE INDEX "UserAccessEvent_userId_effectiveAt_idx" ON "UserAccessEvent"("userId", "effectiveAt");
@@ -187,7 +198,8 @@ CREATE TABLE "AcademicBackfill" (
     "completedAt" TIMESTAMP(3),
     "verifiedAt" TIMESTAMP(3),
 
-    CONSTRAINT "AcademicBackfill_pkey" PRIMARY KEY ("key")
+    CONSTRAINT "AcademicBackfill_pkey" PRIMARY KEY ("key"),
+    CONSTRAINT "AcademicBackfill_state_check" CHECK ("state" IN ('PENDING', 'COPIED', 'VERIFIED'))
 );
 
 -- CreateTable
