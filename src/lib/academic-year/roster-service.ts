@@ -13,9 +13,34 @@ import type {
 } from "./contracts";
 import type { Db, Tx } from "./db";
 import { DomainError } from "./errors";
-import { withAcademicMutation, withRosterRowMutation, type RosterRowTarget } from "./mutation";
-import { normalizeEmail, parseProfile } from "./profile-schema";
+import {
+  sqlStateOf,
+  withAcademicMutation,
+  withRosterRowMutation,
+  type RosterRowTarget,
+} from "./mutation";
+import {
+  coerceProfile,
+  normalizeEmail,
+  parseProfile,
+  profileIssues,
+  type ProfileIssue,
+} from "./profile-schema";
 import { REVIEW_CLEAR_SQL, REVIEW_SET_SQL } from "./roster-sql";
+import {
+  BUMP_YEAR_SQL,
+  COPY_DRAFT_SQL,
+  DRAFT_EMAIL_TAKEN_SQL,
+  EMAIL_TAKEN_SQL,
+  INSERT_USERS_SQL,
+  MISSING_RECORDS_SQL,
+  PARK_SEATS_SQL,
+  SEAT_TAKEN_SQL,
+  UPDATE_USERS_SQL,
+  UPSERT_DRAFT_ENTRIES_SQL,
+  UPSERT_ENTRIES_SQL,
+  UPSERT_RECORDS_SQL,
+} from "./roster-write-sql";
 
 type Summary = MutationSummary & Prisma.InputJsonObject;
 
@@ -26,7 +51,23 @@ export type RosterRowView = RosterRow & {
   memberState: MemberState | null;
   adminLevel: "NONE" | "SUBADMIN" | "ADMIN" | null;
   accessState: string | null;
+  /** 저장 규칙을 아직 만족하지 않는 행. 조회는 막지 않고 표시만 한다. */
+  incomplete: boolean;
+  issues: ProfileIssue[];
 };
+
+export interface ListRosterOptions {
+  /** 전환 검토만 켠다. 일반 명부는 `included = true`만 본다. */
+  includeExcluded?: boolean;
+}
+
+export interface WriteRosterOptions {
+  /**
+   * 호출자가 `included`를 직접 정하는가. 셀 편집·Excel 반영처럼 "이 사람을 명부에서
+   * 뺄지"를 다루지 않는 쓰기는 false여야 저장된 제외 상태를 덮지 않는다.
+   */
+  applyIncluded?: boolean;
+}
 
 export type UpsertRosterProfileInput = {
   actor: Actor;
@@ -34,7 +75,7 @@ export type UpsertRosterProfileInput = {
   kind: string;
   payloadHash: string;
   expectedRowVersion: number;
-  /** 잠글 행이 없는 신규 추가에서만 쓰는 control 버전. */
+  /** 잠글 행이 없을 때(신규 인원, 또는 아직 기록이 없는 기존 사용자) 쓰는 control 버전. */
   expectedVersion?: number;
   year: number;
   userId?: number;
@@ -104,6 +145,7 @@ const CONFIRMED_ROSTER_SQL = `
   LEFT JOIN "RosterEntry" e ON e."year" = r."year" AND e."userId" = r."userId"
   WHERE r."year" = $1::int
     AND ($2::text IS NULL OR r."role"::text = $2::text)
+    AND ($3::bool OR COALESCE(e."included", true) = true)
   ORDER BY r."grade" NULLS LAST, r."classNum" NULLS LAST, r."number" NULLS LAST, r."name"
 `;
 
@@ -124,20 +166,21 @@ const DRAFT_ROSTER_SQL = `
          e."emailKey", e."draftProfile", e."baseUserVersion", e."included", e."version"
   FROM "RosterEntry" e
   LEFT JOIN "User" u ON u."id" = e."userId"
-  WHERE e."year" = $1::int AND e."included" = true
+  WHERE e."year" = $1::int AND ($2::bool OR e."included" = true)
   ORDER BY e."emailKey"
 `;
 
 /**
  * `included = true`인 행만 일반 명부로 돌려준다. 전환 검토가 보는 제외 후보는
- * 따로 읽는다 (Task 7).
+ * `includeExcluded`로 명시해서 읽는다 (Task 7).
  */
 export async function listRoster(
   db: Db,
   year: number,
   role?: Profile["role"],
+  options?: ListRosterOptions,
 ): Promise<RosterRow[]> {
-  const rows = await listRosterView(db, year, role);
+  const rows = await listRosterView(db, year, role, options);
   return rows.map(({ entryId, userId, email, emailKey, profile, baseUserVersion, included }) => ({
     entryId,
     userId,
@@ -153,36 +196,46 @@ export async function listRosterView(
   db: Db,
   year: number,
   role?: Profile["role"],
+  options?: ListRosterOptions,
 ): Promise<RosterRowView[]> {
   const state = await readYearState(db, year);
+  const includeExcluded = options?.includeExcluded ?? false;
 
   if (state === "DRAFT") {
-    const rows = await db.$queryRawUnsafe<DraftRowSql[]>(DRAFT_ROSTER_SQL, year);
+    const rows = await db.$queryRawUnsafe<DraftRowSql[]>(DRAFT_ROSTER_SQL, year, includeExcluded);
     return rows
-      .map((row) => ({
-        entryId: row.entryId,
-        userId: row.userId,
-        email: row.email,
-        emailKey: row.emailKey,
-        profile: parseProfile(row.draftProfile),
-        baseUserVersion: row.baseUserVersion,
-        included: row.included,
-        version: row.version,
-        needsReview: false,
-        memberState: null,
-        adminLevel: null,
-        accessState: null,
-      }))
+      .map((row) => {
+        // 초안에는 아직 덜 채운 행이 있을 수 있다. 한 행 때문에 명부 전체가
+        // 열리지 않으면 고칠 수단이 사라지므로 조회는 너그럽게 읽는다.
+        const { profile, issues } = coerceProfile(row.draftProfile);
+        return {
+          entryId: row.entryId,
+          userId: row.userId,
+          email: row.email,
+          emailKey: row.emailKey,
+          profile,
+          baseUserVersion: row.baseUserVersion,
+          included: row.included,
+          version: row.version,
+          needsReview: issues.length > 0,
+          memberState: null,
+          adminLevel: null,
+          accessState: null,
+          incomplete: issues.length > 0,
+          issues,
+        };
+      })
       .filter((row) => role === undefined || row.profile.role === role);
   }
 
-  const rows = await db.$queryRawUnsafe<ConfirmedRow[]>(CONFIRMED_ROSTER_SQL, year, role ?? null);
-  return rows.map((row) => ({
-    entryId: row.entryId ?? "",
-    userId: row.userId,
-    email: row.email,
-    emailKey: row.emailKey,
-    profile: {
+  const rows = await db.$queryRawUnsafe<ConfirmedRow[]>(
+    CONFIRMED_ROSTER_SQL,
+    year,
+    role ?? null,
+    includeExcluded,
+  );
+  return rows.map((row) => {
+    const profile: Profile = {
       role: row.role,
       name: row.name,
       grade: row.grade,
@@ -192,15 +245,78 @@ export async function listRosterView(
       subject: row.subject,
       homeroom: row.homeroom,
       position: row.position,
-    },
-    baseUserVersion: row.baseUserVersion,
-    included: row.included,
-    version: row.version,
-    needsReview: row.needsReview,
-    memberState: row.memberState as MemberState,
-    adminLevel: row.adminLevel,
-    accessState: row.accessState,
-  }));
+    };
+    const issues = profileIssues(profile);
+    return {
+      entryId: row.entryId ?? "",
+      userId: row.userId,
+      email: row.email,
+      emailKey: row.emailKey,
+      profile,
+      baseUserVersion: row.baseUserVersion,
+      included: row.included,
+      version: row.version,
+      needsReview: row.needsReview,
+      memberState: row.memberState as MemberState,
+      adminLevel: row.adminLevel,
+      accessState: row.accessState,
+      incomplete: issues.length > 0,
+      issues,
+    };
+  });
+}
+
+export interface LegacyAdminUser {
+  id: number;
+  email: string;
+  name: string;
+  role: "STUDENT" | "TEACHER";
+  grade: number | null;
+  classNum: number | null;
+  number: number | null;
+  subject: string | null;
+  homeroom: string | null;
+  position: string | null;
+  gender: "MALE" | "FEMALE" | null;
+  adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
+  accessState: string;
+  rowVersion: number | null;
+  needsReview: boolean;
+  missingAcademicRecord: boolean;
+}
+
+/**
+ * 옛 관리자 화면이 보는 목록. 학년도 기록이 있으면 그 값을, 아직 없으면(초기 이전
+ * 전) `User` 값을 보여 주고 `missingAcademicRecord`로 그 사실을 알린다. 사람을
+ * 목록에서 빠뜨리면 관리자가 고칠 수단 자체가 사라지므로 행을 감추지 않는다.
+ * 새 학년도 API는 이 폴백을 쓰지 않는다.
+ */
+const LEGACY_ADMIN_USERS_SQL = `
+  SELECT u."id", u."email", u."adminLevel", u."accessState",
+         COALESCE(r."role"::text, u."role"::text) AS "role",
+         COALESCE(r."name", u."name") AS "name",
+         COALESCE(r."grade", u."grade") AS "grade",
+         COALESCE(r."classNum", u."classNum") AS "classNum",
+         COALESCE(r."number", u."number") AS "number",
+         COALESCE(r."subject", u."subject") AS "subject",
+         COALESCE(r."homeroom", u."homeroom") AS "homeroom",
+         COALESCE(r."position", u."position") AS "position",
+         COALESCE(r."gender"::text, u."gender"::text) AS "gender",
+         r."version" AS "rowVersion",
+         COALESCE(r."needsReview", false) AS "needsReview",
+         (r."id" IS NULL) AS "missingAcademicRecord"
+  FROM "User" u
+  LEFT JOIN "UserAcademicRecord" r ON r."year" = $1::int AND r."userId" = u."id"
+  WHERE ($2::text IS NULL OR COALESCE(r."role"::text, u."role"::text) = $2::text)
+  ORDER BY "grade" NULLS LAST, "classNum" NULLS LAST, "number" NULLS LAST, "name"
+`;
+
+export async function listLegacyAdminUsers(
+  db: Db,
+  year: number,
+  role?: Profile["role"],
+): Promise<LegacyAdminUser[]> {
+  return db.$queryRawUnsafe<LegacyAdminUser[]>(LEGACY_ADMIN_USERS_SQL, year, role ?? null);
 }
 
 /** 그 학년도 기록이 없어 명부에 뜨지 않는 사용자. 화면은 현재값으로 메우지 않고 이 목록만 알린다. */
@@ -218,30 +334,6 @@ export async function userIdsWithoutRecord(db: Db, year: number): Promise<number
 // ---------------------------------------------------------------------------
 // 초안 학년도
 // ---------------------------------------------------------------------------
-
-/**
- * 원본 학년도의 명부를 그대로 초안으로 복사한다. 자동 진급도, `User` 생성도,
- * 로그인 활성화도 하지 않는다 — 초안은 아직 아무 권한도 만들지 않는 종이다.
- */
-const COPY_DRAFT_SQL = `
-  INSERT INTO "RosterEntry" (
-    "id", "year", "userId", "emailKey", "draftEmail", "draftProfile",
-    "included", "baseUserVersion", "version"
-  )
-  SELECT gen_random_uuid()::text, $1::int, u."id", u."emailKey", u."email",
-         jsonb_build_object(
-           'role', r."role"::text, 'name', r."name",
-           'grade', r."grade", 'classNum', r."classNum", 'number', r."number",
-           'gender', r."gender"::text, 'subject', r."subject",
-           'homeroom', r."homeroom", 'position', r."position"
-         ),
-         true, u."profileVersion", 0
-  FROM "UserAcademicRecord" r
-  JOIN "User" u ON u."id" = r."userId"
-  JOIN "RosterEntry" src
-    ON src."year" = r."year" AND src."userId" = r."userId" AND src."included" = true
-  WHERE r."year" = $2::int AND u."emailKey" IS NOT NULL
-`;
 
 export async function createDraftYear(
   db: PrismaClient,
@@ -282,9 +374,33 @@ export async function createDraftYear(
 // 행 단위 편집
 // ---------------------------------------------------------------------------
 
+async function lockableTarget(
+  db: Db,
+  input: UpsertRosterProfileInput,
+  state: YearState,
+): Promise<RosterRowTarget | null> {
+  if (state === "DRAFT") {
+    if (input.entryId === undefined) return null;
+    const entry = await db.rosterEntry.findUnique({
+      where: { id: input.entryId },
+      select: { id: true },
+    });
+    return entry ? { table: "RosterEntry", entryId: input.entryId } : null;
+  }
+
+  if (input.userId === undefined) return null;
+  const record = await db.userAcademicRecord.findUnique({
+    where: { year_userId: { year: input.year, userId: input.userId } },
+    select: { id: true },
+  });
+  return record ? { table: "UserAcademicRecord", year: input.year, userId: input.userId } : null;
+}
+
 /**
- * 연도 상태로 wrapper를 고른 뒤 한 행짜리 일괄 쓰기를 돌린다. 여기서 읽는 상태는
- * 잠금 밖이라 wrapper 선택에만 쓰고, 실제 분기는 트랜잭션 안에서 다시 읽는다.
+ * 연도 상태로 wrapper와 잠글 행을 고른 뒤 한 행짜리 일괄 쓰기를 돌린다. 그 선택은
+ * 트랜잭션 밖에서 읽은 상태에 기대므로, 트랜잭션 안에서 상태가 그대로인지 다시
+ * 확인한다 — 사이에 초안이 활성화되면 초안 편집이 확정 경로로 새어 들어가
+ * `User`를 만들어 버릴 수 있다.
  */
 export async function upsertRosterProfile(
   db: PrismaClient,
@@ -296,16 +412,12 @@ export async function upsertRosterProfile(
   }
   const profile = parseProfile(input.profile);
   const state = await readYearState(db, input.year);
-  const isNew = state === "DRAFT" ? input.entryId === undefined : input.userId === undefined;
+  const target = await lockableTarget(db, input, state);
 
   const write = async (tx: Tx): Promise<Summary> => {
-    const stored =
-      input.entryId === undefined
-        ? null
-        : await tx.rosterEntry.findUnique({
-            where: { id: input.entryId },
-            select: { included: true, baseUserVersion: true },
-          });
+    if ((await readYearState(tx, input.year)) !== state) {
+      throw new DomainError("VERSION_CONFLICT", "학년도 상태가 바뀌었습니다. 새로고침 후 다시 시도하세요.");
+    }
 
     const row: RosterRow = {
       entryId: input.entryId ?? randomUUID(),
@@ -313,16 +425,16 @@ export async function upsertRosterProfile(
       email,
       emailKey: normalizeEmail(email),
       profile,
-      baseUserVersion: stored?.baseUserVersion ?? null,
-      included: stored?.included ?? true,
+      baseUserVersion: null,
+      included: true,
     };
 
     return writeRosterProfiles(tx, input.year, [row]);
   };
 
-  if (isNew) {
+  if (target === null) {
     if (input.expectedVersion === undefined) {
-      throw new DomainError("VERSION_CONFLICT", "명부 버전을 함께 보내야 새 인원을 추가할 수 있습니다.");
+      throw new DomainError("MISSING_PROFILE", "이 학년도에 해당 명부 행이 없습니다.");
     }
     const { receipt } = await withAcademicMutation(
       db,
@@ -338,11 +450,6 @@ export async function upsertRosterProfile(
     );
     return receipt;
   }
-
-  const target: RosterRowTarget =
-    state === "DRAFT"
-      ? { table: "RosterEntry", entryId: input.entryId! }
-      : { table: "UserAcademicRecord", year: input.year, userId: input.userId! };
 
   const { receipt } = await withRosterRowMutation(
     db,
@@ -363,19 +470,6 @@ export async function upsertRosterProfile(
 // ---------------------------------------------------------------------------
 // 일괄 쓰기
 // ---------------------------------------------------------------------------
-
-/** $1은 학년도, $2~$16은 행 배열이다. 행 수가 늘어도 문장 수는 그대로다. */
-const UNNEST_ROWS = `
-  unnest(
-    $2::text[], $3::int[], $4::text[], $5::text[], $6::text[], $7::text[],
-    $8::int[], $9::int[], $10::int[], $11::text[], $12::text[], $13::text[],
-    $14::text[], $15::bool[], $16::int[]
-  ) AS v(
-    entry_id, user_id, email, email_key, role, name,
-    grade, class_num, number, gender, subject, homeroom,
-    position, included, base_user_version
-  )
-`;
 
 interface RowColumns {
   entryIds: string[];
@@ -436,176 +530,6 @@ function rowArgs(year: number, columns: RowColumns): unknown[] {
   ];
 }
 
-const GENDER_KEPT = `CASE WHEN v.role = 'TEACHER' AND v.gender IS NULL THEN %KEEP% ELSE v.gender END`;
-
-const PARK_SEATS_SQL = `
-  UPDATE "UserAcademicRecord" r SET "number" = -r."userId"
-  FROM ${UNNEST_ROWS}
-  WHERE r."year" = $1::int AND r."userId" = v.user_id AND r."role" = 'STUDENT'
-    AND (r."grade", r."classNum", r."number") IS DISTINCT FROM (v.grade, v.class_num, v.number)
-`;
-
-const UPSERT_RECORDS_SQL = `
-  INSERT INTO "UserAcademicRecord" (
-    "year", "userId", "role", "name", "grade", "classNum", "number", "gender",
-    "subject", "homeroom", "position", "memberState", "needsReview", "version", "updatedAt"
-  )
-  SELECT $1::int, v.user_id, v.role::"Role", v.name, v.grade, v.class_num, v.number,
-         v.gender::"Gender", v.subject, v.homeroom, v.position,
-         CASE WHEN v.role = 'STUDENT' THEN 'ENROLLED' ELSE 'EMPLOYED' END,
-         false, 0, CURRENT_TIMESTAMP
-  FROM ${UNNEST_ROWS}
-  ON CONFLICT ("year", "userId") DO UPDATE SET
-    "role" = EXCLUDED."role",
-    "name" = EXCLUDED."name",
-    "grade" = EXCLUDED."grade",
-    "classNum" = EXCLUDED."classNum",
-    "number" = EXCLUDED."number",
-    "gender" = CASE
-      WHEN EXCLUDED."role" = 'TEACHER' AND EXCLUDED."gender" IS NULL
-      THEN "UserAcademicRecord"."gender" ELSE EXCLUDED."gender" END,
-    "subject" = EXCLUDED."subject",
-    "homeroom" = EXCLUDED."homeroom",
-    "position" = EXCLUDED."position",
-    "memberState" = CASE
-      WHEN "UserAcademicRecord"."role" = EXCLUDED."role"
-      THEN "UserAcademicRecord"."memberState" ELSE EXCLUDED."memberState" END,
-    "version" = "UserAcademicRecord"."version" + 1,
-    "updatedAt" = CURRENT_TIMESTAMP
-  WHERE (
-      "UserAcademicRecord"."role", "UserAcademicRecord"."name", "UserAcademicRecord"."grade",
-      "UserAcademicRecord"."classNum", "UserAcademicRecord"."number", "UserAcademicRecord"."gender",
-      "UserAcademicRecord"."subject", "UserAcademicRecord"."homeroom", "UserAcademicRecord"."position"
-    ) IS DISTINCT FROM (
-      EXCLUDED."role", EXCLUDED."name", EXCLUDED."grade",
-      EXCLUDED."classNum", EXCLUDED."number",
-      CASE WHEN EXCLUDED."role" = 'TEACHER' AND EXCLUDED."gender" IS NULL
-           THEN "UserAcademicRecord"."gender" ELSE EXCLUDED."gender" END,
-      EXCLUDED."subject", EXCLUDED."homeroom", EXCLUDED."position"
-    )
-  RETURNING "userId"
-`;
-
-const UPDATE_USERS_SQL = `
-  UPDATE "User" u SET
-    "email" = v.email, "emailKey" = v.email_key, "name" = v.name, "role" = v.role::"Role",
-    "grade" = v.grade, "classNum" = v.class_num, "number" = v.number,
-    "gender" = (${GENDER_KEPT.replace("%KEEP%", 'u."gender"::text')})::"Gender",
-    "subject" = v.subject, "homeroom" = v.homeroom, "position" = v.position,
-    "profileVersion" = u."profileVersion" + 1, "updatedAt" = CURRENT_TIMESTAMP
-  FROM ${UNNEST_ROWS}
-  WHERE u."id" = v.user_id
-    AND $1::int IS NOT NULL
-    AND (
-      u."email", u."emailKey", u."name", u."role"::text, u."grade", u."classNum",
-      u."number", u."gender"::text, u."subject", u."homeroom", u."position"
-    ) IS DISTINCT FROM (
-      v.email, v.email_key, v.name, v.role, v.grade, v.class_num,
-      v.number, ${GENDER_KEPT.replace("%KEEP%", 'u."gender"::text')}, v.subject, v.homeroom, v.position
-    )
-  RETURNING u."id"
-`;
-
-/**
- * 확정 연도의 명부 항목. 기존 항목이 있으면 그 id를 그대로 써서 (year, emailKey)
- * 색인과 (year, userId) 색인이 서로 다른 행을 가리키는 상태를 만들지 않는다.
- */
-const UPSERT_ENTRIES_SQL = `
-  INSERT INTO "RosterEntry" (
-    "id", "year", "userId", "emailKey", "included", "baseUserVersion", "version"
-  )
-  SELECT COALESCE(e."id", v.entry_id), $1::int, v.user_id, v.email_key, v.included,
-         u."profileVersion", 0
-  FROM ${UNNEST_ROWS}
-  JOIN "User" u ON u."id" = v.user_id
-  LEFT JOIN "RosterEntry" e ON e."year" = $1::int AND e."userId" = v.user_id
-  ON CONFLICT ("year", "userId") DO UPDATE SET
-    "emailKey" = EXCLUDED."emailKey",
-    "included" = EXCLUDED."included",
-    "baseUserVersion" = EXCLUDED."baseUserVersion",
-    "version" = "RosterEntry"."version" + 1
-  WHERE (
-    "RosterEntry"."emailKey", "RosterEntry"."included", "RosterEntry"."baseUserVersion"
-  ) IS DISTINCT FROM (
-    EXCLUDED."emailKey", EXCLUDED."included", EXCLUDED."baseUserVersion"
-  )
-`;
-
-const UPSERT_DRAFT_ENTRIES_SQL = `
-  INSERT INTO "RosterEntry" (
-    "id", "year", "userId", "emailKey", "draftEmail", "draftProfile",
-    "included", "baseUserVersion", "version"
-  )
-  SELECT v.entry_id, $1::int, v.user_id, v.email_key, v.email,
-         jsonb_build_object(
-           'role', v.role, 'name', v.name, 'grade', v.grade, 'classNum', v.class_num,
-           'number', v.number, 'gender', v.gender, 'subject', v.subject,
-           'homeroom', v.homeroom, 'position', v.position
-         ),
-         v.included, v.base_user_version, 0
-  FROM ${UNNEST_ROWS}
-  ON CONFLICT ("id") DO UPDATE SET
-    "emailKey" = EXCLUDED."emailKey",
-    "draftEmail" = EXCLUDED."draftEmail",
-    "draftProfile" = EXCLUDED."draftProfile",
-    "included" = EXCLUDED."included",
-    "version" = "RosterEntry"."version" + 1
-  WHERE (
-    "RosterEntry"."emailKey", "RosterEntry"."draftEmail",
-    "RosterEntry"."draftProfile", "RosterEntry"."included"
-  ) IS DISTINCT FROM (
-    EXCLUDED."emailKey", EXCLUDED."draftEmail",
-    EXCLUDED."draftProfile", EXCLUDED."included"
-  )
-  RETURNING "id"
-`;
-
-const INSERT_USERS_SQL = `
-  INSERT INTO "User" (
-    "email", "emailKey", "name", "role", "grade", "classNum", "number", "gender",
-    "subject", "homeroom", "position", "createdAt", "updatedAt"
-  )
-  SELECT v.email, v.email_key, v.name, v.role::"Role", v.grade, v.class_num, v.number,
-         v.gender::"Gender", v.subject, v.homeroom, v.position,
-         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-  FROM ${UNNEST_ROWS}
-  -- $1은 이 문장이 쓰지 않는 학년도다. 모든 문장이 같은 인자 목록을 받도록
-  -- 여기서 형만 붙여 둔다 — 빠지면 Postgres가 $1의 형을 정하지 못한다(42P18).
-  WHERE v.user_id IS NULL AND $1::int IS NOT NULL
-  RETURNING "id", "emailKey"
-`;
-
-const BUMP_YEAR_SQL = `
-  UPDATE "AcademicYear" SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
-  WHERE "year" = $1::int
-`;
-
-const EMAIL_TAKEN_SQL = `
-  SELECT u."id" FROM "User" u
-  JOIN unnest($1::text[], $2::text[], $3::int[]) AS v(email_key, email, user_id)
-    ON (u."emailKey" = v.email_key OR u."email" = v.email)
-  WHERE v.user_id IS NULL OR u."id" <> v.user_id
-  LIMIT 1
-`;
-
-const SEAT_TAKEN_SQL = `
-  SELECT r."grade", r."classNum", r."number", u."accessState"
-  FROM "UserAcademicRecord" r
-  JOIN "User" u ON u."id" = r."userId"
-  JOIN unnest($2::int[], $3::int[], $4::int[]) AS v(grade, class_num, number)
-    ON r."grade" = v.grade AND r."classNum" = v.class_num AND r."number" = v.number
-  WHERE r."year" = $1::int AND r."role" = 'STUDENT' AND r."memberState" = 'ENROLLED'
-    AND NOT (r."userId" = ANY($5::int[]))
-  LIMIT 1
-`;
-
-const DRAFT_EMAIL_TAKEN_SQL = `
-  SELECT e."id" FROM "RosterEntry" e
-  JOIN unnest($2::text[], $3::text[]) AS v(email_key, entry_id) ON e."emailKey" = v.email_key
-  WHERE e."year" = $1::int AND e."id" <> v.entry_id
-  LIMIT 1
-`;
-
 /**
  * 트랜잭션 전용 일괄 쓰기. 호출자가 Zod로 검증한 행만 받으며, 여기서는 식별 충돌을
  * 쓰기 전에 거절하고 남은 일을 전부 집합 연산으로 처리한다. Task 7·8의 Excel 확정과
@@ -615,25 +539,47 @@ export async function writeRosterProfiles(
   tx: Tx,
   year: number,
   rows: RosterRow[],
+  options?: WriteRosterOptions,
 ): Promise<Summary> {
   if (rows.length === 0) return { changed: 0, ids: [] };
 
   assertNoDuplicatesInBatch(rows);
   const state = await readYearState(tx, year);
+  const applyIncluded = options?.applyIncluded ?? false;
 
   return state === "DRAFT"
-    ? writeDraftRows(tx, year, rows)
-    : writeConfirmedRows(tx, year, rows, state);
+    ? writeDraftRows(tx, year, rows, applyIncluded)
+    : writeConfirmedRows(tx, year, rows, state, applyIncluded);
 }
 
+/**
+ * 같은 사람이 한 배치에 두 번 들어오면 Postgres가 "cannot affect row a second
+ * time"(21000)을 내며, 그 오류에는 무엇이 잘못됐는지가 담기지 않는다. Excel이
+ * 이 쓰기를 먹이므로 원인을 말해 주는 도메인 오류로 먼저 끊는다.
+ */
 function assertNoDuplicatesInBatch(rows: RosterRow[]): void {
   const emails = new Set<string>();
   const seats = new Set<string>();
+  const userIds = new Set<number>();
+  const entryIds = new Set<string>();
+
   for (const row of rows) {
     if (emails.has(row.emailKey)) {
       throw new DomainError("IDENTITY_CONFLICT", "같은 이메일이 두 번 들어 있습니다.");
     }
     emails.add(row.emailKey);
+
+    if (row.userId !== null) {
+      if (userIds.has(row.userId)) {
+        throw new DomainError("IDENTITY_CONFLICT", "같은 사용자가 두 번 들어 있습니다.");
+      }
+      userIds.add(row.userId);
+    }
+
+    if (entryIds.has(row.entryId)) {
+      throw new DomainError("IDENTITY_CONFLICT", "같은 명부 행이 두 번 들어 있습니다.");
+    }
+    entryIds.add(row.entryId);
 
     const { role, grade, classNum, number } = row.profile;
     if (role !== "STUDENT" || grade === null || classNum === null || number === null) continue;
@@ -645,7 +591,12 @@ function assertNoDuplicatesInBatch(rows: RosterRow[]): void {
   }
 }
 
-async function writeDraftRows(tx: Tx, year: number, rows: RosterRow[]): Promise<Summary> {
+async function writeDraftRows(
+  tx: Tx,
+  year: number,
+  rows: RosterRow[],
+  applyIncluded: boolean,
+): Promise<Summary> {
   const columns = columnsOf(rows);
 
   const taken = await tx.$queryRawUnsafe<{ id: string }[]>(
@@ -659,7 +610,11 @@ async function writeDraftRows(tx: Tx, year: number, rows: RosterRow[]): Promise<
   }
 
   const written = await runWithIdentityGuard(() =>
-    tx.$queryRawUnsafe<{ id: string }[]>(UPSERT_DRAFT_ENTRIES_SQL, ...rowArgs(year, columns)),
+    tx.$queryRawUnsafe<{ id: string }[]>(
+      UPSERT_DRAFT_ENTRIES_SQL,
+      ...rowArgs(year, columns),
+      applyIncluded,
+    ),
   );
 
   if (written.length > 0) {
@@ -673,11 +628,25 @@ async function writeConfirmedRows(
   year: number,
   rows: RosterRow[],
   state: YearState,
+  applyIncluded: boolean,
 ): Promise<Summary> {
   const isActive = state === "ACTIVE";
   const newRows = rows.filter((row) => row.userId === null);
   if (newRows.length > 0 && !isActive) {
     throw new DomainError("YEAR_MISMATCH", "지난 학년도에는 새 인원을 추가할 수 없습니다.");
+  }
+
+  // 지난 학년도에는 남은 명부 편집과 보존 기록 정정만 허용한다. 기록이 없는
+  // 사람을 뒤늦게 그 해의 명부에 끼워 넣는 길은 두지 않는다.
+  if (!isActive) {
+    const missing = await tx.$queryRawUnsafe<{ userId: number }[]>(
+      MISSING_RECORDS_SQL,
+      year,
+      rows.map((row) => row.userId),
+    );
+    if (missing.length > 0) {
+      throw new DomainError("YEAR_MISMATCH", "지난 학년도에 없던 기록은 새로 만들 수 없습니다.");
+    }
   }
 
   await assertNoConfirmedConflicts(tx, year, rows);
@@ -717,7 +686,9 @@ async function writeConfirmedRows(
     ? await runWithIdentityGuard(() => tx.$queryRawUnsafe<{ id: number }[]>(UPDATE_USERS_SQL, ...args))
     : [];
   if (isActive) {
-    await runWithIdentityGuard(() => tx.$executeRawUnsafe(UPSERT_ENTRIES_SQL, ...args));
+    await runWithIdentityGuard(() =>
+      tx.$executeRawUnsafe(UPSERT_ENTRIES_SQL, ...args, applyIncluded),
+    );
   }
 
   await tx.$executeRawUnsafe(REVIEW_SET_SQL, year);
@@ -758,23 +729,45 @@ async function assertNoConfirmedConflicts(tx: Tx, year: number, rows: RosterRow[
 
   const clash = seatTaken[0];
   if (clash) {
-    const seat = `${clash.grade}학년 ${clash.classNum}반 ${clash.number}번`;
-    throw new DomainError(
-      "IDENTITY_CONFLICT",
-      clash.accessState === "ACTIVE"
-        ? `${seat} 자리는 이미 다른 학생이 쓰고 있습니다.`
-        : `${seat} 자리는 이용이 중지된 계정이 아직 쥐고 있습니다. 그 학생을 먼저 정리하세요.`,
-    );
+    throw seatConflict(clash.grade, clash.classNum, clash.number, clash.accessState);
   }
 }
 
-/** emailKey·(year, emailKey) unique 위반을 원본 메시지 없이 식별 충돌로 바꾼다. */
+function seatConflict(
+  grade: number,
+  classNum: number,
+  number: number,
+  accessState: string,
+): DomainError {
+  const seat = `${grade}학년 ${classNum}반 ${number}번`;
+  return new DomainError(
+    "IDENTITY_CONFLICT",
+    accessState === "ACTIVE"
+      ? `${seat} 자리는 이미 다른 학생이 쓰고 있습니다.`
+      : `${seat} 자리는 이용이 중지된 계정이 아직 쥐고 있습니다. 그 학생을 먼저 정리하세요.`,
+  );
+}
+
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * 좌석·이메일 선점 검사는 control 행을 공유 잠금만 한 채로 돌기 때문에, 검사와
+ * 쓰기 사이에 다른 관리자가 같은 자리를 차지할 수 있다. 그때 DB가 내는 unique
+ * 위반을 500으로 흘리지 않고 검사에 걸렸을 때와 같은 409로 맞춘다. raw 쿼리는
+ * P2002가 아니라 P2010으로 오므로 원본 SQLSTATE를 본다.
+ */
 async function runWithIdentityGuard<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new DomainError("IDENTITY_CONFLICT", "이미 다른 사용자가 쓰는 이메일입니다.");
+    const isUnique =
+      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") ||
+      sqlStateOf(error) === UNIQUE_VIOLATION;
+    if (isUnique) {
+      throw new DomainError(
+        "IDENTITY_CONFLICT",
+        "같은 이메일이나 학번을 다른 변경이 먼저 차지했습니다. 새로고침 후 다시 시도하세요.",
+      );
     }
     throw error;
   }

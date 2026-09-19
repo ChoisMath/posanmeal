@@ -142,6 +142,20 @@ function readObject(source: unknown, key: string): unknown {
   return (source as Record<string, unknown>)[key];
 }
 
+/** pg 어댑터가 실어 주는 원본 SQLSTATE. raw 쿼리는 P2002가 아니라 P2010으로 온다. */
+export function sqlStateOf(error: unknown): string | undefined {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return undefined;
+  const cause = readObject(readObject(error.meta, "driverAdapterError"), "cause");
+  return readString(cause, "originalCode");
+}
+
+/** 위반한 제약 이름까지 필요한 판정을 위해 원본 메시지를 꺼낸다. */
+export function driverErrorMessage(error: unknown): string | undefined {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return undefined;
+  const cause = readObject(readObject(error.meta, "driverAdapterError"), "cause");
+  return readString(cause, "originalMessage");
+}
+
 /**
  * write가 일으킨 다른 unique 위반(좌석·emailKey 등)을 재전송으로 오인하지 않도록,
  * RosterMutation의 requestId PK 위반임이 증명될 때만 참이다. pg 어댑터는 원본
@@ -151,8 +165,7 @@ function isRequestIdConflict(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
   if (readString(error.meta, "modelName") !== "RosterMutation") return false;
 
-  const cause = readObject(readObject(error.meta, "driverAdapterError"), "cause");
-  return readString(cause, "originalMessage")?.includes(ROSTER_MUTATION_PK) ?? false;
+  return driverErrorMessage(error)?.includes(ROSTER_MUTATION_PK) ?? false;
 }
 
 /**

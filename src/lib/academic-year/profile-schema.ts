@@ -96,3 +96,69 @@ export function parseProfile(input: unknown): Profile {
   }
   return parsed.data;
 }
+
+export type ProfileIssue = { field: string; message: string };
+
+/** 이미 Profile 모양인 값이 저장 규칙까지 만족하는지. 조회가 "보완 필요"를 표시할 때 쓴다. */
+export function profileIssues(profile: Profile): ProfileIssue[] {
+  const schema = profile.role === "STUDENT" ? studentProfileSchema : teacherProfileSchema;
+  const parsed = schema.safeParse(profile);
+  if (parsed.success) return [];
+  return parsed.error.issues.map((issue) => ({
+    field: String(issue.path[0] ?? ""),
+    message: issue.message,
+  }));
+}
+
+function readInt(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function readText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * 조회 전용의 너그러운 해석. 초안에는 아직 비어 있거나 잘못된 행이 남아 있을 수
+ * 있고, 그 한 행 때문에 명부 전체가 열리지 않으면 관리자가 고칠 방법이 없다.
+ * 값은 Profile 모양으로만 맞춰 돌려주고 무엇이 잘못됐는지는 `issues`로 알린다.
+ * 저장은 언제나 엄격한 `parseProfile`을 지난다.
+ */
+export function coerceProfile(input: unknown): { profile: Profile; issues: ProfileIssue[] } {
+  const raw = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+  const role = raw.role === "TEACHER" ? "TEACHER" : "STUDENT";
+  const gender = raw.gender === "MALE" || raw.gender === "FEMALE" ? raw.gender : null;
+
+  const profile: Profile =
+    role === "STUDENT"
+      ? {
+          role,
+          name: readText(raw.name) ?? "",
+          grade: readInt(raw.grade),
+          classNum: readInt(raw.classNum),
+          number: readInt(raw.number),
+          gender,
+          subject: null,
+          homeroom: null,
+          position: null,
+        }
+      : {
+          role,
+          name: readText(raw.name) ?? "",
+          grade: null,
+          classNum: null,
+          number: null,
+          gender,
+          subject: readText(raw.subject),
+          homeroom: readText(raw.homeroom),
+          position: readText(raw.position),
+        };
+
+  const issues = profileIssues(profile);
+  if (raw.role !== "STUDENT" && raw.role !== "TEACHER") {
+    issues.unshift({ field: "role", message: "역할은 학생 또는 교사여야 합니다." });
+  }
+  return { profile, issues };
+}

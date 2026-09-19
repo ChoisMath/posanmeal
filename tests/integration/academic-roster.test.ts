@@ -8,6 +8,7 @@ import { getAcademicProfiles } from "@/lib/academic-year/profile-service";
 import {
   createDraftYear,
   listRoster,
+  listRosterView,
   upsertRosterProfile,
   writeRosterProfiles,
 } from "@/lib/academic-year/roster-service";
@@ -697,7 +698,8 @@ describe("academic year roster services", () => {
         number: 1,
         gender: "MALE",
       });
-      expect(typeof body.users[0].version).toBe("number");
+      expect(typeof body.users[0].rowVersion).toBe("number");
+      expect(body.users[0].missingAcademicRecord).toBe(false);
     });
 
     it("creates a user through the legacy POST and writes the year record in the same transaction", async () => {
@@ -804,6 +806,388 @@ describe("academic year roster services", () => {
 
       expect(res.status).toBe(201);
       expect((await db.academicYear.findUniqueOrThrow({ where: { year: NEXT_YEAR } })).state).toBe("DRAFT");
+    });
+  });
+
+  describe("exclusion and listing", () => {
+    let fx: AcademicFixture;
+
+    beforeEach(async () => {
+      fx = await prepareAcademicFixture(db, pgClient);
+    });
+
+    async function excludeStudent(): Promise<void> {
+      await db.rosterEntry.update({
+        where: { year_userId: { year: YEAR, userId: fx.studentId } },
+        data: { included: false },
+      });
+    }
+
+    it("keeps an excluded row excluded when an unrelated cell is edited", async () => {
+      await excludeStudent();
+
+      const { PUT } = await import("@/app/api/admin/users/route");
+      const res = await PUT(jsonRequest("/api/admin/users", "PUT", { id: fx.studentId, name: "이름만수정" }));
+
+      expect(res.status).toBe(200);
+      expect((await record(fx.studentId)).name).toBe("이름만수정");
+      expect(
+        (await db.rosterEntry.findUniqueOrThrow({ where: { year_userId: { year: YEAR, userId: fx.studentId } } }))
+          .included,
+      ).toBe(false);
+    });
+
+    it("keeps an excluded row excluded through the record route too", async () => {
+      await excludeStudent();
+
+      const records = await import("@/app/api/admin/academic-years/[year]/records/[userId]/route");
+      const res = await records.PUT(
+        jsonRequest(`/api/admin/academic-years/${YEAR}/records/${fx.studentId}`, "PUT", {
+          requestId: randomUUID(),
+          expectedRowVersion: await rowVersion(fx.studentId),
+          email: "student-test@example.posan.kr",
+          profile: studentProfile({ name: "행경로수정" }),
+        }),
+        { params: Promise.resolve({ year: String(YEAR), userId: String(fx.studentId) }) },
+      );
+
+      expect(res.status).toBe(200);
+      expect(
+        (await db.rosterEntry.findUniqueOrThrow({ where: { year_userId: { year: YEAR, userId: fx.studentId } } }))
+          .included,
+      ).toBe(false);
+    });
+
+    it("hides excluded rows from the ordinary roster and shows them only on request", async () => {
+      await excludeStudent();
+
+      expect(await listRoster(db, YEAR, "STUDENT")).toHaveLength(0);
+      const all = await listRoster(db, YEAR, "STUDENT", { includeExcluded: true });
+      expect(all).toHaveLength(1);
+      expect(all[0]!.included).toBe(false);
+    });
+  });
+
+  describe("legacy admin API without a year record", () => {
+    beforeEach(async () => {
+      await seedLegacyFixture(db);
+    });
+
+    it("lists every user while preparing and marks the missing record", async () => {
+      const { GET } = await import("@/app/api/admin/users/route");
+      const res = await GET(new Request("http://localhost/api/admin/users"));
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.users).toHaveLength(2);
+      for (const user of body.users) {
+        expect(user.missingAcademicRecord).toBe(true);
+        expect(user.rowVersion).toBeNull();
+      }
+      expect(body.users.map((u: { name: string }) => u.name)).toContain("학생테스트");
+    });
+
+    it("creates the active year record on a partial edit of a user that has none", async () => {
+      const student = await db.user.findFirstOrThrow({ where: { role: "STUDENT" } });
+
+      const { PUT } = await import("@/app/api/admin/users/route");
+      const res = await PUT(jsonRequest("/api/admin/users", "PUT", { id: student.id, classNum: 4 }));
+
+      expect(res.status).toBe(200);
+      expect(await record(student.id)).toMatchObject({
+        classNum: 4,
+        grade: 1,
+        number: 1,
+        name: "학생테스트",
+        memberState: "ENROLLED",
+      });
+      expect((await db.user.findUniqueOrThrow({ where: { id: student.id } })).classNum).toBe(4);
+      expect(await db.rosterEntry.count({ where: { year: YEAR, userId: student.id } })).toBe(1);
+    });
+
+    it("refuses to create a record on a past year", async () => {
+      const student = await db.user.findFirstOrThrow({ where: { role: "STUDENT" } });
+      await db.academicYear.create({ data: { year: 2025, state: "ARCHIVED", version: 0 } });
+
+      const { PUT } = await import("@/app/api/admin/users/route");
+      const res = await PUT(
+        jsonRequest("/api/admin/users?academicYear=2025", "PUT", { id: student.id, classNum: 4 }),
+      );
+
+      expect(res.status).toBe(422);
+      expect(await db.userAcademicRecord.count({ where: { year: 2025 } })).toBe(0);
+    });
+  });
+
+  describe("adminLevel on the legacy PUT", () => {
+    let fx: AcademicFixture;
+
+    beforeEach(async () => {
+      fx = await prepareAcademicFixture(db, pgClient);
+    });
+
+    it("lets the main admin change a teacher's level", async () => {
+      const { PUT } = await import("@/app/api/admin/users/route");
+      const res = await PUT(
+        jsonRequest("/api/admin/users", "PUT", { id: fx.teacherId, adminLevel: "SUBADMIN" }),
+      );
+
+      expect(res.status).toBe(200);
+      expect((await db.user.findUniqueOrThrow({ where: { id: fx.teacherId } })).adminLevel).toBe("SUBADMIN");
+    });
+
+    it("refuses a write admin and writes nothing at all", async () => {
+      const other = await db.user.create({
+        data: { email: "other-teacher@example.posan.kr", name: "다른교사", role: "TEACHER", adminLevel: "NONE" },
+      });
+      const teacher = await db.user.findUniqueOrThrow({ where: { id: fx.teacherId } });
+      mocks.auth.mockResolvedValue({
+        user: {
+          dbUserId: teacher.id,
+          role: "TEACHER",
+          adminLevel: "ADMIN",
+          sessionVersion: teacher.sessionVersion,
+        },
+      });
+
+      const { PUT } = await import("@/app/api/admin/users/route");
+      const res = await PUT(
+        jsonRequest("/api/admin/users", "PUT", { id: other.id, adminLevel: "ADMIN", name: "이름도같이" }),
+      );
+
+      expect(res.status).toBe(403);
+      expect(await db.user.findUniqueOrThrow({ where: { id: other.id } })).toMatchObject({
+        adminLevel: "NONE",
+        name: "다른교사",
+      });
+    });
+
+    it("ignores an unchanged adminLevel sent by a write admin", async () => {
+      const teacher = await db.user.findUniqueOrThrow({ where: { id: fx.teacherId } });
+      mocks.auth.mockResolvedValue({
+        user: {
+          dbUserId: teacher.id,
+          role: "TEACHER",
+          adminLevel: "ADMIN",
+          sessionVersion: teacher.sessionVersion,
+        },
+      });
+
+      const { PUT } = await import("@/app/api/admin/users/route");
+      const res = await PUT(
+        jsonRequest("/api/admin/users", "PUT", { id: fx.studentId, adminLevel: "NONE", name: "학생수정" }),
+      );
+
+      expect(res.status).toBe(200);
+      expect((await record(fx.studentId)).name).toBe("학생수정");
+    });
+  });
+
+  describe("draft rows that are not yet valid", () => {
+    let fx: AcademicFixture;
+
+    beforeEach(async () => {
+      fx = await prepareAcademicFixture(db, pgClient);
+      await createDraftYear(db, {
+        actor: fx.main,
+        requestId: "draft-lenient",
+        expectedVersion: fx.version,
+        kind: "DRAFT",
+        payloadHash: "draft-lenient",
+        year: NEXT_YEAR,
+      });
+    });
+
+    it("lists an incomplete draft row instead of failing the whole year", async () => {
+      const [row] = await listRosterView(db, NEXT_YEAR);
+      await db.rosterEntry.update({
+        where: { id: row!.entryId },
+        data: { draftProfile: { role: "STUDENT", name: "미완성", grade: null, classNum: 2 } },
+      });
+
+      const rows = await listRosterView(db, NEXT_YEAR);
+      const broken = rows.find((entry) => entry.entryId === row!.entryId);
+      expect(broken).toBeDefined();
+      expect(broken!.incomplete).toBe(true);
+      expect(broken!.profile).toMatchObject({ name: "미완성", grade: null, classNum: 2, number: null });
+      expect(broken!.issues.map((issue) => issue.field)).toEqual(
+        expect.arrayContaining(["grade", "number", "gender"]),
+      );
+    });
+
+    it("still refuses to write an incomplete profile", async () => {
+      const [row] = await listRosterView(db, NEXT_YEAR);
+      await expectDomainCode(
+        upsertRosterProfile(db, {
+          actor: fx.main,
+          requestId: "draft-invalid-write",
+          expectedRowVersion: row!.version,
+          expectedVersion: 0,
+          kind: "ROSTER_ROW",
+          payloadHash: "draft-invalid-write",
+          year: NEXT_YEAR,
+          entryId: row!.entryId,
+          userId: row!.userId ?? undefined,
+          email: row!.email,
+          profile: { ...row!.profile, grade: null },
+        }),
+        "MISSING_PROFILE",
+      );
+    });
+  });
+
+  describe("bulk writer guards", () => {
+    let fx: AcademicFixture;
+
+    beforeEach(async () => {
+      fx = await prepareAcademicFixture(db, pgClient);
+    });
+
+    it("refuses the same user twice in one batch", async () => {
+      const rows = await listRoster(db, YEAR, "STUDENT");
+      await expectDomainCode(
+        db.$transaction(async (tx) => {
+          await writeRosterProfiles(tx, YEAR, [
+            { ...rows[0]!, email: "a@example.posan.kr", emailKey: "a@example.posan.kr" },
+            { ...rows[0]!, email: "b@example.posan.kr", emailKey: "b@example.posan.kr" },
+          ]);
+        }),
+        "IDENTITY_CONFLICT",
+      );
+    });
+
+    it("rotates three seats in one call", async () => {
+      const b = await addStudent(fx, "cycle-b@example.posan.kr", studentProfile({ name: "순환나", number: 2 }));
+      const c = await addStudent(fx, "cycle-c@example.posan.kr", studentProfile({ name: "순환다", number: 3 }));
+      const next = new Map([[fx.studentId, 2], [b, 3], [c, 1]]);
+
+      const rows = await listRoster(db, YEAR, "STUDENT");
+      await db.$transaction(async (tx) => {
+        await writeRosterProfiles(
+          tx,
+          YEAR,
+          rows.map((row) => ({
+            ...row,
+            profile: { ...row.profile, number: next.get(row.userId!)! },
+          })),
+        );
+      });
+
+      expect((await record(fx.studentId)).number).toBe(2);
+      expect((await record(b)).number).toBe(3);
+      expect((await record(c)).number).toBe(1);
+      expect(await db.userAcademicRecord.count({ where: { year: YEAR, needsReview: true } })).toBe(0);
+    });
+
+    it("moves a student onto a seat vacated in the same call", async () => {
+      const mover = await addStudent(fx, "mover@example.posan.kr", studentProfile({ name: "이동", number: 9 }));
+
+      const rows = await listRoster(db, YEAR, "STUDENT");
+      await db.$transaction(async (tx) => {
+        await writeRosterProfiles(
+          tx,
+          YEAR,
+          rows.map((row) => ({
+            ...row,
+            profile: {
+              ...row.profile,
+              number: row.userId === fx.studentId ? 5 : row.userId === mover ? 1 : row.profile.number,
+            },
+          })),
+        );
+      });
+
+      expect((await record(fx.studentId)).number).toBe(5);
+      expect((await record(mover)).number).toBe(1);
+    });
+
+    it("ends a race for one free seat as a conflict, never as an unhandled error", async () => {
+      const b = await addStudent(fx, "race-b@example.posan.kr", studentProfile({ name: "경합나", number: 2 }));
+
+      const move = (userId: number, email: string, name: string, version: number) =>
+        upsertRosterProfile(db, {
+          actor: fx.main,
+          requestId: `seat-race-${userId}`,
+          expectedRowVersion: version,
+          expectedVersion: 0,
+          kind: "ROSTER_ROW",
+          payloadHash: `seat-race-${userId}`,
+          year: YEAR,
+          userId,
+          email,
+          profile: studentProfile({ name, number: 7 }),
+        });
+
+      const settled = await Promise.allSettled([
+        move(fx.studentId, "student-test@example.posan.kr", "경합가", await rowVersion(fx.studentId)),
+        move(b, "race-b@example.posan.kr", "경합나", await rowVersion(b)),
+      ]);
+
+      expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      const rejected = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
+      expect(isDomainError(rejected.reason)).toBe(true);
+      expect(rejected.reason.code).toBe("IDENTITY_CONFLICT");
+    });
+
+    it("refuses to create a missing record on an archived year", async () => {
+      await db.academicYear.create({ data: { year: 2025, state: "ARCHIVED", version: 0 } });
+
+      await expectDomainCode(
+        upsertRosterProfile(db, {
+          actor: fx.main,
+          requestId: "archived-create",
+          expectedRowVersion: 0,
+          expectedVersion: (await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).version,
+          kind: "ROSTER_ROW",
+          payloadHash: "archived-create",
+          year: 2025,
+          userId: fx.studentId,
+          email: "student-test@example.posan.kr",
+          profile: studentProfile(),
+        }),
+        "YEAR_MISMATCH",
+      );
+      expect(await db.userAcademicRecord.count({ where: { year: 2025 } })).toBe(0);
+    });
+
+    it("refuses the edit when the year state changed after the target was chosen", async () => {
+      await createDraftYear(db, {
+        actor: fx.main,
+        requestId: "draft-flip",
+        expectedVersion: fx.version,
+        kind: "DRAFT",
+        payloadHash: "draft-flip",
+        year: NEXT_YEAR,
+      });
+      const [row] = await listRosterView(db, NEXT_YEAR, "STUDENT");
+
+      const holder = await openAcademicTestPgClient();
+      try {
+        await holder.query("BEGIN");
+        await holder.query('SELECT id FROM "RosterEntry" WHERE id = $1 FOR UPDATE', [row!.entryId]);
+
+        const pending = upsertRosterProfile(db, {
+          actor: fx.main,
+          requestId: "draft-flip-edit",
+          expectedRowVersion: row!.version,
+          expectedVersion: 0,
+          kind: "ROSTER_ROW",
+          payloadHash: "draft-flip-edit",
+          year: NEXT_YEAR,
+          entryId: row!.entryId,
+          userId: row!.userId ?? undefined,
+          email: row!.email,
+          profile: { ...row!.profile, classNum: 7 },
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        await holder.query(`UPDATE "AcademicYear" SET state = 'ARCHIVED' WHERE year = $1`, [NEXT_YEAR]);
+        await holder.query("COMMIT");
+
+        await expectDomainCode(pending, "VERSION_CONFLICT");
+      } finally {
+        await holder.end();
+      }
     });
   });
 

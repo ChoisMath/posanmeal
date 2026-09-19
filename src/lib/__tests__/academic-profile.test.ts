@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { isDomainError } from "@/lib/academic-year/errors";
-import { normalizeEmail, parseProfile } from "@/lib/academic-year/profile-schema";
+import {
+  coerceProfile,
+  normalizeEmail,
+  parseProfile,
+  profileIssues,
+} from "@/lib/academic-year/profile-schema";
 
 function expectRejected(input: unknown): void {
   try {
@@ -100,5 +105,49 @@ describe("parseProfile — teacher", () => {
   it("refuses an unknown role", () => {
     expectRejected({ role: "ADMIN", name: "관리자" });
     expectRejected(null);
+  });
+});
+
+describe("coerceProfile — 조회 전용 관대한 해석", () => {
+  it("shapes an incomplete draft row instead of throwing and names the empty fields", () => {
+    const { profile, issues } = coerceProfile({ role: "STUDENT", name: "미완성", classNum: 2 });
+
+    expect(profile).toEqual({
+      role: "STUDENT",
+      name: "미완성",
+      grade: null,
+      classNum: 2,
+      number: null,
+      gender: null,
+      subject: null,
+      homeroom: null,
+      position: null,
+    });
+    expect(issues.map((issue) => issue.field)).toEqual(
+      expect.arrayContaining(["grade", "number", "gender"]),
+    );
+  });
+
+  it("reports no issue for a complete row", () => {
+    const { issues } = coerceProfile({
+      role: "TEACHER",
+      name: "교사",
+      homeroom: "2-3",
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it("flags an unusable role and still returns a usable shape", () => {
+    const { profile, issues } = coerceProfile({ role: "ADMIN", name: "알수없음" });
+    expect(profile.role).toBe("STUDENT");
+    expect(issues[0]?.field).toBe("role");
+  });
+});
+
+describe("profileIssues", () => {
+  it("is empty for a valid profile and lists the gap for an invalid one", () => {
+    const valid = parseProfile({ role: "STUDENT", name: "학생", grade: 1, classNum: 1, number: 1, gender: "MALE" });
+    expect(profileIssues(valid)).toEqual([]);
+    expect(profileIssues({ ...valid, number: null }).map((i) => i.field)).toContain("number");
   });
 });
