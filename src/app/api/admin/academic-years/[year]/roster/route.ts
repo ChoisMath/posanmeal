@@ -1,0 +1,35 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { routeResponse } from "@/lib/academic-year/api";
+import { DomainError } from "@/lib/academic-year/errors";
+import { requireAcademicReady } from "@/lib/academic-year/readiness";
+import { requireActor } from "@/lib/academic-year/request-actor";
+import { listRosterView, userIdsWithoutRecord } from "@/lib/academic-year/roster-service";
+
+function parseYear(raw: string): number {
+  const year = Number.parseInt(raw, 10);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new DomainError("YEAR_MISMATCH", "학년도를 확인하세요.");
+  }
+  return year;
+}
+
+export async function GET(request: Request, { params }: { params: Promise<{ year: string }> }) {
+  return routeResponse(async () => {
+    await requireActor("READ_ADMIN");
+    await requireAcademicReady(prisma);
+
+    const year = parseYear((await params).year);
+    const roleParam = new URL(request.url).searchParams.get("role");
+    if (roleParam !== null && roleParam !== "STUDENT" && roleParam !== "TEACHER") {
+      throw new DomainError("MISSING_PROFILE", "역할은 학생 또는 교사여야 합니다.");
+    }
+
+    const [rows, missingProfileUserIds] = await Promise.all([
+      listRosterView(prisma, year, roleParam ?? undefined),
+      userIdsWithoutRecord(prisma, year),
+    ]);
+
+    return NextResponse.json({ year, rows, missingProfileUserIds });
+  });
+}

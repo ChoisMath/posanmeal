@@ -50,7 +50,11 @@ export const MIRROR_CONFLICT_GROUPS_CTE = `
  * Release A 동안 `needsReview`는 순수한 파생값이다 — 지금 데이터로 다시 계산할 수
  * 있는 세 가지(필수값 누락·좌석 중복·정규화 이메일 중복)뿐이고, 이 식 말고는
  * 아무도 이 칸을 쓰지 않는다. 그래서 호환 쓰기가 매번 전체를 다시 계산해도
- * 사람이 남긴 판단을 지울 위험이 없다. Task 5가 관리자 검토 도구를 들이면서
+ * 사람이 남긴 판단을 지울 위험이 없다.
+ *
+ * Release B에서도 파생값으로 남긴다. 새 명부 서비스는 좌석·이메일 충돌을 쓰기 전에
+ * IDENTITY_CONFLICT로 거절하므로 충돌을 새로 만들지 못하고, 아래 두 문장으로 같은
+ * 식을 다시 계산해 옛 경로(Excel import)가 남긴 플래그를 걷어내기만 한다.
  * "사람이 세운 플래그"가 생기면 이 전제를 먼저 다시 봐야 한다.
  */
 export const NEEDS_REVIEW_EXPR = `
@@ -62,4 +66,25 @@ export const NEEDS_REVIEW_EXPR = `
     ))
     OR EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = k."emailKeyValue")
   )
+`;
+
+/**
+ * 재계산 두 문장. $1은 학년도다. 올리는 쪽을 먼저 돌려야 부분 색인에서 빠질 행이
+ * 전부 빠진 뒤에 내리는 쪽이 들어간다. 호환 쓰기와 새 명부 서비스가 같은 문장을
+ * 쓰므로 needsReview의 의미가 두 경로에서 갈라지지 않는다.
+ */
+export const REVIEW_SET_SQL = `
+  WITH ${MIRROR_CONFLICT_GROUPS_CTE}
+  UPDATE "UserAcademicRecord" r
+  SET "needsReview" = true, "version" = r."version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+  FROM "keyed" k
+  WHERE k."id" = r."id" AND r."needsReview" = false AND ${NEEDS_REVIEW_EXPR}
+`;
+
+export const REVIEW_CLEAR_SQL = `
+  WITH ${MIRROR_CONFLICT_GROUPS_CTE}
+  UPDATE "UserAcademicRecord" r
+  SET "needsReview" = false, "version" = r."version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+  FROM "keyed" k
+  WHERE k."id" = r."id" AND r."needsReview" = true AND NOT ${NEEDS_REVIEW_EXPR}
 `;

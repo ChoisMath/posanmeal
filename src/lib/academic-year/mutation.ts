@@ -155,10 +155,21 @@ function isRequestIdConflict(error: unknown): boolean {
   return readString(cause, "originalMessage")?.includes(ROSTER_MUTATION_PK) ?? false;
 }
 
-async function runUserMutation<T extends Summary>(
+/**
+ * 잠글 행과 버전을 읽는 방법, 그리고 write 뒤의 새 버전을 얻는 방법. 행 단위
+ * wrapper가 어떤 테이블을 잡든 나머지 절차(control 공유 잠금·권한·재전송·기록)를
+ * 한 벌만 유지하기 위한 이음새다.
+ */
+interface RowLock {
+  read: (tx: Tx) => Promise<number | null>;
+  finish: (tx: Tx) => Promise<number>;
+}
+
+async function runRowMutation<T extends Summary>(
   db: PrismaClient,
-  input: RowMutationInput,
+  input: { actor: MutationInput["actor"]; requestId: string; kind: string; payloadHash: string; expectedRowVersion: number },
   identity: { actorUserId: number | null; kind: string; payloadHash: string },
+  lock: RowLock,
   authorize: (tx: Tx) => Promise<void>,
   write: (tx: Tx) => Promise<T>,
 ): Promise<MutationOutcome<T>> {
@@ -171,23 +182,16 @@ async function runUserMutation<T extends Summary>(
       return replayReceipt<T>(stored, identity);
     }
 
-    const locked = await tx.$queryRaw<{ id: number; profileVersion: number }[]>`
-      SELECT id, "profileVersion" FROM "User" WHERE id = ${input.userId} FOR UPDATE
-    `;
-    const target = locked[0];
-    if (!target) {
-      throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
+    const current = await lock.read(tx);
+    if (current === null) {
+      throw new DomainError("MISSING_PROFILE", "대상 행을 찾을 수 없습니다.");
     }
-    if (target.profileVersion !== input.expectedRowVersion) {
+    if (current !== input.expectedRowVersion) {
       throw new DomainError("VERSION_CONFLICT", "다른 변경이 먼저 반영되었습니다. 새로고침 후 다시 시도하세요.");
     }
 
     const result = await write(tx);
-    const updated = await tx.user.update({
-      where: { id: input.userId },
-      data: { profileVersion: { increment: 1 } },
-      select: { profileVersion: true },
-    });
+    const version = await lock.finish(tx);
 
     await tx.rosterMutation.create({
       data: {
@@ -196,14 +200,118 @@ async function runUserMutation<T extends Summary>(
         kind: input.kind,
         payloadHash: input.payloadHash,
         result,
-        version: updated.profileVersion,
+        version,
         changed: result.changed,
       },
     });
 
-    return {
-      result,
-      receipt: { requestId: input.requestId, version: updated.profileVersion, changed: result.changed },
-    };
+    return { result, receipt: { requestId: input.requestId, version, changed: result.changed } };
   }, USER_TX);
+}
+
+async function runUserMutation<T extends Summary>(
+  db: PrismaClient,
+  input: RowMutationInput,
+  identity: { actorUserId: number | null; kind: string; payloadHash: string },
+  authorize: (tx: Tx) => Promise<void>,
+  write: (tx: Tx) => Promise<T>,
+): Promise<MutationOutcome<T>> {
+  const lock: RowLock = {
+    read: async (tx) => {
+      const rows = await tx.$queryRaw<{ profileVersion: number }[]>`
+        SELECT "profileVersion" FROM "User" WHERE id = ${input.userId} FOR UPDATE
+      `;
+      return rows[0]?.profileVersion ?? null;
+    },
+    finish: async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: input.userId },
+        data: { profileVersion: { increment: 1 } },
+        select: { profileVersion: true },
+      });
+      return updated.profileVersion;
+    },
+  };
+
+  return runRowMutation(db, input, identity, lock, authorize, write);
+}
+
+/**
+ * 명부 한 행(확정 연도 기록 또는 초안 항목)을 고치는 경로 전용. `withUserMutation`과
+ * 절차는 같지만 충돌 판정 기준이 `User.profileVersion`이 아니라 그 행의 `version`이다.
+ * 확정 행은 `UserAcademicRecord.version`, 초안 행은 `RosterEntry.version` — UI가
+ * 다루는 행 버전이 화면에 보이는 행과 언제나 같은 것이 되도록 하나로 맞춘다.
+ * 버전은 write가 직접 올리므로 여기서는 올린 결과를 다시 읽기만 한다.
+ */
+export async function withRosterRowMutation<T extends Summary>(
+  db: PrismaClient,
+  input: RosterRowMutationInput,
+  authorize: (tx: Tx) => Promise<void>,
+  write: (tx: Tx) => Promise<T>,
+): Promise<MutationOutcome<T>> {
+  const identity = {
+    actorUserId: input.actor.userId,
+    kind: input.kind,
+    payloadHash: input.payloadHash,
+  };
+
+  const lock = rowLockFor(input.target);
+
+  try {
+    return await runRowMutation(db, input, identity, lock, authorize, write);
+  } catch (error) {
+    if (!isRequestIdConflict(error)) throw error;
+    const stored = await db.rosterMutation.findUnique({ where: { requestId: input.requestId } });
+    if (!stored) throw error;
+    return replayReceipt<T>(stored, identity);
+  }
+}
+
+export type RosterRowTarget =
+  | { table: "UserAcademicRecord"; year: number; userId: number }
+  | { table: "RosterEntry"; entryId: string };
+
+export type RosterRowMutationInput = {
+  actor: MutationInput["actor"];
+  requestId: string;
+  expectedRowVersion: number;
+  kind: string;
+  payloadHash: string;
+  target: RosterRowTarget;
+};
+
+function rowLockFor(target: RosterRowTarget): RowLock {
+  if (target.table === "UserAcademicRecord") {
+    const read = async (tx: Tx, forUpdate: boolean) => {
+      const rows = forUpdate
+        ? await tx.$queryRaw<{ version: number }[]>`
+            SELECT "version" FROM "UserAcademicRecord"
+            WHERE "year" = ${target.year} AND "userId" = ${target.userId} FOR UPDATE
+          `
+        : await tx.$queryRaw<{ version: number }[]>`
+            SELECT "version" FROM "UserAcademicRecord"
+            WHERE "year" = ${target.year} AND "userId" = ${target.userId}
+          `;
+      return rows[0]?.version ?? null;
+    };
+    return {
+      read: (tx) => read(tx, true),
+      finish: async (tx) => (await read(tx, false)) ?? 0,
+    };
+  }
+
+  const read = async (tx: Tx, forUpdate: boolean) => {
+    const rows = forUpdate
+      ? await tx.$queryRaw<{ version: number }[]>`
+          SELECT "version" FROM "RosterEntry" WHERE "id" = ${target.entryId} FOR UPDATE
+        `
+      : await tx.$queryRaw<{ version: number }[]>`
+          SELECT "version" FROM "RosterEntry" WHERE "id" = ${target.entryId}
+        `;
+    return rows[0]?.version ?? null;
+  };
+  return {
+    read: (tx) => read(tx, true),
+    finish: async (tx) => (await read(tx, false)) ?? 0,
+  };
 }

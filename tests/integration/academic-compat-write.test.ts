@@ -75,16 +75,34 @@ describe("compat writes mirror legacy user writes into the active year", () => {
     return (await db.academicYear.findUniqueOrThrow({ where: { year: YEAR } })).version;
   }
 
+  // Release B에서 `/api/admin/users`는 새 명부 서비스로 옮겨 갔다. 미러는 이제
+  // Excel import만 쓰므로, 미러의 동작은 그 통로를 직접 불러 확인한다.
   async function createUser(body: Record<string, unknown>): Promise<number> {
-    const { POST } = await import("@/app/api/admin/users/route");
-    const res = await POST(jsonRequest("/api/admin/users", "POST", body));
-    expect(res.status).toBe(201);
-    return (await res.json()).user.id as number;
+    return withCompatUserWrite(db, async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email: body.email as string,
+          name: body.name as string,
+          role: body.role as "STUDENT" | "TEACHER",
+          grade: (body.grade as number | undefined) ?? null,
+          classNum: (body.classNum as number | undefined) ?? null,
+          number: (body.number as number | undefined) ?? null,
+          subject: (body.subject as string | undefined) ?? null,
+          homeroom: (body.homeroom as string | undefined) ?? null,
+          position: (body.position as string | undefined) ?? null,
+          gender: (body.gender as "MALE" | "FEMALE" | undefined) ?? null,
+        },
+      });
+      return { value: created.id, userIds: [created.id] };
+    });
   }
 
-  async function editUser(body: Record<string, unknown>): Promise<Response> {
-    const { PUT } = await import("@/app/api/admin/users/route");
-    return PUT(jsonRequest("/api/admin/users", "PUT", body));
+  async function editUser(body: Record<string, unknown>): Promise<void> {
+    const { id, ...rest } = body;
+    await withCompatUserWrite(db, async (tx) => {
+      const updated = await tx.user.update({ where: { id: id as number }, data: rest });
+      return { value: null, userIds: [updated.id] };
+    });
   }
 
   describe("before the backfill has run", () => {
@@ -109,7 +127,7 @@ describe("compat writes mirror legacy user writes into the active year", () => {
       expect(mirrored.needsReview).toBe(false);
     });
 
-    it("mirrors an admin POST and fills the email key and roster entry", async () => {
+    it("mirrors a legacy user create and fills the email key and roster entry", async () => {
       const createdId = await createUser({
         email: "New.Student@example.posan.kr",
         name: "신규학생",
@@ -131,8 +149,8 @@ describe("compat writes mirror legacy user writes into the active year", () => {
       expect(entry.emailKey).toBe("new.student@example.posan.kr");
     });
 
-    it("mirrors an admin PUT", async () => {
-      const res = await editUser({
+    it("mirrors a legacy user update", async () => {
+      await editUser({
         id: fx.teacherId,
         email: "teacher-test@example.posan.kr",
         name: "교사변경",
@@ -141,8 +159,6 @@ describe("compat writes mirror legacy user writes into the active year", () => {
         position: "부장",
       });
 
-      expect(res.status).toBe(200);
-      expect((await res.json()).user.name).toBe("교사변경");
       expect(await record(fx.teacherId)).toMatchObject({
         name: "교사변경", subject: "수학", homeroom: "2-2", position: "부장", memberState: "EMPLOYED",
       });

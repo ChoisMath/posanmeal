@@ -3,7 +3,12 @@ import { INITIAL_ACADEMIC_YEAR } from "./backfill";
 import type { Tx } from "./db";
 import { DomainError } from "./errors";
 import { ROSTER_TX } from "./mutation";
-import { CONFLICT_GROUPS_CTE, MIRROR_CONFLICT_GROUPS_CTE, NEEDS_REVIEW_EXPR } from "./roster-sql";
+import {
+  CONFLICT_GROUPS_CTE,
+  NEEDS_REVIEW_EXPR,
+  REVIEW_CLEAR_SQL,
+  REVIEW_SET_SQL,
+} from "./roster-sql";
 
 const EMAIL_DUP_CTE = `
   "emailDup" AS (
@@ -116,23 +121,6 @@ const UPSERT_RECORDS_SQL = `
 
 const BUMP_PROFILE_VERSION_SQL = `
   UPDATE "User" SET "profileVersion" = "profileVersion" + 1 WHERE "id" = ANY($1::int[])
-`;
-
-// 올리는 쪽을 먼저 돌려야 색인에서 빠질 행이 전부 빠진 뒤에 내리는 쪽이 들어간다.
-const REVIEW_SET_SQL = `
-  WITH ${MIRROR_CONFLICT_GROUPS_CTE}
-  UPDATE "UserAcademicRecord" r
-  SET "needsReview" = true, "version" = r."version" + 1, "updatedAt" = CURRENT_TIMESTAMP
-  FROM "keyed" k
-  WHERE k."id" = r."id" AND r."needsReview" = false AND ${NEEDS_REVIEW_EXPR}
-`;
-
-const REVIEW_CLEAR_SQL = `
-  WITH ${MIRROR_CONFLICT_GROUPS_CTE}
-  UPDATE "UserAcademicRecord" r
-  SET "needsReview" = false, "version" = r."version" + 1, "updatedAt" = CURRENT_TIMESTAMP
-  FROM "keyed" k
-  WHERE k."id" = r."id" AND r."needsReview" = true AND NOT ${NEEDS_REVIEW_EXPR}
 `;
 
 /**

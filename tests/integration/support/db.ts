@@ -77,6 +77,69 @@ export async function openAcademicTestDb(): Promise<PrismaClient> {
   return new PrismaClient({ adapter });
 }
 
+export interface CountingAcademicTestDb {
+  db: PrismaClient;
+  /** 지금까지 이 클라이언트가 서버로 보낸 문장 수. BEGIN/COMMIT도 포함한다. */
+  count(): number;
+  reset(): void;
+  close(): Promise<void>;
+}
+
+type Queryable = { query: pg.PoolClient["query"] };
+const PATCHED = Symbol("counting-query");
+
+/**
+ * "행 수와 무관하게 쿼리 수가 상수"를 증명하려면 Prisma가 실제로 보낸 문장을 세야
+ * 한다. 드라이버 어댑터를 쓰면 Prisma의 query 이벤트가 어댑터 경로를 모두 담지
+ * 못하므로, pg 쪽에서 직접 센다.
+ */
+export async function openCountingAcademicTestDb(): Promise<CountingAcademicTestDb> {
+  const url = parseAcademicTestTarget(ACADEMIC_TEST_DATABASE_URL);
+  const pool = new pg.Pool({ connectionString: url.toString(), max: 5 });
+
+  let count = 0;
+  const patch = (target: Queryable): void => {
+    const holder = target as Queryable & { [PATCHED]?: true };
+    if (holder[PATCHED]) return;
+    holder[PATCHED] = true;
+    const original = target.query.bind(target) as Queryable["query"];
+    target.query = ((...args: Parameters<Queryable["query"]>) => {
+      count += 1;
+      return original(...args);
+    }) as Queryable["query"];
+  };
+
+  const probe = await pool.connect();
+  try {
+    await assertIdentityMarker(probe);
+  } finally {
+    probe.release();
+  }
+
+  const connect = pool.connect.bind(pool);
+  pool.connect = (async () => {
+    const client = await connect();
+    patch(client);
+    return client;
+  }) as typeof pool.connect;
+  patch(pool);
+
+  const adapter = new PrismaPg(pool);
+  const db = new PrismaClient({ adapter });
+
+  return {
+    db,
+    count: () => count,
+    reset: () => {
+      count = 0;
+    },
+    close: async () => {
+      await db.$disconnect();
+      await pool.end();
+    },
+  };
+}
+
 /**
  * fingerprint 계산 등 raw SQL이 필요한 경로를 위한 pg 클라이언트.
  * 동일한 가드를 다시 적용한다 (호출 경로가 다르므로 재검사가 필요).
