@@ -5,6 +5,7 @@ import { academicYearBounds } from "./calendar";
 import type { Db, Tx } from "./db";
 import { DomainError } from "./errors";
 import { ROSTER_TX } from "./mutation";
+import { CONFLICT_GROUPS_CTE, NEEDS_REVIEW_EXPR } from "./roster-sql";
 
 /** 초기 이전 대상 학년도. 운영 DB의 ACTIVE 학년도와 일치해야 실행된다. */
 export const INITIAL_ACADEMIC_YEAR = 2026;
@@ -47,33 +48,6 @@ async function activeYear(db: Db): Promise<number> {
   }
   return INITIAL_ACADEMIC_YEAR;
 }
-
-// 복사와 점검이 같은 규칙을 쓰도록, 충돌 그룹 판정을 SQL 안에 둔다. 미리 계산한
-// id 목록에 의존하지 않으므로 사이에 들어온 행이 있어도 23505가 나지 않는다.
-const CONFLICT_GROUPS_CTE = `
-  "keyed" AS (
-    SELECT u.*, lower(btrim(u.email)) AS "emailKeyValue" FROM "User" u
-  ),
-  "emailDup" AS (
-    SELECT "emailKeyValue" FROM "keyed" GROUP BY "emailKeyValue" HAVING count(*) > 1
-  ),
-  "seatDup" AS (
-    SELECT "grade", "classNum", "number" FROM "keyed"
-    WHERE "role" = 'STUDENT' AND "grade" IS NOT NULL AND "classNum" IS NOT NULL AND "number" IS NOT NULL
-    GROUP BY "grade", "classNum", "number" HAVING count(*) > 1
-  )
-`;
-
-const NEEDS_REVIEW_EXPR = `
-  (
-    (k."role" = 'STUDENT' AND (k."grade" IS NULL OR k."classNum" IS NULL OR k."number" IS NULL OR k."gender" IS NULL))
-    OR (k."role" = 'STUDENT' AND EXISTS (
-      SELECT 1 FROM "seatDup" s
-      WHERE s."grade" = k."grade" AND s."classNum" = k."classNum" AND s."number" = k."number"
-    ))
-    OR EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = k."emailKeyValue")
-  )
-`;
 
 const INSERT_RECORDS_SQL = `
   WITH ${CONFLICT_GROUPS_CTE}

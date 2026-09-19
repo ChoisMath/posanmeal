@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/auth";
-import { canWriteAdmin } from "@/lib/permissions";
+import { errorResponse } from "@/lib/academic-year/api";
+import { withCompatUserWrite } from "@/lib/academic-year/compat-write";
+import { requireActor } from "@/lib/academic-year/request-actor";
 import { normalizeGender } from "@/lib/gender";
 
 function extractSpreadsheetId(url: string): string | null {
@@ -92,10 +93,12 @@ async function fetchSheet(url: string, label: string): Promise<{ rows: string[][
 }
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!canWriteAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  try {
+    await requireActor("WRITE_ADMIN");
+  } catch (error) {
+    return errorResponse(error);
   }
+
   let body: { studentSheetUrl?: string; teacherSheetUrl?: string };
   try {
     body = await request.json();
@@ -113,6 +116,13 @@ export async function POST(request: Request) {
   let studentCount = 0;
   let teacherCount = 0;
 
+  type StudentRow = {
+    email: string; name: string; grade: number; classNum: number; number: number;
+    gender: "MALE" | "FEMALE";
+  };
+  let students: StudentRow[] = [];
+  let teachers: string[][] = [];
+
   try {
     if (studentSheetUrl) {
       const { rows, error } = await fetchSheet(studentSheetUrl, "학생");
@@ -125,10 +135,7 @@ export async function POST(request: Request) {
           errors.push("학생 시트에서 유효한 데이터를 찾을 수 없습니다. email과 name 열을 확인하세요.");
         } else {
           const rowErrors: string[] = [];
-          const parsed: Array<{
-            email: string; name: string; grade: number; classNum: number; number: number;
-            gender: "MALE" | "FEMALE";
-          }> = [];
+          const parsed: StudentRow[] = [];
 
           for (let i = 0; i < validRows.length; i++) {
             const [email, grade, classNum, number, name, genderRaw] = validRows[i];
@@ -160,19 +167,7 @@ export async function POST(request: Request) {
             errors.push("학생 데이터 오류:\n" + rowErrors.slice(0, 5).join("\n") +
               (rowErrors.length > 5 ? `\n...외 ${rowErrors.length - 5}건` : ""));
           } else {
-            for (const batch of chunk(parsed, BATCH_SIZE)) {
-              await Promise.all(
-                batch.map((p) =>
-                  prisma.user.upsert({
-                    where: { email: p.email },
-                    update: { name: p.name, grade: p.grade, classNum: p.classNum, number: p.number, gender: p.gender },
-                    create: { email: p.email, name: p.name, role: "STUDENT", grade: p.grade, classNum: p.classNum, number: p.number, gender: p.gender },
-                  })
-                )
-              );
-            }
-
-            studentCount = parsed.length;
+            students = parsed;
           }
         }
       }
@@ -188,21 +183,50 @@ export async function POST(request: Request) {
         if (validRows.length === 0) {
           errors.push("교사 시트에서 유효한 데이터를 찾을 수 없습니다. email과 name 열을 확인하세요.");
         } else {
-          for (const batch of chunk(validRows, BATCH_SIZE)) {
-            await Promise.all(
-              batch.map(([email, subject, homeroom, position, name]) =>
-                prisma.user.upsert({
-                  where: { email },
-                  update: { name, subject, homeroom: homeroom || null, position },
-                  create: { email, name, role: "TEACHER", subject, homeroom: homeroom || null, position },
-                })
-              )
-            );
-          }
-
-          teacherCount = validRows.length;
+          teachers = validRows;
         }
       }
+    }
+
+    // 두 시트를 한 트랜잭션에서 쓴다. 한 행이라도 실패하면 User와 학년도 기록이
+    // 함께 롤백되고, 명부 반영은 바뀐 id를 모아 배치 끝에 한 번만 한다.
+    if (students.length > 0 || teachers.length > 0) {
+      await withCompatUserWrite(prisma, async (tx) => {
+        const userIds: number[] = [];
+
+        for (const batch of chunk(students, BATCH_SIZE)) {
+          const written = await Promise.all(
+            batch.map((p) =>
+              tx.user.upsert({
+                where: { email: p.email },
+                update: { name: p.name, grade: p.grade, classNum: p.classNum, number: p.number, gender: p.gender },
+                create: { email: p.email, name: p.name, role: "STUDENT", grade: p.grade, classNum: p.classNum, number: p.number, gender: p.gender },
+                select: { id: true },
+              })
+            )
+          );
+          userIds.push(...written.map((u) => u.id));
+        }
+
+        for (const batch of chunk(teachers, BATCH_SIZE)) {
+          const written = await Promise.all(
+            batch.map(([email, subject, homeroom, position, name]) =>
+              tx.user.upsert({
+                where: { email },
+                update: { name, subject, homeroom: homeroom || null, position },
+                create: { email, name, role: "TEACHER", subject, homeroom: homeroom || null, position },
+                select: { id: true },
+              })
+            )
+          );
+          userIds.push(...written.map((u) => u.id));
+        }
+
+        return { value: null, userIds };
+      });
+
+      studentCount = students.length;
+      teacherCount = teachers.length;
     }
   } catch (e) {
     const errMsg = e instanceof Error ? e.message : "알 수 없는 오류";

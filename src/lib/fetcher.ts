@@ -1,10 +1,12 @@
+import { fetchWithSessionRecovery } from "./session-recovery";
+
 export const fetcher = async (url: string) => {
-  const res = await fetch(url);
+  const res = await fetchWithSessionRecovery(url);
   if (!res.ok) {
-    const error = new Error("API 요청 실패");
-    (error as any).status = res.status;
+    const error = new Error("API 요청 실패") as Error & { status?: number; info?: unknown };
+    error.status = res.status;
     try {
-      (error as any).info = await res.json();
+      error.info = await res.json();
     } catch {}
     throw error;
   }

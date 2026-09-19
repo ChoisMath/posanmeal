@@ -646,7 +646,12 @@ export default function AdminPage() {
 
   async function handleDeleteUser(id: number) {
     if (!confirm("정말 삭제하시겠습니까?")) return;
-    await fetch(`/api/admin/users?id=${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/admin/users?id=${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data?.reason ?? "사용자를 삭제할 수 없습니다.");
+      return;
+    }
     fetchUsers();
   }
 

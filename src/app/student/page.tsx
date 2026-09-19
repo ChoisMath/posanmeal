@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { clearClientStateAndSignOut } from "@/lib/clearClientState";
+import { fetchWithSessionRecovery } from "@/lib/session-recovery";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,7 @@ export default function StudentPage() {
     setMyLoading(true);
     setMyHistoryOpen(true);
     try {
-      const res = await fetch("/api/applications/my");
+      const res = await fetchWithSessionRecovery("/api/applications/my");
       if (!res.ok) throw new Error("failed");
       const json = await res.json();
       setMyRegistrations(json.registrations ?? []);

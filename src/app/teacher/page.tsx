@@ -150,7 +150,7 @@ export default function TeacherPage() {
                       <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis" title={value}>{value}</span>
                     </div>
                   ))}
-                  <p className="pt-3 text-xs text-muted-foreground">
+                  <p className="pt-3 text-xs text-muted-foreground break-keep">
                     담임·담당교과·직위는 관리자가 학년도 명부에서 관리합니다.
                   </p>
                 </div>
