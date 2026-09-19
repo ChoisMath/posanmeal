@@ -21,7 +21,7 @@ import {
   type ExistingAccount,
   type ImportCheck,
 } from "./import-diff";
-import { withAcademicMutation } from "./mutation";
+import { ROSTER_TX, withAcademicMutation } from "./mutation";
 import { normalizeEmail } from "./profile-schema";
 import { requireAcademicReady } from "./readiness";
 import {
@@ -148,66 +148,69 @@ export async function previewRosterImport(
   await assertActor(db, actor, "WRITE_ADMIN");
   await requireAcademicReady(db);
 
-  const state = await readYearState(db, year);
-  assertWritableYear(state);
-
   const parsed = await parseRosterWorkbook(file);
   if (parsed.year !== year) {
     throw new DomainError("YEAR_MISMATCH", `이 파일은 ${parsed.year}학년도 명부입니다.`);
   }
 
-  let manifest: WorkbookManifest | null = null;
-  if (!parsed.templateOnly) {
-    const stored = await db.rosterFile.findUnique({ where: { id: parsed.fileId } });
-    if (!stored) {
-      throw new DomainError(
-        "INVALID_FILE",
-        "이 파일의 서버 기록이 보존 기간(30일)이 지나 정리되었습니다. 명부를 다시 내려받아 사용하세요.",
-      );
+  // 초안 행과 전환 후 control 버전을 섞으면 서로 다른 테이블의 행 버전이 우연히
+  // 같아도 확정이 통과한다. 파일 파싱을 끝낸 뒤 모든 DB 근거를 한 시점에서 읽는다.
+  return db.$transaction(async (tx) => {
+    await assertActor(tx, actor, "WRITE_ADMIN");
+    await requireAcademicReady(tx);
+    const state = await readYearState(tx, year);
+    assertWritableYear(state);
+
+    let manifest: WorkbookManifest | null = null;
+    if (!parsed.templateOnly) {
+      const stored = await tx.rosterFile.findUnique({ where: { id: parsed.fileId } });
+      if (!stored) {
+        throw new DomainError(
+          "INVALID_FILE",
+          "이 파일의 서버 기록이 보존 기간(30일)이 지나 정리되었습니다. 명부를 다시 내려받아 사용하세요.",
+        );
+      }
+      if (stored.year !== year) {
+        throw new DomainError(
+          "YEAR_MISMATCH",
+          `이 파일은 ${stored.year}학년도 명부로 발행된 것입니다.`,
+        );
+      }
+      manifest = stored.manifest as unknown as WorkbookManifest;
     }
-    if (stored.year !== year) {
-      throw new DomainError(
-        "YEAR_MISMATCH",
-        `이 파일은 ${stored.year}학년도 명부로 발행된 것입니다.`,
-      );
-    }
-    manifest = stored.manifest as unknown as WorkbookManifest;
-  }
 
-  const roster = await listRosterView(db, year, undefined, { includeExcluded: true });
-  const emailKeys = [...new Set(parsed.rows.map((row) => normalizeEmail(row.email)))];
-  const [accounts, userVersions] = await Promise.all([
-    loadAccounts(db, emailKeys),
-    loadUserVersions(db, roster.map((row) => row.userId).filter((id): id is number => id !== null)),
-  ]);
+    const roster = await listRosterView(tx, year, undefined, { includeExcluded: true });
+    const emailKeys = [...new Set(parsed.rows.map((row) => normalizeEmail(row.email)))];
+    const [accounts, userVersions] = await Promise.all([
+      loadAccounts(tx, emailKeys),
+      loadUserVersions(tx, roster.map((row) => row.userId).filter((id): id is number => id !== null)),
+    ]);
 
-  const diff = diffRosterImport({ parsed, year, state, scope, roster, manifest, accounts, userVersions });
+    const diff = diffRosterImport({ parsed, year, state, scope, roster, manifest, accounts, userVersions });
 
-  const control = await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
-  const academicYear = await db.academicYear.findUniqueOrThrow({ where: { year } });
+    const control = await tx.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
+    const academicYear = await tx.academicYear.findUniqueOrThrow({ where: { year } });
 
-  const id = randomUUID();
-  const preview: ImportPreview = {
-    id,
-    year,
-    controlVersion: control.version,
-    yearVersion: academicYear.version,
-    scope,
-    rows: diff.rows,
-    missingUserIds: diff.missingUserIds,
-    coveredRoles: parsed.coveredRoles,
-    canCommit: diff.canCommit,
-    fileIssues: diff.fileIssues,
-  };
+    const id = randomUUID();
+    const preview: ImportPreview = {
+      id, year,
+      controlVersion: control.version,
+      yearVersion: academicYear.version,
+      scope,
+      rows: diff.rows,
+      missingUserIds: diff.missingUserIds,
+      coveredRoles: parsed.coveredRoles,
+      canCommit: diff.canCommit,
+      fileIssues: diff.fileIssues,
+    };
 
-  const payload: ImportPayload = {
-    checks: diff.checks as ImportPayload["checks"],
-    omittedEntryIds: diff.omittedEntryIds as ImportPayload["omittedEntryIds"],
-    templateOnly: parsed.templateOnly,
-  };
+    const payload: ImportPayload = {
+      checks: diff.checks as ImportPayload["checks"],
+      omittedEntryIds: diff.omittedEntryIds as ImportPayload["omittedEntryIds"],
+      templateOnly: parsed.templateOnly,
+    };
 
-  await db.rosterImport.create({
-    data: {
+    await tx.rosterImport.create({ data: {
       id,
       year,
       scope,
@@ -216,10 +219,10 @@ export async function previewRosterImport(
       state: PREVIEW,
       payload,
       preview: preview as unknown as Prisma.InputJsonObject,
-    },
-  });
+    } });
 
-  return preview;
+    return preview;
+  }, { ...ROSTER_TX, isolationLevel: "RepeatableRead" });
 }
 
 // ---------------------------------------------------------------------------

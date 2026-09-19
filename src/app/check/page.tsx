@@ -50,6 +50,7 @@ export default function CheckPage() {
   const [mealWindows, setMealWindows] = useState<MealWindows>(DEFAULT_MEAL_WINDOWS);
   const [staleRoster, setStaleRoster] = useState(false);
   const [resetPending, setResetPending] = useState<PendingCheckInCounts | null>(null);
+  const resettingRef = useRef(false);
   const prevModeRef = useRef<"online" | "local">("online");
 
   // Service Worker registration is handled globally in <SwUpdater /> (layout).
@@ -167,6 +168,7 @@ export default function CheckPage() {
 
   // --- Online mode: existing server-based check-in ---
   const handleOnlineScan = useCallback(async (data: string) => {
+    if (resettingRef.current) return;
     if (processingRef.current) {
       playLockClick();
       return;
@@ -196,6 +198,7 @@ export default function CheckPage() {
 
   // --- Local mode: IndexedDB-based check-in (판정 로직은 /facecheck QR 모드와 공용) ---
   const handleLocalScan = useCallback(async (data: string) => {
+    if (resettingRef.current) return;
     if (processingRef.current) {
       playLockClick();
       return;
@@ -228,6 +231,7 @@ export default function CheckPage() {
 
   const handleScan = useCallback(
     (data: string) => {
+      if (resettingRef.current) return;
       // Auto-detect: printed-card/local QR always goes through the local handler
       if (isLocalQR(data)) {
         handleLocalScan(data);
@@ -248,6 +252,7 @@ export default function CheckPage() {
   }
 
   function afterReset() {
+    resettingRef.current = false;
     setOperationMode("online");
     setUnsyncedCount(0);
     setLastSyncAt(null);
@@ -257,15 +262,26 @@ export default function CheckPage() {
   }
 
   async function handleClearAll() {
-    const counts = await getPendingCheckInCounts();
-    // 서버가 아직 받지 못한 기록은 초기화로 사라지면 복구할 길이 없다.
-    if (decideResetGuard(counts) === "NEEDS_FORCED") {
-      setResetPending(counts);
-      return;
+    resettingRef.current = true;
+    try {
+      const counts = await getPendingCheckInCounts();
+      if (decideResetGuard(counts) === "NEEDS_FORCED") {
+        setResetPending(counts);
+        return;
+      }
+      if (!confirm("모든 로컬 데이터를 삭제하시겠습니까?")) {
+        resettingRef.current = false;
+        return;
+      }
+      // 기록 0건을 확인한 뒤에도 다른 탭이나 진행 중 스캔이 저장할 수 있다.
+      await clearAllData({ exported: [], scope: "PENDING" });
+      afterReset();
+    } catch (error) {
+      const counts = await getPendingCheckInCounts();
+      if (decideResetGuard(counts) === "NEEDS_FORCED") setResetPending(counts);
+      else resettingRef.current = false;
+      setSyncMessage(error instanceof Error ? error.message : "초기화하지 못했습니다.");
     }
-    if (!confirm("모든 로컬 데이터를 삭제하시겠습니까?")) return;
-    await clearAllData();
-    afterReset();
   }
 
   const formatCheckedAt = (checkedAt: string) => {
@@ -311,7 +327,9 @@ export default function CheckPage() {
           aria-label="카메라 화면"
           className={`relative min-h-0 flex-1 overflow-hidden rounded-2xl border-[10px] bg-black transition-colors duration-300 sm:border-[14px] ${borderClass}`}
         >
-          {modeLoaded ? (
+          {resetPending ? (
+            <p className="flex h-full items-center justify-center whitespace-nowrap text-white/70">초기화 확인 중 · 스캔 일시 중지</p>
+          ) : modeLoaded ? (
             <QRScanner onScan={handleScan} />
           ) : (
             <div className="flex h-full items-center justify-center gap-2 text-white/70">
@@ -342,7 +360,7 @@ export default function CheckPage() {
               {result.user && (
                 <span className="text-sm font-bold sm:text-base">
                   {result.user.role === "STUDENT"
-                    ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ${result.user.name}`
+                    ? `${result.user.grade != null && result.user.classNum != null && result.user.number != null ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ` : ""}${result.user.name}`
                     : `${result.user.name} 선생님`}
                 </span>
               )}
@@ -421,8 +439,9 @@ export default function CheckPage() {
       {resetPending && (
         <ForceResetDialog
           counts={resetPending}
-          onClose={() => setResetPending(null)}
+          onClose={() => { resettingRef.current = false; setResetPending(null); }}
           onSync={() => {
+            resettingRef.current = false;
             setResetPending(null);
             performSync();
           }}

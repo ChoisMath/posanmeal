@@ -6,6 +6,7 @@ import {
   getUnsyncedCheckIns,
   invalidateLocalSnapshotCache,
   openDB,
+  preserveLocalCheckInProfiles,
   setServerActiveYear,
   SNAPSHOT_SETTING_KEYS,
   setSetting,
@@ -233,7 +234,7 @@ export function readKioskDownload(data: unknown): KioskDownload {
 
 /**
  * 명부·근거·설정을 한 트랜잭션에서 통째로 바꾼다. 중간에 실패하면 abort되어
- * 직전 명부가 그대로 남는다. 체크인 기록은 이 트랜잭션에 넣지 않는다.
+ * 직전 명부가 그대로 남는다. 미전송 기록의 표시정보도 이전 명부와 함께 보존한다.
  */
 export interface ApplySnapshotOptions {
   /** 이번 내려받기가 얼굴 임베딩을 함께 받았는가. 받지 않았으면 기존 후보를 건드리지 않는다. */
@@ -246,7 +247,7 @@ export function applyKioskSnapshot(
   options: ApplySnapshotOptions = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(["users", "eligibleEntries", "faceProfiles", "settings"], "readwrite");
+    const tx = db.transaction(["users", "eligibleEntries", "faceProfiles", "settings", "checkins"], "readwrite");
     tx.oncomplete = () => {
       invalidateLocalSnapshotCache();
       resolve();
@@ -255,6 +256,7 @@ export function applyKioskSnapshot(
     tx.onabort = () => reject(tx.error ?? new Error("명부 교체가 중단되었습니다."));
 
     try {
+      preserveLocalCheckInProfiles(tx);
       const users = tx.objectStore("users");
       users.clear();
       for (const user of download.users) users.put(user);
@@ -287,9 +289,11 @@ export function applyKioskSnapshot(
         // 판정에 쓰는 머리말과 명단 id를 따로 둔다 — 스캔마다 근거 전체를 parse하지 않기 위해서다.
         settings.put(JSON.stringify(snapshotHeaderOf(download.snapshot)), SNAPSHOT_SETTING_KEYS.header);
         settings.put(JSON.stringify(snapshotMemberIds(download.snapshot)), SNAPSHOT_SETTING_KEYS.members);
+        settings.put(JSON.stringify(download.snapshot.profiles ?? []), SNAPSHOT_SETTING_KEYS.profiles);
       } else {
         settings.delete(SNAPSHOT_SETTING_KEYS.header);
         settings.delete(SNAPSHOT_SETTING_KEYS.members);
+        settings.delete(SNAPSHOT_SETTING_KEYS.profiles);
       }
     } catch (error) {
       // 여기서 나가면 이미 넣은 clear/put이 커밋되어 명부가 반쪽이 된다.

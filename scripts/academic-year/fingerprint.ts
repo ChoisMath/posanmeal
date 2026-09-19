@@ -16,37 +16,36 @@ interface TableDef {
 
 const LEGACY_TABLES = legacyColumns as Record<string, TableDef>;
 
+export const LEGACY_FINGERPRINT_FORMAT = "posanmeal-legacy-fingerprint";
+export const LEGACY_FINGERPRINT_VERSION = 2;
+
 export interface LegacyFingerprint {
+  // 이전에 저장한 무버전 manifest도 읽되 비교 단계에서 명시적으로 거절한다.
+  format?: string;
+  version?: number;
   tables: Record<string, { count: number; pkHash: string; rowHash: string }>;
 }
 
 export interface LegacyFingerprintDiff {
   equal: boolean;
   differingTables: string[];
+  formatMismatch?: boolean;
 }
-
-// 행 사이 구분자와 NULL 표식은 실제 데이터에 나타날 수 없는 제어문자를 사용해
-// 값 안의 구분자/개행과 절대 충돌하지 않게 한다.
-// PostgreSQL 와이어 프로토콜은 텍스트 리터럴에 NUL 바이트(\0)을 허용하지 않으므로
-// (보내면 "invalid message format" 로 끊긴다) 제어문자 중 NUL을 피해서 고른다.
-const FIELD_SEPARATOR = "\u0001";
-const NULL_SENTINEL = "\u0002__NULL__\u0002";
-const ROW_SEPARATOR = "\n";
 
 function columnExpr(column: ColumnDef): string {
   const quoted = `"${column.name}"`;
   switch (column.type) {
     case "timestamp":
-      return `COALESCE(to_char(${quoted}, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), '${NULL_SENTINEL}')`;
+      return `to_char(${quoted}, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
     case "date":
-      return `COALESCE(to_char(${quoted}, 'YYYY-MM-DD'), '${NULL_SENTINEL}')`;
+      return `to_char(${quoted}, 'YYYY-MM-DD')`;
     case "json":
       // jsonb 컬럼은 저장 시 이미 정규화되므로 ::jsonb::text 로 캐스팅해
       // 항상 동일한 정렬·표기의 텍스트를 얻는다.
-      return `COALESCE(${quoted}::jsonb::text, '${NULL_SENTINEL}')`;
+      return `${quoted}::jsonb::text`;
     case "text":
     default:
-      return `COALESCE(${quoted}::text, '${NULL_SENTINEL}')`;
+      return `${quoted}::text`;
   }
 }
 
@@ -55,14 +54,16 @@ async function fingerprintTable(
   tableName: string,
   def: TableDef,
 ): Promise<{ count: number; pkHash: string; rowHash: string }> {
-  const pkExprs = def.pk.map((name) => columnExpr({ name, type: "text" }));
+  const pkExprs = def.pk.map((name) => columnExpr({
+    name, type: def.columns.find((column) => column.name === name)?.type ?? "text",
+  }));
   const colExprs = def.columns.map(columnExpr);
   const orderBy = def.pk.map((name) => `"${name}"`).join(", ");
 
   const sql = `
     SELECT
-      array_to_string(ARRAY[${pkExprs.join(", ")}], '${FIELD_SEPARATOR}') AS pk_text,
-      array_to_string(ARRAY[${colExprs.join(", ")}], '${FIELD_SEPARATOR}') AS row_text
+      json_build_array(${pkExprs.join(", ")})::text AS pk_text,
+      json_build_array(${colExprs.join(", ")})::text AS row_text
     FROM "${tableName}"
     ORDER BY ${orderBy}
   `;
@@ -70,13 +71,14 @@ async function fingerprintTable(
   const result = await pgClient.query(sql);
   const pkLines = result.rows.map((row: { pk_text: string }) => row.pk_text);
   const rowLines = result.rows.map(
-    (row: { pk_text: string; row_text: string }) => `${row.pk_text}${FIELD_SEPARATOR}${row.row_text}`,
+    (row: { pk_text: string; row_text: string }) => [row.pk_text, row.row_text],
   );
 
   return {
     count: result.rows.length,
-    pkHash: sha256(pkLines.join(ROW_SEPARATOR)),
-    rowHash: sha256(rowLines.join(ROW_SEPARATOR)),
+    // 저장 가능한 제어문자나 개행이 열·행 경계로 해석되지 않도록 두 경계 모두 인코딩한다.
+    pkHash: sha256(JSON.stringify(pkLines)),
+    rowHash: sha256(JSON.stringify(rowLines)),
   };
 }
 
@@ -91,12 +93,13 @@ function sha256(input: string): string {
 export async function captureLegacyFingerprint(pgClient: ClientBase): Promise<LegacyFingerprint> {
   await pgClient.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
   try {
+    await pgClient.query("SET LOCAL TIME ZONE 'UTC'");
     const tables: LegacyFingerprint["tables"] = {};
     for (const [tableName, def] of Object.entries(LEGACY_TABLES)) {
       tables[tableName] = await fingerprintTable(pgClient, tableName, def);
     }
     await pgClient.query("COMMIT");
-    return { tables };
+    return { format: LEGACY_FINGERPRINT_FORMAT, version: LEGACY_FINGERPRINT_VERSION, tables };
   } catch (err) {
     await pgClient.query("ROLLBACK");
     throw err;
@@ -104,6 +107,9 @@ export async function captureLegacyFingerprint(pgClient: ClientBase): Promise<Le
 }
 
 export function compareLegacyFingerprints(a: LegacyFingerprint, b: LegacyFingerprint): LegacyFingerprintDiff {
+  if ([a, b].some((value) => value.format !== LEGACY_FINGERPRINT_FORMAT || value.version !== LEGACY_FINGERPRINT_VERSION)) {
+    return { equal: false, differingTables: [], formatMismatch: true };
+  }
   const tableNames = new Set([...Object.keys(a.tables), ...Object.keys(b.tables)]);
   const differingTables: string[] = [];
 

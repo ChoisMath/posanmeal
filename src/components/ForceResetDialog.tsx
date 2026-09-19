@@ -9,6 +9,7 @@ import {
   getReviewableCheckIns,
   getUser,
   type PendingCheckInCounts,
+  type StoredLocalCheckIn,
 } from "@/lib/local-db";
 
 interface ForceResetDialogProps {
@@ -19,7 +20,7 @@ interface ForceResetDialogProps {
   onCleared: () => void;
 }
 
-async function downloadPendingCheckIns(): Promise<"xlsx" | "csv"> {
+async function downloadPendingCheckIns(): Promise<{ extension: "xlsx" | "csv"; checkins: StoredLocalCheckIn[] }> {
   const checkins = await getReviewableCheckIns();
   const rows: LocalCheckInRow[] = [];
   for (const checkin of checkins) {
@@ -33,12 +34,12 @@ async function downloadPendingCheckIns(): Promise<"xlsx" | "csv"> {
   link.download = `local-checkins-${new Date().toISOString().slice(0, 10)}.${extension}`;
   link.click();
   URL.revokeObjectURL(url);
-  return extension;
+  return { extension, checkins };
 }
 
 /** 미전송·확인 대기 기록이 남은 기기에서만 뜬다. 내보내기 없이는 지우지 않는다. */
 export function ForceResetDialog({ counts, onClose, onSync, onCleared }: ForceResetDialogProps) {
-  const [exported, setExported] = useState(false);
+  const [exported, setExported] = useState<StoredLocalCheckIn[] | null>(null);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,9 +48,11 @@ export function ForceResetDialog({ counts, onClose, onSync, onCleared }: ForceRe
   async function handleExport() {
     setBusy(true);
     setError(null);
+    setExported(null);
     try {
-      setFormat(await downloadPendingCheckIns());
-      setExported(true);
+      const downloaded = await downloadPendingCheckIns();
+      setFormat(downloaded.extension);
+      setExported(downloaded.checkins);
     } catch {
       setError("내보내기에 실패했습니다.");
     } finally {
@@ -64,6 +67,7 @@ export function ForceResetDialog({ counts, onClose, onSync, onCleared }: ForceRe
       await forceClearLocalData({ exported, typed });
       onCleared();
     } catch (err) {
+      setExported(null);
       setError(err instanceof Error ? err.message : "초기화하지 못했습니다.");
     } finally {
       setBusy(false);
@@ -112,7 +116,7 @@ export function ForceResetDialog({ counts, onClose, onSync, onCleared }: ForceRe
         >
           강제 초기화
         </button>
-        {error && <p className="shrink-0 text-sm font-semibold whitespace-nowrap text-red-700">{error}</p>}
+        {error && <p className="shrink-0 text-sm font-semibold break-keep text-red-700">{error}</p>}
         <button
           onClick={onClose}
           disabled={busy}

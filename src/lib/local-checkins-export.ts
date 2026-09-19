@@ -1,5 +1,6 @@
 import type { LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import { formatDateTimeSecondsKST } from "@/lib/timezone";
+import { MEAL_SHORT } from "@/lib/meal-plan";
 
 const HEADERS = [
   "IDB ID",
@@ -14,6 +15,8 @@ const HEADERS = [
   "사유",
   "근거ID",
   "기기ID",
+  "체크시각(ISO)",
+  "로컬 원본(JSON)",
 ];
 
 function cells(r: LocalCheckInRow): Array<string | number> {
@@ -23,13 +26,15 @@ function cells(r: LocalCheckInRow): Array<string | number> {
     r.userLabel,
     r.name,
     r.date,
-    r.mealKind === undefined ? "-" : r.mealKind === "BREAKFAST" ? "조" : "석",
+    r.mealKind === undefined ? "-" : MEAL_SHORT[r.mealKind],
     r.type,
-    formatDateTimeSecondsKST(new Date(r.checkedAt)),
+    Number.isNaN(Date.parse(r.checkedAt)) ? r.checkedAt : formatDateTimeSecondsKST(new Date(r.checkedAt)),
     r.status,
     r.reason ?? "",
     r.snapshotId ?? "",
     r.deviceId ?? "",
+    r.checkedAt,
+    r.sourceJson ?? "",
   ];
 }
 

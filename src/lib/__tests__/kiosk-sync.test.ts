@@ -204,6 +204,9 @@ const fakeDb = {
           clear: () => log.push({ op: "clear" }),
           put: (value: unknown, key?: unknown) => log.push({ op: "put", value, key }),
           delete: (key: unknown) => log.push({ op: "delete", key }),
+          get: () => ({ result: undefined }),
+          getAll: () => ({ result: [] }),
+          openCursor: () => ({ result: null }),
         };
       },
       names,
@@ -294,7 +297,7 @@ describe("performKioskSync", () => {
     });
     // 학년도는 설정 조회만 쓴다 — 근거 자신의 연도로 덮으면 검사가 항상 통과한다.
     expect(dbState.stores.settings.some((entry) => entry.key === "serverActiveYear")).toBe(false);
-    expect(dbState.stores.checkins).toBeUndefined();
+    expect(dbState.stores.checkins).toEqual([]);
   });
 
   it("근거 없는 응답(PREPARING)은 근거 모드를 끄고 저장된 근거를 지운다", async () => {

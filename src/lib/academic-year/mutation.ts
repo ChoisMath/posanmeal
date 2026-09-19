@@ -196,6 +196,9 @@ async function runRowMutation<T extends Summary>(
     }
 
     const current = await lock.read(tx);
+    // 잠금 대기 중 같은 요청이 커밋됐으면 오래된 입력 버전보다 저장된 결과를 우선한다.
+    const completed = await tx.rosterMutation.findUnique({ where: { requestId: input.requestId } });
+    if (completed) return replayReceipt<T>(completed, identity);
     if (current === null) {
       throw new DomainError("MISSING_PROFILE", "대상 행을 찾을 수 없습니다.");
     }
@@ -308,7 +311,11 @@ function rowLockFor(target: RosterRowTarget): RowLock {
       return rows[0]?.version ?? null;
     };
     return {
-      read: (tx) => read(tx, true),
+      read: async (tx) => {
+        // 계정 변경도 User → Record 순서다. 반대로 잡으면 이용 중단과 서로 기다린다.
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${target.userId} FOR UPDATE`;
+        return read(tx, true);
+      },
       finish: async (tx) => (await read(tx, false)) ?? 0,
     };
   }

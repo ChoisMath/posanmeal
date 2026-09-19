@@ -1,10 +1,12 @@
-// 초기 이전 이후 원본 보존을 확인하는 읽기 전용 CLI. `--before`로 받은
-// manifest(해시·건수만 담긴다)와 현재 상태를 비교해 차이의 종류만 출력한다.
+// 기본 inspect는 상태를 바꾸지 않는다. VERIFIED 확정은 복원 근거와 보고 경로를
+// 갖춘 명시적 apply에서만 수행한다.
 import fs from "node:fs";
 import type { LegacyFingerprint } from "./fingerprint";
 import { captureLegacyFingerprint } from "./fingerprint";
-import { verifyBackfill } from "../../src/lib/academic-year/backfill";
+import { inspectBackfill, verifyBackfill } from "../../src/lib/academic-year/backfill";
+import { createMigrationReport } from "./report";
 import {
+  assertApplyAllowed,
   openMigrationPgClient,
   openMigrationTarget,
   parseCliArgs,
@@ -26,20 +28,32 @@ async function main(): Promise<void> {
   if (!options.beforePath) throw new Error("--before를 지정하세요");
 
   const config = readMigrationTargetConfig(options.targetConfigPath);
+  assertApplyAllowed(options, config);
   const before = readFingerprint(options.beforePath);
+  const evidence = options.mode === "apply" ? createMigrationReport(options.reportDir!) : null;
+  evidence?.write("before.json", before);
+  if (evidence) console.info(`report=${evidence.directory}`);
 
   const target = await openMigrationTarget(options.targetConfigPath);
   const db = target.db;
-  const pgClient = await openMigrationPgClient(options.targetConfigPath);
   try {
-    const after = await captureLegacyFingerprint(pgClient);
-    const verified = await verifyBackfill(db, before, after);
+    const pgClient = await openMigrationPgClient(options.targetConfigPath);
+    try {
+      const after = await captureLegacyFingerprint(pgClient);
+      evidence?.write("after.json", after);
+      const verified = options.mode === "apply"
+        ? await verifyBackfill(db, before, after)
+        : await inspectBackfill(db, before, after);
+      evidence?.write("result.json", { environment: config.environment, verified });
 
-    console.info(`environment=${config.environment} mode=verify`);
-    console.info(`canEnable=${verified.canEnable}`);
-    console.info(`issues=${verified.issues.join(",") || "none"}`);
+      console.info(`environment=${config.environment} mode=${options.mode} operation=verify`);
+      console.info(`canEnable=${verified.canEnable}`);
+      console.info(`issues=${verified.issues.join(",") || "none"}`);
+      if (!verified.canEnable) process.exitCode = 1;
+    } finally {
+      await pgClient.end();
+    }
   } finally {
-    await pgClient.end();
     await target.close();
   }
 }

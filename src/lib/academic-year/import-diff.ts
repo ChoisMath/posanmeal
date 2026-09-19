@@ -203,6 +203,10 @@ export function diffRosterImport(input: DiffRosterImportInput): DiffRosterImport
       ? resolveByToken(source, manifest, index, issues)
       : resolveByEmail(source, emailKey, parsed.templateOnly, index, issues);
 
+    if (current && current.profile.role !== source.profile.role) {
+      issues.push(issue(source, "이메일", "ROLE_MISMATCH", "기존 명부와 다른 역할의 시트에 있습니다. 원래 역할의 시트에서 수정하세요."));
+    }
+
     if (issues.length > 0) {
       entries.push({
         source,

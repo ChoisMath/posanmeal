@@ -260,6 +260,8 @@ function buildManifest(
 ): Prisma.InputJsonObject {
   return {
     year: INITIAL_ACADEMIC_YEAR,
+    fingerprintFormat: source.format ?? null,
+    fingerprintVersion: source.version ?? null,
     counts: report.counts,
     issues,
     notes: report.notes,
@@ -316,23 +318,9 @@ export async function backfill2026(db: PrismaClient, source: LegacyFingerprint):
   }, ROSTER_TX);
 }
 
-/**
- * 원본 훼손 여부와 남은 충돌을 함께 판정한다. 둘 다 깨끗할 때만 VERIFIED로
- * 올리며, 이 상태가 되어야 메인 관리자가 새 학년도 기능을 켤 수 있다.
- */
-export async function verifyBackfill(
-  db: PrismaClient,
-  before: LegacyFingerprint,
-  after: LegacyFingerprint,
-): Promise<VerifyResult> {
+export async function checkCurrentBackfill(db: Db) {
   const year = await activeYear(db);
   const issues: string[] = [];
-
-  const diff = compareLegacyFingerprints(before, after);
-  for (const table of diff.differingTables) {
-    issues.push(`LEGACY_MODIFIED:${table}`);
-  }
-
   const backfill = await db.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } });
   if (!backfill || backfill.state === "PENDING") {
     issues.push("BACKFILL_NOT_COPIED:1");
@@ -348,20 +336,55 @@ export async function verifyBackfill(
   if (recordCount !== report.counts.users) {
     issues.push(issue("RECORD_COUNT_MISMATCH", Math.abs(report.counts.users - recordCount)));
   }
+  const missingApplicationYears = await db.mealApplication.count({ where: { academicYear: null } });
+  if (missingApplicationYears > 0) issues.push(issue("APPLICATION_YEAR_MISSING", missingApplicationYears));
 
-  issues.sort();
-  if (issues.length > 0 || !backfill) {
-    return { canEnable: false, issues };
+  return { backfill, report, issues };
+}
+
+async function inspectBackfillWithDb(db: Db, before: LegacyFingerprint, after: LegacyFingerprint) {
+  const { backfill, report, issues } = await checkCurrentBackfill(db);
+  const diff = compareLegacyFingerprints(before, after);
+  if (diff.formatMismatch) issues.push("FINGERPRINT_FORMAT_MISMATCH:1");
+  for (const table of diff.differingTables) {
+    issues.push(`LEGACY_MODIFIED:${table}`);
   }
+  issues.sort();
+  return { backfill, report, result: { canEnable: issues.length === 0, issues } };
+}
 
-  await db.academicBackfill.update({
-    where: { key: ACADEMIC_BACKFILL_KEY },
-    data: {
-      state: "VERIFIED",
-      verifiedAt: new Date(),
-      sourceManifest: buildManifest(before, report, []),
-    },
-  });
+export async function inspectBackfill(db: PrismaClient, before: LegacyFingerprint, after: LegacyFingerprint): Promise<VerifyResult> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    return (await inspectBackfillWithDb(tx, before, after)).result;
+  }, { ...ROSTER_TX, isolationLevel: "RepeatableRead" });
+}
 
-  return { canEnable: true, issues: [] };
+/** 신청 쓰기는 control 잠금을 쓰지 않으므로 최종 검증 중에만 대상 테이블 쓰기를 잠깐 기다린다. */
+export async function lockBackfillVerificationSources(tx: Tx): Promise<void> {
+  await tx.$executeRaw`LOCK TABLE "MealApplication", "MealApplicationMealDate", "MealRegistration", "MealRegistrationMealDate" IN SHARE MODE`;
+}
+
+export async function verifyBackfill(db: PrismaClient, before: LegacyFingerprint, after: LegacyFingerprint): Promise<VerifyResult> {
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR UPDATE`;
+    const control = await tx.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
+    if (control.mode !== "PREPARING") {
+      throw new DomainError("NOT_READY", "기능 공개 후에는 읽기 전용 검증을 사용하세요.");
+    }
+    await lockBackfillVerificationSources(tx);
+    const { backfill, report, result } = await inspectBackfillWithDb(tx, before, after);
+    if (backfill && backfill.state !== "PENDING") {
+      await tx.academicBackfill.update({
+        where: { key: ACADEMIC_BACKFILL_KEY },
+        data: {
+          state: result.canEnable ? "VERIFIED" : "COPIED",
+          verifiedAt: result.canEnable ? new Date() : null,
+          sourceManifest: buildManifest(before, report, result.issues),
+        },
+      });
+    }
+    // 실패를 throw하면 오래된 VERIFIED를 취소한 UPDATE도 rollback된다.
+    return result;
+  }, ROSTER_TX);
 }

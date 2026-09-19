@@ -894,7 +894,7 @@ describe("academic year roster services", () => {
       expect(await db.rosterEntry.findUniqueOrThrow({ where: { id: entry.id } })).toEqual(entry);
     });
 
-    it("동일값 프로필 저장도 진행 중인 이메일 변경 뒤의 최신 명부 키를 유지한다", async () => {
+    it("진행 중인 이메일 변경 뒤에 잠금을 얻은 예전 프로필 저장은 거절하고 최신 명부 키를 유지한다", async () => {
       let changed!: () => void;
       let release!: () => void;
       const emailWritten = new Promise<void>((resolve) => { changed = resolve; });
@@ -918,6 +918,7 @@ describe("academic year roster services", () => {
         expectedRowVersion: await rowVersion(fx.studentId), year: YEAR, userId: fx.studentId,
         email: account.email, profile: studentProfile({ name: account.name }),
       });
+      const profileResult = profileWrite.then(() => null, (error: unknown) => error);
       try {
         await vi.waitFor(async () => {
           const waiting = await pgClient.query<{ count: number }>(`
@@ -929,8 +930,9 @@ describe("academic year roster services", () => {
         }, { timeout: 2_000, interval: 10 });
       } finally {
         release();
-        await Promise.all([emailChange, profileWrite]);
+        await Promise.all([emailChange, profileResult]);
       }
+      expect(await profileResult).toMatchObject({ code: "IDENTITY_CONFLICT" });
       expect(await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).toMatchObject({
         email: "moved.student@example.posan.kr", emailKey: "moved.student@example.posan.kr", sessionVersion: 1,
       });
@@ -938,7 +940,7 @@ describe("academic year roster services", () => {
         .toBe("moved.student@example.posan.kr");
     });
 
-    it("계정 주소 검사 직후 이메일이 바뀌어도 이름 저장이 로그인 주소와 명부 키를 되돌리지 않는다", async () => {
+    it("프로필 저장이 잡은 계정 잠금 뒤의 이메일 변경은 최신 버전으로 재시도하고 이름을 보존한다", async () => {
       let read!: () => void;
       let release!: () => void;
       const readFinished = new Promise<void>((resolve) => { read = resolve; });
@@ -961,8 +963,22 @@ describe("academic year roster services", () => {
         email: "student-test@example.posan.kr", profile: studentProfile({ name: "동시이름수정" }),
       });
       await readFinished;
-      try { await changeStudentEmail(); } finally { release(); }
-      await pending;
+      const emailChange = changeStudentEmail().then(() => null, (error: unknown) => error);
+      try {
+        await vi.waitFor(async () => {
+          const waiting = await pgClient.query<{ count: number }>(`
+            SELECT count(*)::int AS count FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+              AND query LIKE '%"User"%'
+          `);
+          expect(waiting.rows[0]?.count).toBeGreaterThan(0);
+        }, { timeout: 2_000, interval: 10 });
+      } finally {
+        release();
+        await Promise.all([pending, emailChange]);
+      }
+      expect(await emailChange).toMatchObject({ code: "VERSION_CONFLICT" });
+      await changeStudentEmail();
       const user = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
       expect(user).toMatchObject({ name: "동시이름수정", email: "moved.student@example.posan.kr",
         emailKey: "moved.student@example.posan.kr", sessionVersion: 1 });

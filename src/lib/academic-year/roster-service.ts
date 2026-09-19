@@ -440,6 +440,19 @@ export async function upsertRosterProfile(
       throw new DomainError("VERSION_CONFLICT", "학년도 상태가 바뀌었습니다. 새로고침 후 다시 시도하세요.");
     }
 
+    if (input.entryId !== undefined) {
+      const entry = await tx.rosterEntry.findUnique({
+        where: { id: input.entryId }, select: { year: true, userId: true },
+      });
+      if (!entry) throw new DomainError("MISSING_PROFILE", "대상 명부 행을 찾을 수 없습니다.");
+      if (entry.year !== input.year) {
+        throw new DomainError("YEAR_MISMATCH", "이 명부 행은 다른 학년도의 것입니다.");
+      }
+      if (entry.userId !== (input.userId ?? null)) {
+        throw new DomainError("IDENTITY_CONFLICT", "명부 행과 대상 사용자가 일치하지 않습니다.");
+      }
+    }
+
     if (input.userId !== undefined) {
       const account = await tx.user.findUnique({ where: { id: input.userId }, select: { email: true } });
       if (!account) throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
@@ -581,6 +594,17 @@ export async function writeRosterProfiles(
   if (rows.length === 0) return { changed: 0, ids: [] };
 
   assertNoDuplicatesInBatch(rows);
+  const existingUsers = await tx.user.findMany({
+    where: { id: { in: rows.flatMap((row) => row.userId === null ? [] : [row.userId]) } },
+    select: { id: true, role: true },
+  });
+  const rolesByUserId = new Map(existingUsers.map((user) => [user.id, user.role]));
+  for (const row of rows) {
+    const currentRole = row.userId === null ? undefined : rolesByUserId.get(row.userId);
+    if (currentRole !== undefined && currentRole !== row.profile.role) {
+      throw new DomainError("IDENTITY_CONFLICT", "학생·교사 계정 종류는 명부 편집으로 변경할 수 없습니다.");
+    }
+  }
   const state = await readYearState(tx, year);
   const applyIncluded = options?.applyIncluded ?? false;
 
@@ -742,11 +766,6 @@ async function writeConfirmedRows(
   const columns = columnsOf(resolved);
   const args = rowArgs(year, columns);
 
-  await tx.$executeRawUnsafe(PARK_SEATS_SQL, ...args);
-  const recordChanged = await runWithIdentityGuard(() =>
-    tx.$queryRawUnsafe<{ userId: number }[]>(UPSERT_RECORDS_SQL, ...args),
-  );
-
   if (isActive) {
     // 동일값 UPDATE는 행을 잠그지 않아 뒤의 명부 키 저장이 진행 중인 이메일 변경을 놓칠 수 있다.
     await tx.$queryRaw`
@@ -754,6 +773,11 @@ async function writeConfirmedRows(
       ORDER BY "id" FOR UPDATE
     `;
   }
+
+  await tx.$executeRawUnsafe(PARK_SEATS_SQL, ...args);
+  const recordChanged = await runWithIdentityGuard(() =>
+    tx.$queryRawUnsafe<{ userId: number }[]>(UPSERT_RECORDS_SQL, ...args),
+  );
 
   const userChanged = isActive
     ? await runWithIdentityGuard(() =>

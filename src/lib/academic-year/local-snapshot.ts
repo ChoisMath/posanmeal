@@ -1,3 +1,6 @@
+import { academicYearOfDate } from "./calendar";
+import type { LocalUser } from "@/lib/local-db";
+
 /**
  * 키오스크(브라우저)에서 쓰는 명부 근거 판정. 서버 모듈을 절대 import하지 않는다 —
  * `kiosk-snapshot.ts`의 타입과 모양은 같지만 그쪽은 Prisma를 끌고 온다.
@@ -57,6 +60,7 @@ export type SnapshotHeader = {
 export type LocalSnapshot = {
   header: SnapshotHeader;
   members: ReadonlySet<number>;
+  profiles: ReadonlyMap<string, SnapshotProfile>;
 };
 
 export function snapshotHeaderOf(evidence: SnapshotEvidence): SnapshotHeader {
@@ -89,7 +93,34 @@ export function isUsableSnapshot(value: unknown): value is SnapshotEvidence {
 }
 
 export function toLocalSnapshot(evidence: SnapshotEvidence): LocalSnapshot {
-  return { header: snapshotHeaderOf(evidence), members: new Set(snapshotMemberIds(evidence)) };
+  return { header: snapshotHeaderOf(evidence), members: new Set(snapshotMemberIds(evidence)), profiles: indexSnapshotProfiles(evidence.profiles ?? []) };
+}
+
+export function indexSnapshotProfiles(profiles: SnapshotProfile[]): ReadonlyMap<string, SnapshotProfile> {
+  return new Map(profiles.map((profile) => [`${profile.year}:${profile.userId}`, profile]));
+}
+
+export function snapshotDisplayUser(
+  profiles: ReadonlyMap<string, SnapshotProfile>, userId: number, dateKey: string,
+): LocalUser | null {
+  let year: number;
+  try {
+    year = academicYearOfDate(dateKey);
+  } catch {
+    // 구버전 원본의 날짜가 불명이어도 목록과 백업은 계속 가능해야 한다.
+    return null;
+  }
+  const profile = profiles.get(`${year}:${userId}`);
+  if (!profile) return null;
+  return {
+    id: profile.userId, name: profile.name, role: profile.role,
+    grade: profile.grade ?? undefined, classNum: profile.classNum ?? undefined, number: profile.number ?? undefined,
+  };
+}
+
+export function localDisplayUser(state: LocalSnapshotState, user: LocalUser, dateKey: string): LocalUser | null {
+  if (!state.snapshotMode) return { ...user };
+  return state.snapshot ? snapshotDisplayUser(state.snapshot.profiles, user.id, dateKey) : null;
 }
 
 export type SnapshotFreshness = "FRESH" | "STALE";

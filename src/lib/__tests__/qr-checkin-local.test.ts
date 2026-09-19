@@ -46,6 +46,7 @@ describe("parseLocalQR / isLocalQR", () => {
   });
   it("5-part QR은 식사 종류를 실어 온다", () => {
     expect(parseLocalQR("posanmeal:12:3:STUDENT:BREAKFAST")).toMatchObject({ mealKind: "BREAKFAST" });
+    expect(parseLocalQR("posanmeal:12:3:STUDENT:LUNCH")).toMatchObject({ mealKind: "LUNCH" });
     expect(parseLocalQR("posanmeal:12:3:STUDENT:OTHER")).toMatchObject({ mealKind: undefined });
   });
   it("접두어·자릿수·id가 틀리면 null", () => {
@@ -103,6 +104,15 @@ describe("runLocalQrCheckIn", () => {
     const r = await run("posanmeal:1:3:STUDENT:BREAKFAST", CLOSED, repo);
     expect(r).toMatchObject({ success: true, mealKind: "BREAKFAST" });
     expect(checkins[0]).toMatchObject({ mealKind: "BREAKFAST" });
+  });
+
+  it.each([CLOSED, OPEN])("명시 중식 QR은 시간 창에 관계없이 중식 자격으로 저장한다", async (mealWindows) => {
+    const { repo, checkins } = makeRepo([STUDENT], new Set(["1:2026-09-05:LUNCH", "1:2026-09-05:DINNER"]), { qrGeneration: "3" });
+    const result = await run("posanmeal:1:3:STUDENT:LUNCH", mealWindows, repo);
+
+    expect(result).toMatchObject({ success: true, mealKind: "LUNCH" });
+    expect(checkins).toHaveLength(1);
+    expect(checkins[0]).toMatchObject({ mealKind: "LUNCH", date: "2026-09-05", synced: 0 });
   });
 
   it("학생 미신청 → notApplicant + 사용자 정보", async () => {

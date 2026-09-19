@@ -1,11 +1,12 @@
 import { resolveMealKindLocal, type MealKind, type MealWindows } from "@/lib/meal-kind-local";
-import { MEAL_LABEL } from "@/lib/meal-plan";
+import { MEAL_KINDS, MEAL_LABEL } from "@/lib/meal-plan";
 import { localDateKey } from "@/lib/facecheck-local";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
 import type { CheckInResult } from "@/lib/checkin-client";
 import {
   LocalSnapshotError,
   guardLocalCheckIn,
+  localDisplayUser,
   type LocalSnapshotState,
   type SnapshotFreshness,
 } from "@/lib/academic-year/local-snapshot";
@@ -29,7 +30,7 @@ export function parseLocalQR(data: string): ParsedLocalQR | null {
   if ((parts.length !== 4 && parts.length !== 5) || parts[0] !== "posanmeal") return null;
   const userId = parseInt(parts[1], 10);
   if (isNaN(userId)) return null;
-  const mealKind = parts[4] === "BREAKFAST" || parts[4] === "DINNER" ? parts[4] : undefined;
+  const mealKind = MEAL_KINDS.find((kind) => kind === parts[4]);
   return { userId, generation: parts[2], type: parts[3], mealKind };
 }
 
@@ -77,7 +78,9 @@ export async function runLocalQrCheckIn(
   if (!mealKind) return { success: false, error: "현재 식사 시간이 아닙니다." };
 
   const date = localDateKey(input.now);
-  const resultUser = { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number };
+  const state = await repo.getSnapshotState();
+  const displayProfile = localDisplayUser(state, user, date);
+  const resultUser = displayProfile ?? { id: user.id, role: user.role, name: "학년도 정보 확인 필요" };
 
   if (user.role === "STUDENT") {
     const eligible = await repo.isEligible(user.id, date, mealKind);
@@ -101,7 +104,6 @@ export async function runLocalQrCheckIn(
     };
   }
 
-  const state = await repo.getSnapshotState();
   let freshness: SnapshotFreshness | null;
   try {
     freshness = guardLocalCheckIn(state, { now: now(), userId: user.id, dateKey: date });
@@ -122,6 +124,7 @@ export async function runLocalQrCheckIn(
     checkedAt,
     type,
     synced: 0,
+    displayProfile,
     deviceId: await repo.getDeviceId(),
     ...(state.snapshot ? { snapshotId: state.snapshot.header.id } : {}),
     ...(stale ? { stale: true } : {}),

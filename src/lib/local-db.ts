@@ -1,7 +1,10 @@
 import {
   createSnapshotStateCache,
+  indexSnapshotProfiles,
+  snapshotDisplayUser,
   type LocalSnapshotState,
   type SnapshotHeader,
+  type SnapshotProfile,
 } from "@/lib/academic-year/local-snapshot";
 
 export const DB_NAME = "posanmeal-local";
@@ -24,6 +27,8 @@ export interface LocalCheckIn {
   checkedAt: string; // ISO string
   type: "STUDENT" | "WORK" | "PERSONAL";
   synced: number; // 0 = not synced, 1 = synced (IndexedDB keys don't support booleans)
+  /** null은 당시 학년도 정보 결측이다. 나중의 현재 학급으로 메우지 않는다. */
+  displayProfile?: LocalUser | null;
   /** 저장 당시 기기가 들고 있던 근거 id. 근거 모드가 아니면 없다. */
   snapshotId?: string;
   deviceId?: string;
@@ -419,12 +424,14 @@ export async function clearFaceProfiles(): Promise<void> {
 
 const SNAPSHOT_HEADER_KEY = "snapshotHeader";
 const SNAPSHOT_MEMBERS_KEY = "snapshotMembers";
+const SNAPSHOT_PROFILES_KEY = "snapshotProfiles";
 const SNAPSHOT_MODE_KEY = "snapshotMode";
 const SERVER_ACTIVE_YEAR_KEY = "serverActiveYear";
 
 export const SNAPSHOT_SETTING_KEYS = {
   header: SNAPSHOT_HEADER_KEY,
   members: SNAPSHOT_MEMBERS_KEY,
+  profiles: SNAPSHOT_PROFILES_KEY,
   mode: SNAPSHOT_MODE_KEY,
   serverActiveYear: SERVER_ACTIVE_YEAR_KEY,
 } as const;
@@ -446,6 +453,7 @@ async function readLocalSnapshotState(): Promise<LocalSnapshotState> {
     const modeReq = store.get(SNAPSHOT_MODE_KEY);
     const headerReq = store.get(SNAPSHOT_HEADER_KEY);
     const membersReq = store.get(SNAPSHOT_MEMBERS_KEY);
+    const profilesReq = store.get(SNAPSHOT_PROFILES_KEY);
     const yearReq = store.get(SERVER_ACTIVE_YEAR_KEY);
     tx.oncomplete = () => {
       const header = parseJson<SnapshotHeader>(headerReq.result);
@@ -453,7 +461,7 @@ async function readLocalSnapshotState(): Promise<LocalSnapshotState> {
       const year = Number(yearReq.result);
       resolve({
         snapshotMode: modeReq.result === "1",
-        snapshot: header ? { header, members: new Set(members) } : null,
+        snapshot: header ? { header, members: new Set(members), profiles: indexSnapshotProfiles(parseJson<SnapshotProfile[]>(profilesReq.result) ?? []) } : null,
         serverActiveYear: yearReq.result && Number.isFinite(year) ? year : null,
       });
     };
@@ -563,8 +571,56 @@ export async function getTerminalRejectedCheckIns(): Promise<StoredLocalCheckIn[
 
 /** 화면·내보내기가 함께 보는 목록: 미전송 + 종결 거절. */
 export async function getReviewableCheckIns(): Promise<StoredLocalCheckIn[]> {
-  const [unsynced, rejected] = await Promise.all([getUnsyncedCheckIns(), getTerminalRejectedCheckIns()]);
-  return [...unsynced, ...rejected];
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["checkins", "settings", "users"], "readonly");
+    const records = tx.objectStore("checkins").getAll();
+    const profiles = tx.objectStore("settings").get(SNAPSHOT_PROFILES_KEY);
+    const mode = tx.objectStore("settings").get(SNAPSHOT_MODE_KEY);
+    const users = tx.objectStore("users").getAll();
+    tx.oncomplete = () => {
+      const byYear = indexSnapshotProfiles(parseJson<SnapshotProfile[]>(profiles.result) ?? []);
+      const byUser = new Map<number, LocalUser>(users.result.map((user: LocalUser) => [user.id, user]));
+      resolve((records.result as StoredLocalCheckIn[])
+        .filter((record) => record.synced === 0 || record.terminal === "REJECTED")
+        .map((record) => withDisplayProfile(record, byYear, byUser, mode.result === "1")));
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function withDisplayProfile(
+  record: StoredLocalCheckIn,
+  profiles: ReadonlyMap<string, SnapshotProfile>,
+  users: ReadonlyMap<number, LocalUser>,
+  snapshotMode: boolean,
+): StoredLocalCheckIn {
+  if (record.displayProfile !== undefined) return record;
+  const displayProfile = snapshotMode || record.snapshotId
+    ? snapshotDisplayUser(profiles, record.userId, record.date)
+    : users.get(record.userId) ?? null;
+  return { ...record, displayProfile };
+}
+
+/** 명부를 교체하기 전에 같은 트랜잭션에서 이전 표시정보를 미전송 원본에 고정한다. */
+export function preserveLocalCheckInProfiles(tx: IDBTransaction): void {
+  const profiles = tx.objectStore("settings").get(SNAPSHOT_PROFILES_KEY);
+  const mode = tx.objectStore("settings").get(SNAPSHOT_MODE_KEY);
+  const users = tx.objectStore("users").getAll();
+  const cursorRequest = tx.objectStore("checkins").openCursor();
+  let byYear: ReadonlyMap<string, SnapshotProfile> | undefined;
+  let byUser: ReadonlyMap<number, LocalUser> | undefined;
+  cursorRequest.onsuccess = () => {
+    const cursor = cursorRequest.result;
+    if (!cursor) return;
+    const record = cursor.value as StoredLocalCheckIn;
+    if ((record.synced === 0 || record.terminal === "REJECTED") && record.displayProfile === undefined) {
+      byYear ??= indexSnapshotProfiles(parseJson<SnapshotProfile[]>(profiles.result) ?? []);
+      byUser ??= new Map<number, LocalUser>(users.result.map((user: LocalUser) => [user.id, user]));
+      cursor.update(withDisplayProfile(record, byYear, byUser, mode.result === "1"));
+    }
+    cursor.continue();
+  };
 }
 
 export type ResetDecision = "ALLOWED" | "NEEDS_FORCED";
@@ -588,22 +644,42 @@ export function decideClientStateReset(counts: PendingCheckInCounts): "FULL" | "
 export const FORCE_RESET_PHRASE = "초기화";
 
 /** 내보내기를 끝내고 확인 문구를 입력했을 때만, 기기 번호까지 포함해 모두 지운다. */
-export async function forceClearLocalData(confirm: { exported: boolean; typed: string }): Promise<void> {
-  if (!confirm.exported) throw new Error("먼저 Excel로 내보내야 합니다.");
+export async function forceClearLocalData(confirm: { exported: readonly StoredLocalCheckIn[] | null; typed: string }): Promise<void> {
+  if (!Array.isArray(confirm.exported)) throw new Error("먼저 Excel로 내보내야 합니다.");
   if (confirm.typed.trim() !== FORCE_RESET_PHRASE) throw new Error(`확인 문구 "${FORCE_RESET_PHRASE}"를 입력하세요.`);
-  await clearAllData();
+  await clearAllData({ exported: confirm.exported, scope: "REVIEWABLE" });
 }
 
-export async function clearAllData(): Promise<void> {
-  invalidateLocalSnapshotCache();
+export async function clearAllData(protection?: {
+  exported: readonly StoredLocalCheckIn[];
+  scope: "PENDING" | "REVIEWABLE";
+}): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const storeNames = ["settings", "users", "eligibleEntries", "checkins", "faceProfiles"] as const;
     const tx = db.transaction([...storeNames], "readwrite");
-    for (const name of storeNames) {
-      tx.objectStore(name).clear();
-    }
-    tx.oncomplete = () => resolve();
+    const clear = () => { for (const name of storeNames) tx.objectStore(name).clear(); };
+    let coverageError: Error | undefined;
+    if (protection) {
+      // 조회와 clear가 같은 쓰기 잠금을 가져야 다른 탭의 삽입이 둘 사이에 끼지 못한다.
+      const fingerprint = (record: StoredLocalCheckIn) => {
+        const copy = { ...record };
+        delete copy.displayProfile;
+        return JSON.stringify(copy);
+      };
+      const covered = new Map(protection.exported.map((record) => [record.id, fingerprint(record)]));
+      const records = tx.objectStore("checkins").getAll();
+      records.onsuccess = () => {
+        const needsBackup = (record: StoredLocalCheckIn) => record.synced === 0 ||
+          (protection.scope === "REVIEWABLE" && record.terminal === "REJECTED");
+        if ((records.result as StoredLocalCheckIn[]).some((record) => needsBackup(record) && covered.get(record.id) !== fingerprint(record))) {
+          coverageError = new Error("내보내기 후 기록이 변경되었습니다. 다시 내보내 주세요.");
+          tx.abort();
+        } else clear();
+      };
+    } else clear();
+    tx.oncomplete = () => { invalidateLocalSnapshotCache(); resolve(); };
     tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(coverageError ?? tx.error ?? new Error("초기화가 중단되었습니다."));
   });
 }

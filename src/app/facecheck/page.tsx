@@ -841,7 +841,7 @@ export default function FaceCheckPage() {
               {result.user && (
                 <span className="text-sm font-bold sm:text-base">
                   {result.user.role === "STUDENT"
-                    ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ${result.user.name}`
+                    ? `${result.user.grade != null && result.user.classNum != null && result.user.number != null ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ` : ""}${result.user.name}`
                     : `${result.user.name} 선생님`}
                 </span>
               )}

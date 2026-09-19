@@ -1,6 +1,7 @@
 import { signOut } from "next-auth/react";
 import {
   DB_NAME,
+  clearAllData,
   decideClientStateReset,
   getPendingCheckInCounts,
   type PendingCheckInCounts,
@@ -79,12 +80,25 @@ export async function clearClientBrowserState(): Promise<ClearClientStateResult>
 
   // 남겨야 할 때는 키오스크 DB를 통째로 둔다(명부·자격·얼굴·근거·설정·기록·기기 번호).
   // 명부만 비우면 로컬 모드 체크인이 전부 실패하고, 복구에 방금 끝낸 관리자 로그인이 필요하다.
-  const keepKioskDb = decideClientStateReset(counts) === "KEEP_KIOSK_DB";
+  let keepKioskDb = decideClientStateReset(counts) === "KEEP_KIOSK_DB";
+  if (!keepKioskDb) {
+    try {
+      await clearAllData({ exported: [], scope: "PENDING" });
+    } catch {
+      keepKioskDb = true;
+      try {
+        counts = await getPendingCheckInCounts();
+      } catch {
+        counts = { unsynced: 1, review: 0 };
+      }
+    }
+  }
 
   await Promise.all([
     clearCaches(),
     unregisterServiceWorkers(),
-    clearIndexedDB(keepKioskDb ? new Set([DB_NAME]) : new Set()),
+    // 지연된 deleteDatabase가 원자 clear 이후 다른 탭이 찍은 기록까지 지우면 안 된다.
+    clearIndexedDB(new Set([DB_NAME])),
   ]);
 
   return { keptCheckIns: keepKioskDb ? counts.unsynced + counts.review : 0 };

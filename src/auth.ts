@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
+import { normalizeEmail } from "@/lib/academic-year/profile-schema";
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin";
@@ -47,11 +48,24 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async signIn({ user, account }) {
       if (account?.provider === "google") {
-        const dbUser = await prisma.user.findUnique({
-          where: { email: user.email! },
-          select: { id: true, role: true, adminLevel: true, sessionVersion: true, accessState: true },
+        const emailKey = normalizeEmail(user.email ?? "");
+        if (!emailKey) return false;
+
+        // 이전 전 null 키도 함께 확인해야 정규화 키가 있는 계정과의 중복을 놓치지 않는다.
+        // 원문을 같은 정규화 함수로 비교하므로 기존 공백 표기도 DB에서 수정할 필요가 없다.
+        const candidates = await prisma.user.findMany({
+          where: { OR: [{ emailKey }, { emailKey: null }] },
+          select: {
+            id: true, email: true, emailKey: true, role: true, adminLevel: true,
+            sessionVersion: true, accessState: true,
+          },
         });
-        if (!dbUser || dbUser.accessState !== "ACTIVE") return false;
+        const matches = candidates.filter(
+          (candidate) => candidate.emailKey === emailKey || normalizeEmail(candidate.email) === emailKey,
+        );
+        if (matches.length !== 1) return false;
+        const dbUser = matches[0];
+        if (dbUser.accessState !== "ACTIVE" || normalizeEmail(dbUser.email) !== emailKey) return false;
         user.dbUserId = dbUser.id;
         user.dbRole = dbUser.role;
         user.dbAdminLevel = dbUser.adminLevel;

@@ -1,8 +1,8 @@
 // src/lib/__tests__/local-checkins-export.test.ts
 import { describe, expect, it } from "vitest";
-import { exportLocalCheckInsXlsx } from "@/lib/local-checkins-export";
+import { buildLocalCheckInsCsv, exportLocalCheckInsXlsx } from "@/lib/local-checkins-export";
 import ExcelJS from "exceljs";
-import { buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
+import { buildUserLabel, toLocalCheckInRow, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import type { LocalUser } from "@/lib/local-db";
 
 describe("buildUserLabel", () => {
@@ -62,6 +62,21 @@ async function loadWorkbook(blob: Blob): Promise<ExcelJS.Workbook> {
 }
 
 describe("exportLocalCheckInsXlsx", () => {
+  it("강제 초기화 백업은 원 ISO 시각과 누락 식사 구분을 포함한 원본 JSON을 보존한다", async () => {
+    const original = { id: 72, userId: 7, date: "2027-02-28", checkedAt: "2027-02-28T03:20:42.123Z", type: "STUDENT" as const, synced: 0, rawLegacy: { synced: false, note: "이전 원본" }, snapshotId: "snap-old", deviceId: "device-old" };
+    const row = toLocalCheckInRow(original, undefined);
+    const wb = await loadWorkbook(await exportLocalCheckInsXlsx([row]));
+    const ws = wb.getWorksheet("로컬 미동기")!;
+    expect(ws.getRow(2).getCell(13).value).toBe("2027-02-28T03:20:42.123Z");
+    expect(JSON.parse(String(ws.getRow(2).getCell(14).value))).toEqual(original);
+    expect(await buildLocalCheckInsCsv([row]).text()).toContain("이전 원본");
+  });
+  it("중식 체크인은 XLSX와 CSV에서 석식으로 바뀌지 않는다", async () => {
+    const row = { ...sampleRows[0], mealKind: "LUNCH" as const };
+    const wb = await loadWorkbook(await exportLocalCheckInsXlsx([row]));
+    expect(wb.getWorksheet("로컬 미동기")!.getRow(2).getCell(6).value).toBe("중");
+    expect(await buildLocalCheckInsCsv([row]).text()).toContain('"중"');
+  });
   it("returns a workbook with a header row only when input is empty", async () => {
     const blob = await exportLocalCheckInsXlsx([]);
     expect(blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -72,7 +87,7 @@ describe("exportLocalCheckInsXlsx", () => {
     const header = ws.getRow(1).values as Array<string | undefined>;
     expect(header.slice(1)).toEqual([
       "IDB ID", "사용자ID", "학년반번호", "이름", "날짜", "식사", "종류", "체크시각(KST)",
-      "상태", "사유", "근거ID", "기기ID",
+      "상태", "사유", "근거ID", "기기ID", "체크시각(ISO)", "로컬 원본(JSON)",
     ]);
   });
 
@@ -82,11 +97,11 @@ describe("exportLocalCheckInsXlsx", () => {
     const ws = wb.getWorksheet("로컬 미동기")!;
     expect(ws.rowCount).toBe(3);
     const row2 = ws.getRow(2).values as Array<unknown>;
-    expect(row2.slice(1)).toEqual([42, 1, "1-2-15", "홍길동", "2026-05-10", "석", "STUDENT", "2026-05-10 18:32:11", "미전송", "", "", ""]);
+    expect(row2.slice(1)).toEqual([42, 1, "1-2-15", "홍길동", "2026-05-10", "석", "STUDENT", "2026-05-10 18:32:11", "미전송", "", "", "", "2026-05-10T09:32:11.000Z", ""]);
     const row3 = ws.getRow(3).values as Array<unknown>;
     expect(row3.slice(1)).toEqual([
       43, 2, "교사", "김선생", "2026-05-10", "조", "WORK", "2026-05-10 09:15:00",
-      "거절 확정", "USER_NOT_FOUND", "snap-1", "device-1",
+      "거절 확정", "USER_NOT_FOUND", "snap-1", "device-1", "2026-05-10T00:15:00.000Z", "",
     ]);
   });
 

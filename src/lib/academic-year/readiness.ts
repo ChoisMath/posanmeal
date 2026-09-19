@@ -1,10 +1,11 @@
 import type { PrismaClient } from "@/generated/prisma/client";
+import { LEGACY_FINGERPRINT_FORMAT, LEGACY_FINGERPRINT_VERSION } from "../../../scripts/academic-year/fingerprint";
 import { assertActor } from "./access";
-import { ACADEMIC_BACKFILL_KEY } from "./backfill";
+import { ACADEMIC_BACKFILL_KEY, checkCurrentBackfill, lockBackfillVerificationSources } from "./backfill";
 import type { Actor } from "./contracts";
 import type { Db, Tx } from "./db";
 import { DomainError } from "./errors";
-import { withAcademicMutation } from "./mutation";
+import { ROSTER_TX, withAcademicMutation } from "./mutation";
 import { invalidateRosterModeCache } from "./roster-mode-cache";
 
 const ENABLE_REQUEST_ID = `enable-academic-${ACADEMIC_BACKFILL_KEY}`;
@@ -22,9 +23,32 @@ export async function requireAcademicReady(db: Db): Promise<void> {
 
 function readIssues(manifest: unknown): string[] {
   if (typeof manifest !== "object" || manifest === null) return ["MANIFEST_UNREADABLE:1"];
-  const issues = (manifest as Record<string, unknown>).issues;
-  if (!Array.isArray(issues)) return ["MANIFEST_UNREADABLE:1"];
-  return issues.filter((value): value is string => typeof value === "string");
+  const source = manifest as Record<string, unknown>;
+  const issues = source.issues;
+  if (!Array.isArray(issues) || issues.some((value) => typeof value !== "string")) return ["MANIFEST_UNREADABLE:1"];
+  if (source.fingerprintFormat !== LEGACY_FINGERPRINT_FORMAT || source.fingerprintVersion !== LEGACY_FINGERPRINT_VERSION) {
+    return [...issues, "FINGERPRINT_FORMAT_MISMATCH:1"];
+  }
+  return issues;
+}
+
+export type AcademicReadiness = { mode: string; canEnable: boolean; issues: string[] };
+
+async function currentReadiness(db: Db): Promise<AcademicReadiness> {
+  const { mode } = await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
+  if (mode === "READY") return { mode, canEnable: false, issues: [] };
+  const { backfill, issues } = await checkCurrentBackfill(db);
+  if (!backfill || backfill.state !== "VERIFIED" || backfill.verifiedAt === null) issues.push("BACKFILL_NOT_VERIFIED:1");
+  if (backfill) issues.push(...readIssues(backfill.sourceManifest));
+  const uniqueIssues = [...new Set(issues)].sort();
+  return { mode, canEnable: uniqueIssues.length === 0, issues: uniqueIssues };
+}
+
+export async function inspectAcademicMode(db: PrismaClient): Promise<AcademicReadiness> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    return currentReadiness(tx);
+  }, { ...ROSTER_TX, isolationLevel: "RepeatableRead" });
 }
 
 /**
@@ -45,8 +69,10 @@ export async function enableAcademicMode(db: PrismaClient, actor: Actor): Promis
     },
     (tx: Tx) => assertActor(tx, actor, "MAIN"),
     async (tx: Tx) => {
-      const backfill = await tx.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } });
-      if (!backfill || backfill.state !== "VERIFIED" || readIssues(backfill.sourceManifest).length > 0) {
+      await lockBackfillVerificationSources(tx);
+      const readiness = await currentReadiness(tx);
+      if (readiness.mode === "READY") return { changed: 0, ids: [1] };
+      if (!readiness.canEnable) {
         throw new DomainError("NOT_READY", "초기 이전 검증이 끝나야 학년도 기능을 켤 수 있습니다.");
       }
 
@@ -55,6 +81,6 @@ export async function enableAcademicMode(db: PrismaClient, actor: Actor): Promis
     },
   );
 
-  // 체크인 경로가 보는 캐시를 즉시 버린다. 전환은 운영 중 한 번뿐이라 여기 한 줄로 충분하다.
+  // 현재 프로세스만 무효화한다. 별도 CLI로 전환하면 앱 인스턴스는 재시작 또는 TTL 만료가 필요하다.
   invalidateRosterModeCache();
 }

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { LocalUser, StoredLocalCheckIn } from "@/lib/local-db";
 import { formatDateTimeSecondsKST } from "@/lib/timezone";
 import { Info } from "lucide-react";
+import { MEAL_SHORT } from "@/lib/meal-plan";
 
 export interface LocalCheckInRow {
   id: number;
@@ -19,6 +20,7 @@ export interface LocalCheckInRow {
   reason?: string;
   snapshotId?: string;
   deviceId?: string;
+  sourceJson?: string;
 }
 
 export type LocalCheckInStatus = "미전송" | "검토 대기" | "거절 확정";
@@ -32,11 +34,14 @@ export function toLocalCheckInRow(
   record: StoredLocalCheckIn,
   user: LocalUser | undefined,
 ): LocalCheckInRow {
+  const displayUser = record.displayProfile !== undefined
+    ? record.displayProfile ?? undefined
+    : record.snapshotId ? undefined : user;
   return {
     id: record.id!,
     userId: record.userId,
-    userLabel: buildUserLabel(user, record.userId),
-    name: user?.name ?? "-",
+    userLabel: buildUserLabel(displayUser, record.userId),
+    name: displayUser?.name ?? "-",
     date: record.date,
     mealKind: record.mealKind,
     type: record.type,
@@ -45,6 +50,7 @@ export function toLocalCheckInRow(
     reason: record.reviewReason,
     snapshotId: record.snapshotId,
     deviceId: record.deviceId,
+    sourceJson: JSON.stringify(record),
   };
 }
 
@@ -112,9 +118,9 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
                 <td className="sticky left-0 z-[1] bg-background px-3 py-2">{r.userLabel}</td>
                 <td className="px-3 py-2">{r.name}</td>
                 <td className="px-3 py-2">{r.date}</td>
-                <td className="px-3 py-2">{r.mealKind === undefined ? "-" : r.mealKind === "BREAKFAST" ? "조" : "석"}</td>
+                <td className="px-3 py-2">{r.mealKind === undefined ? "-" : MEAL_SHORT[r.mealKind]}</td>
                 <td className="px-3 py-2">{r.type}</td>
-                <td className="px-3 py-2">{formatDateTimeSecondsKST(new Date(r.checkedAt)).slice(11)}</td>
+                <td className="px-3 py-2">{Number.isNaN(Date.parse(r.checkedAt)) ? "시각 확인 필요" : formatDateTimeSecondsKST(new Date(r.checkedAt)).slice(11)}</td>
                 <td className={`px-3 py-2 ${r.status === "거절 확정" ? "text-red-600 dark:text-red-400" : ""}`}>{r.status}</td>
                 <td className="px-3 py-2 text-muted-foreground" title={r.reason}>{r.reason ?? "-"}</td>
                 <td className="px-3 py-2 text-muted-foreground">{r.id}</td>

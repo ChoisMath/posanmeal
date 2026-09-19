@@ -7,6 +7,7 @@ import { TIMEZONE } from "@/lib/timezone";
 import {
   LocalSnapshotError,
   guardLocalCheckIn,
+  localDisplayUser,
   type LocalSnapshotState,
   type SnapshotFreshness,
 } from "@/lib/academic-year/local-snapshot";
@@ -90,7 +91,9 @@ export async function runLocalFaceCheckIn(
   if (!user) return { success: false, matched: false, ...score, error: "명단에 없는 사용자입니다. 동기화가 필요합니다." };
 
   const date = localDateKey(input.now);
-  const faceUser = toFaceUser(user);
+  const state = await repo.getSnapshotState();
+  const displayProfile = localDisplayUser(state, user, date);
+  const faceUser = toFaceUser(displayProfile ?? { id: user.id, role: user.role, name: "학년도 정보 확인 필요" });
   if (user.role !== "STUDENT" && user.role !== "TEACHER") {
     return { success: false, error: "체크인할 수 없는 사용자입니다.", errorCode: "ROLE_NOT_ALLOWED" };
   }
@@ -105,7 +108,6 @@ export async function runLocalFaceCheckIn(
 
   // 확인 창을 띄우기 전에 한 번, 저장 직전에 다시 판정한다. 확인창이 떠 있는 동안
   // 자정이 지나거나 학년도가 바뀔 수 있다.
-  const state = await repo.getSnapshotState();
   const judge = (): SnapshotFreshness | null | FaceCheckResult => {
     try {
       return guardLocalCheckIn(state, { now: now(), userId: user.id, dateKey: date });
@@ -175,6 +177,7 @@ export async function runLocalFaceCheckIn(
     checkedAt,
     type,
     synced: 0,
+    displayProfile,
     deviceId: await repo.getDeviceId(),
     ...(state.snapshot ? { snapshotId: state.snapshot.header.id } : {}),
     ...(stale ? { stale: true } : {}),
