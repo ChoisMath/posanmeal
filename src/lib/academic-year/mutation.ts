@@ -121,7 +121,7 @@ export async function withUserMutation<T extends Summary>(
     // control 행을 공유 잠금만 하므로 같은 requestId의 두 트랜잭션이 나란히
     // 재전송 검사를 통과할 수 있다. 진 쪽은 RosterMutation PK 충돌로 롤백되며,
     // 트랜잭션이 이미 중단된 상태라 기록은 트랜잭션 밖에서 다시 읽는다.
-    if (!isRosterMutationConflict(error)) throw error;
+    if (!isRequestIdConflict(error)) throw error;
 
     const stored = await db.rosterMutation.findUnique({ where: { requestId: input.requestId } });
     if (!stored) throw error;
@@ -129,8 +129,30 @@ export async function withUserMutation<T extends Summary>(
   }
 }
 
-function isRosterMutationConflict(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+const ROSTER_MUTATION_PK = "RosterMutation_pkey";
+
+function readString(source: unknown, key: string): string | undefined {
+  if (typeof source !== "object" || source === null) return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function readObject(source: unknown, key: string): unknown {
+  if (typeof source !== "object" || source === null) return undefined;
+  return (source as Record<string, unknown>)[key];
+}
+
+/**
+ * write가 일으킨 다른 unique 위반(좌석·emailKey 등)을 재전송으로 오인하지 않도록,
+ * RosterMutation의 requestId PK 위반임이 증명될 때만 참이다. pg 어댑터는 원본
+ * 제약 이름을 meta.driverAdapterError.cause.originalMessage에 담아 준다.
+ */
+function isRequestIdConflict(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
+  if (readString(error.meta, "modelName") !== "RosterMutation") return false;
+
+  const cause = readObject(readObject(error.meta, "driverAdapterError"), "cause");
+  return readString(cause, "originalMessage")?.includes(ROSTER_MUTATION_PK) ?? false;
 }
 
 async function runUserMutation<T extends Summary>(

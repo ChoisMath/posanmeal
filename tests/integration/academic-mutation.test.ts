@@ -259,6 +259,59 @@ describe("guarded mutations", () => {
     ).rejects.toMatchObject({ code: "REQUEST_REUSED" });
   });
 
+  it("propagates an unrelated unique violation raised inside write", async () => {
+    const decision = {
+      year: ACADEMIC_TEST_SEED_YEAR,
+      userId: fixture.studentId,
+      decision: "RESTORE",
+      sourceVersion: 0,
+    };
+    await db.rosterDecision.create({ data: decision });
+
+    const input = {
+      actor: MAIN,
+      requestId: "write-conflict",
+      userId: fixture.studentId,
+      expectedRowVersion: 0,
+      kind: "EDIT",
+      payloadHash: "hash",
+    };
+
+    await expect(
+      withUserMutation(db, input, allow, async (tx) => {
+        await tx.rosterDecision.create({ data: decision });
+        return { changed: 1, ids: [fixture.studentId] };
+      }),
+    ).rejects.toMatchObject({ code: "P2002", meta: { modelName: "RosterDecision" } });
+
+    expect(await db.rosterMutation.count()).toBe(0);
+    const user = await db.user.findUniqueOrThrow({ where: { id: fixture.studentId } });
+    expect(user.profileVersion).toBe(0);
+  });
+
+  it("replays a successful request without running write again", async () => {
+    const input = {
+      actor: MAIN,
+      requestId: "row-replay",
+      userId: fixture.studentId,
+      expectedRowVersion: 0,
+      kind: "EDIT",
+      payloadHash: "hash",
+    };
+    let writes = 0;
+    const write = async () => {
+      writes += 1;
+      return { changed: 2, ids: [fixture.studentId] };
+    };
+
+    const first = await withUserMutation(db, input, allow, write);
+    const second = await withUserMutation(db, input, allow, write);
+
+    expect(writes).toBe(1);
+    expect(second.receipt).toEqual(first.receipt);
+    expect(await db.rosterMutation.count()).toBe(1);
+  });
+
   it("re-checks authorization before returning a replayed receipt", async () => {
     const version = await controlVersion(db);
     const input = {
