@@ -28,6 +28,7 @@ import {
   type MealApplyMethod,
 } from "@/lib/meal-plan";
 import { todayKST } from "@/lib/timezone";
+import { errorTextOf } from "@/lib/fetcher";
 
 interface ApplicationFormProps {
   applicationId?: number;
@@ -281,7 +282,7 @@ export default function ApplicationForm({ applicationId }: ApplicationFormProps)
 
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error ?? "저장에 실패했습니다.");
+        toast.error(errorTextOf(json, "저장에 실패했습니다."));
         return;
       }
       toast.success(isEdit ? "공고가 수정되었습니다." : "공고가 생성되었습니다.");

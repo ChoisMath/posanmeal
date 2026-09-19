@@ -27,6 +27,7 @@ import {
   mapServerError,
   type MealWindowsForm,
 } from "@/lib/meal-windows-validation";
+import { errorTextOf } from "@/lib/fetcher";
 import {
   parseFaceMatchForm,
   toFaceMatchForm,
@@ -685,7 +686,7 @@ export default function AdminPage() {
     if (!confirm(`"${app.title}" 공고를 삭제하시겠습니까? 모든 신청 데이터가 삭제됩니다.`)) return;
     const res = await fetch(`/api/admin/applications/${app.id}`, { method: "DELETE" });
     if (res.ok) { toast.success("공고가 삭제되었습니다."); fetchApps(); }
-    else { const d = await res.json(); toast.error(d.error || "삭제 실패"); }
+    else { const d = await res.json(); toast.error(errorTextOf(d, "삭제 실패")); }
   }
 
   const {
@@ -1090,7 +1091,7 @@ export default function AdminPage() {
                                   if (!confirm(`"${app.title}" 공고를 마감하시겠습니까?`)) return;
                                   const res = await fetch(`/api/admin/applications/${app.id}/close`, { method: "POST" });
                                   if (res.ok) { toast.success("공고가 마감되었습니다."); fetchApps(); }
-                                  else { const d = await res.json(); toast.error(d.error || "마감 실패"); }
+                                  else { const d = await res.json(); toast.error(errorTextOf(d, "마감 실패")); }
                                 }}
                               >
                                 마감

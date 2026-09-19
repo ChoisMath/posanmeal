@@ -5,7 +5,11 @@ import { canWriteAdmin } from "@/lib/permissions";
 import { studentNumberOf } from "@/lib/meal-plan";
 import { buildStatsWorkbook, type MealKind } from "@/lib/meal-stats-excel";
 import { toDateKey } from "@/lib/meal-plan-server";
-import { buildTemplateColumns, columnHeader } from "@/lib/meal-template-columns";
+import {
+  buildTemplateColumns,
+  columnHeader,
+  TEMPLATE_FIXED_HEADERS,
+} from "@/lib/meal-template-columns";
 import type { MealApplyMethod } from "@/lib/meal-plan";
 
 export async function GET(
@@ -46,7 +50,7 @@ export async function GET(
         }),
         prisma.user.findMany({
           where: { role: "STUDENT" },
-          select: { id: true, name: true, grade: true, classNum: true, number: true },
+          select: { id: true, name: true, email: true, grade: true, classNum: true, number: true },
           orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }],
         }),
         prisma.mealRegistration.findMany({
@@ -110,18 +114,20 @@ export async function GET(
 
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet("일괄신청양식");
-      const totalCols = 4 + columns.length;
+      const FIXED_HEADERS = TEMPLATE_FIXED_HEADERS;
+      const firstMealCol = FIXED_HEADERS.length + 1;
+      const totalCols = FIXED_HEADERS.length + columns.length;
 
       // 1행: 헤더
       const headerRow = sheet.getRow(1);
-      ["학년", "반", "번호", "이름"].forEach((h, i) => {
+      FIXED_HEADERS.forEach((h, i) => {
         const cell = headerRow.getCell(i + 1);
         cell.value = h;
         cell.font = { bold: true };
         cell.alignment = { horizontal: "center" };
       });
       columns.forEach((col, i) => {
-        const cell = headerRow.getCell(5 + i);
+        const cell = headerRow.getCell(firstMealCol + i);
         cell.value = columnHeader(col);
         cell.font = { bold: true };
         cell.alignment = { horizontal: "center" };
@@ -135,28 +141,31 @@ export async function GET(
       // 2행: 안내문
       sheet.mergeCells(2, 1, 2, Math.max(totalCols, 7));
       const guideCell = sheet.getCell(2, 1);
+      const yearLabel = application.academicYear != null ? `${application.academicYear}학년도 ` : "";
       guideCell.value =
-        "신청할 날짜/요일에 O 표시. O를 모두 지워도 기존 신청은 취소되지 않습니다 (취소는 신청 명단에서).";
+        `${yearLabel}신청할 날짜/요일에 O 표시. 이메일 열은 지우거나 바꾸지 마세요. ` +
+        "O를 모두 지워도 기존 신청은 취소되지 않습니다 (취소는 신청 명단에서).";
       guideCell.alignment = { horizontal: "left" };
       guideCell.font = { italic: true, color: { argb: "FF888888" } };
 
       // 열 너비
-      [6, 6, 6, 14].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
+      [30, 6, 6, 6, 14].forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
       columns.forEach((col, i) => {
-        sheet.getColumn(5 + i).width = col.type === "YN" ? 8 : 12;
+        sheet.getColumn(firstMealCol + i).width = col.type === "YN" ? 8 : 12;
       });
 
       // 3행~: 학생 목록 + 프리필
       let rowIdx = 3;
       for (const s of allStudents) {
         const r = sheet.getRow(rowIdx++);
-        r.getCell(1).value = s.grade;
-        r.getCell(2).value = s.classNum;
-        r.getCell(3).value = s.number;
-        r.getCell(4).value = s.name;
+        r.getCell(1).value = s.email;
+        r.getCell(2).value = s.grade;
+        r.getCell(3).value = s.classNum;
+        r.getCell(4).value = s.number;
+        r.getCell(5).value = s.name;
         const p = prefillByUser.get(s.id);
         columns.forEach((col, i) => {
-          const cell = r.getCell(5 + i);
+          const cell = r.getCell(firstMealCol + i);
           let marked = false;
           if (p) {
             if (col.type === "YN") marked = p.appliedKinds.has(col.kind);

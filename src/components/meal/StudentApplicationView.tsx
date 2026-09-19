@@ -14,6 +14,7 @@ import {
 import { studentNumberOf } from "@/lib/meal-plan";
 import { formatDateTimeKST } from "@/lib/timezone";
 import { useUser } from "@/hooks/useUser";
+import { errorTextOf } from "@/lib/fetcher";
 
 interface ApplicationDetail {
   id: number;
@@ -99,7 +100,7 @@ export function StudentApplicationView({
         onBack();
       } else {
         const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "취소에 실패했습니다.");
+        toast.error(errorTextOf(data, "취소에 실패했습니다."));
       }
     } catch {
       toast.error("취소 중 오류가 발생했습니다.");
@@ -128,7 +129,7 @@ export function StudentApplicationView({
         onBack();
       } else {
         const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "신청에 실패했습니다.");
+        toast.error(errorTextOf(data, "신청에 실패했습니다."));
       }
     } catch {
       toast.error("신청 중 오류가 발생했습니다.");

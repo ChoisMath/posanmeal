@@ -19,7 +19,7 @@ import { AdminApplyDialog, type AdminApplyMode } from "./AdminApplyDialog";
 import { MEAL_THEME } from "@/components/meal/meal-ui";
 import { genderLabel } from "@/lib/gender";
 import { formatDateTimeKST } from "@/lib/timezone";
-import { fetcher } from "@/lib/fetcher";
+import { fetcher, errorTextOf } from "@/lib/fetcher";
 
 // ---------- Types ----------
 
@@ -182,7 +182,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error ?? "업로드에 실패했습니다.");
+        toast.error(errorTextOf(json, "업로드에 실패했습니다."));
         return;
       }
       toast.success(
@@ -210,7 +210,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
       );
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error ?? "상태 변경에 실패했습니다.");
+        toast.error(errorTextOf(json, "상태 변경에 실패했습니다."));
         return;
       }
       toast.success(nextStatus === "CANCELLED" ? "신청이 취소되었습니다." : "신청이 복원되었습니다.");
@@ -229,7 +229,7 @@ export default function ApplicationStats({ applicationId }: ApplicationStatsProp
       );
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error ?? "삭제에 실패했습니다.");
+        toast.error(errorTextOf(json, "삭제에 실패했습니다."));
         return;
       }
       toast.success("신청이 삭제되었습니다.");

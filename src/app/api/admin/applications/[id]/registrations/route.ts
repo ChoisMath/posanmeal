@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/auth";
-import { canWriteAdmin, canReadAdmin } from "@/lib/permissions";
 import { studentRegisterSchema } from "@/lib/schemas/meal-plan";
 import { resolveRegistrationSelections, writeRegistration } from "@/lib/meal-plan-server";
+import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
+import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
+import { getRegistrationContext } from "@/lib/academic-year/registration-context";
+import { requireActor } from "@/lib/academic-year/request-actor";
 import { z } from "zod";
 
 // Admin body: no signature, just userId + meals
@@ -12,20 +14,13 @@ const adminRegisterSchema = z.object({
   meals: studentRegisterSchema.shape.meals,
 });
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  if (!canReadAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return routeResponse(() => listRegistrations(params));
+}
 
-  const { id } = await params;
-  const applicationId = parseInt(id, 10);
-  if (Number.isNaN(applicationId)) {
-    return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
-  }
+async function listRegistrations(params: Promise<{ id: string }>): Promise<NextResponse> {
+  await requireActor("READ_ADMIN");
+  const applicationId = parseIdParam((await params).id);
 
   const application = await prisma.mealApplication.findUnique({
     where: { id: applicationId },
@@ -115,63 +110,78 @@ export async function GET(
   return NextResponse.json({ application, registrations });
 }
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  if (!canWriteAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return routeResponse(async () => {
+    const actor = await requireActor("WRITE_ADMIN");
+    const applicationId = parseIdParam((await params).id);
 
-  const { id } = await params;
-  const applicationId = parseInt(id, 10);
-  if (Number.isNaN(applicationId)) {
-    return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
-  }
+    const parsed = adminRegisterSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
+    }
+    const input = parsed.data;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
-  }
+    const app = await prisma.mealApplication.findUnique({
+      where: { id: applicationId },
+      select: { id: true },
+    });
+    if (!app) {
+      return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
+    }
 
-  const parsed = adminRegisterSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
-  }
-  const input = parsed.data;
+    const written = await withEligibilityMutation<
+      { registrationId: number; created: boolean } | { error: string }
+    >(
+      prisma,
+      actor,
+      {
+        scope: "REGISTRATION",
+        applicationId,
+        userId: input.userId,
+        recorded: (result) => !("error" in result),
+      },
+      async (tx) => {
+        const existing = await tx.mealRegistration.findUnique({
+          where: {
+            applicationId_userId: { applicationId, userId: input.userId },
+          },
+          select: { status: true },
+        });
+        const intent = existing?.status === "APPROVED" ? "EDIT" : existing ? "RESTORE" : "CREATE";
 
-  const [app, targetUser] = await Promise.all([
-    prisma.mealApplication.findUnique({ where: { id: applicationId }, select: { id: true } }),
-    prisma.user.findUnique({
-      where: { id: input.userId },
-      select: { role: true, grade: true },
-    }),
-  ]);
+        const context = await getRegistrationContext(
+          tx,
+          actor,
+          applicationId,
+          input.userId,
+          intent,
+        );
+        const resolved = await resolveRegistrationSelections(
+          applicationId,
+          context.profile.grade ?? 0,
+          input.meals,
+          context.resolveContext,
+        );
+        if (!resolved.ok) return { error: resolved.error };
 
-  if (!app) {
-    return NextResponse.json({ error: "공고를 찾을 수 없습니다." }, { status: 404 });
-  }
+        return writeRegistration(
+          tx,
+          applicationId,
+          input.userId,
+          "(관리자 등록)",
+          resolved.resolved,
+          "ADMIN",
+        );
+      },
+    );
 
-  if (!targetUser || targetUser.role !== "STUDENT" || targetUser.grade == null) {
-    return NextResponse.json({ error: "학생 정보가 올바르지 않습니다." }, { status: 400 });
-  }
+    if ("error" in written) {
+      return NextResponse.json({ error: written.error }, { status: 400 });
+    }
 
-  const resolveResult = await resolveRegistrationSelections(
-    applicationId,
-    targetUser.grade,
-    input.meals,
-  );
-
-  if (!resolveResult.ok) {
-    return NextResponse.json({ error: resolveResult.error }, { status: 400 });
-  }
-
-  const { registrationId, created } = await prisma.$transaction((tx) =>
-    writeRegistration(tx, applicationId, input.userId, "(관리자 등록)", resolveResult.resolved, "ADMIN"),
-  );
-
-  return NextResponse.json({ registration: { id: registrationId } }, { status: created ? 201 : 200 });
+    return NextResponse.json(
+      { registration: { id: written.registrationId } },
+      { status: written.created ? 201 : 200 },
+    );
+  });
 }

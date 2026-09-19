@@ -1,5 +1,6 @@
-import type { PrismaClient } from "@/generated/prisma/client";
+import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { Actor } from "@/lib/academic-year/contracts";
+import { adminApplicationSchema, type AdminApplicationInput } from "@/lib/schemas/meal-plan";
 import { backfill2026, verifyBackfill } from "@/lib/academic-year/backfill";
 import { enableAcademicMode } from "@/lib/academic-year/readiness";
 import type { Client } from "pg";
@@ -60,4 +61,31 @@ export async function prepareAcademicFixture(db: PrismaClient, pgClient?: Client
   } finally {
     if (ownsClient) await client.end();
   }
+}
+
+export type FixtureApplication = Prisma.MealApplicationGetPayload<{
+  include: { meals: true; mealDates: true };
+}>;
+
+/** 저장된 공고를 그대로 다시 저장할 수 있는 입력으로 되돌린다. */
+export function applicationInputFromFixture(app: FixtureApplication): AdminApplicationInput {
+  return adminApplicationSchema.parse({
+    academicYear: app.academicYear,
+    subject: app.title,
+    description: app.description ?? "",
+    startYear: app.startYear,
+    startMonth: app.startMonth,
+    monthCount: app.monthCount,
+    applyStartAt: app.applyStartAt?.toISOString(),
+    applyEndAt: app.applyEndAt?.toISOString(),
+    meals: app.meals.map((meal) => ({
+      mealKind: meal.mealKind,
+      price: meal.price,
+      exemptionSelectable: meal.exemptionSelectable,
+      method: meal.method,
+      dates: app.mealDates
+        .filter((day) => day.mealKind === meal.mealKind)
+        .map((day) => ({ grade: day.grade, date: day.date.toISOString().slice(0, 10) })),
+    })),
+  });
 }

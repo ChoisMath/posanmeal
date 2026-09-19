@@ -1,40 +1,18 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { studentRegisterSchema } from "@/lib/schemas/meal-plan";
 import { resolveRegistrationSelections, writeRegistration } from "@/lib/meal-plan-server";
+import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
+import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
+import { getRegistrationContext } from "@/lib/academic-year/registration-context";
+import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const { id } = await params;
-  const applicationId = parseInt(id, 10);
-  if (Number.isNaN(applicationId)) {
-    return NextResponse.json({ error: "잘못된 요청입니다.", errorCode: "INVALID_BODY" }, { status: 400 });
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "잘못된 요청입니다.", errorCode: "INVALID_BODY" }, { status: 400 });
-  }
-
-  const parsed = studentRegisterSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "잘못된 요청입니다.", errorCode: "INVALID_BODY" }, { status: 400 });
-  }
-  const input = parsed.data;
-
+/** 접수 기간 밖이면 학생 경로에서는 신청도 취소도 받지 않는다. */
+async function assertApplyWindow(applicationId: number, message: string, errorCode?: string) {
   const now = new Date();
-  const app = await prisma.mealApplication.findUnique({ where: { id: applicationId } });
-
+  const app = await prisma.mealApplication.findUnique({
+    where: { id: applicationId },
+  });
   if (
     !app ||
     app.status !== "OPEN" ||
@@ -43,76 +21,127 @@ export async function POST(
     now < app.applyStartAt ||
     now > app.applyEndAt
   ) {
-    return NextResponse.json({ error: "신청 기간이 아닙니다." }, { status: 400 });
+    return NextResponse.json(errorCode ? { error: message, errorCode } : { error: message }, {
+      status: 400,
+    });
   }
-
-  const dbUser = await prisma.user.findUnique({
-    where: { id: session.user.dbUserId },
-    select: { role: true, grade: true },
-  });
-
-  if (!dbUser || dbUser.role !== "STUDENT" || dbUser.grade == null) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  const resolveResult = await resolveRegistrationSelections(
-    applicationId,
-    dbUser.grade,
-    input.meals,
-  );
-
-  if (!resolveResult.ok) {
-    return NextResponse.json({ error: resolveResult.error }, { status: 400 });
-  }
-
-  const { registrationId, created } = await prisma.$transaction((tx) =>
-    writeRegistration(tx, applicationId, session.user.dbUserId, input.signature, resolveResult.resolved),
-  );
-
-  return NextResponse.json({ registration: { id: registrationId } }, { status: created ? 201 : 200 });
+  return null;
 }
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return routeResponse(async () => {
+    const actor = await requireActor("STUDENT");
+    const userId = selfUserId(actor);
+    const applicationId = parseIdParam((await params).id);
 
-  const { id } = await params;
-  const applicationId = parseInt(id, 10);
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: "잘못된 요청입니다.", errorCode: "INVALID_BODY" },
+        { status: 400 },
+      );
+    }
 
-  const now = new Date();
-  const app = await prisma.mealApplication.findUnique({ where: { id: applicationId } });
+    const parsed = studentRegisterSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "잘못된 요청입니다.", errorCode: "INVALID_BODY" },
+        { status: 400 },
+      );
+    }
+    const input = parsed.data;
 
-  if (
-    !app ||
-    app.status !== "OPEN" ||
-    !app.applyStartAt ||
-    !app.applyEndAt ||
-    now < app.applyStartAt ||
-    now > app.applyEndAt
-  ) {
-    return NextResponse.json(
-      { error: "신청 취소 기간이 아닙니다.", errorCode: "OUT_OF_APPLY_WINDOW" },
-      { status: 400 },
+    const outOfWindow = await assertApplyWindow(applicationId, "신청 기간이 아닙니다.");
+    if (outOfWindow) return outOfWindow;
+
+    const written = await withEligibilityMutation<
+      { registrationId: number; created: boolean } | { error: string }
+    >(
+      prisma,
+      actor,
+      {
+        scope: "REGISTRATION",
+        applicationId,
+        userId,
+        recorded: (result) => !("error" in result),
+      },
+      async (tx) => {
+        const existing = await tx.mealRegistration.findUnique({
+          where: { applicationId_userId: { applicationId, userId } },
+          select: { status: true },
+        });
+        const intent = existing?.status === "APPROVED" ? "EDIT" : existing ? "RESTORE" : "CREATE";
+
+        const context = await getRegistrationContext(tx, actor, applicationId, userId, intent);
+        const resolved = await resolveRegistrationSelections(
+          applicationId,
+          context.profile.grade ?? 0,
+          input.meals,
+          context.resolveContext,
+        );
+        if (!resolved.ok) return { error: resolved.error };
+
+        return writeRegistration(tx, applicationId, userId, input.signature, resolved.resolved);
+      },
     );
-  }
 
-  const reg = await prisma.mealRegistration.findUnique({
-    where: { applicationId_userId: { applicationId, userId: session.user.dbUserId } },
+    if ("error" in written) {
+      return NextResponse.json({ error: written.error }, { status: 400 });
+    }
+
+    return NextResponse.json(
+      { registration: { id: written.registrationId } },
+      { status: written.created ? 201 : 200 },
+    );
   });
+}
 
-  if (!reg || reg.status !== "APPROVED") {
-    return NextResponse.json({ error: "신청 내역이 없습니다." }, { status: 404 });
-  }
+export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  return routeResponse(async () => {
+    const actor = await requireActor("STUDENT");
+    const userId = selfUserId(actor);
+    const applicationId = parseIdParam((await params).id);
 
-  await prisma.mealRegistration.update({
-    where: { id: reg.id },
-    data: { status: "CANCELLED", cancelledAt: new Date(), cancelledBy: "STUDENT" },
+    const outOfWindow = await assertApplyWindow(
+      applicationId,
+      "신청 취소 기간이 아닙니다.",
+      "OUT_OF_APPLY_WINDOW",
+    );
+    if (outOfWindow) return outOfWindow;
+
+    const cancelled = await withEligibilityMutation<boolean>(
+      prisma,
+      actor,
+      {
+        scope: "REGISTRATION",
+        applicationId,
+        userId,
+        recorded: (done) => done,
+      },
+      async (tx) => {
+        const reg = await tx.mealRegistration.findUnique({
+          where: { applicationId_userId: { applicationId, userId } },
+        });
+        if (!reg || reg.status !== "APPROVED") return false;
+
+        await getRegistrationContext(tx, actor, applicationId, userId, "CANCEL");
+        await tx.mealRegistration.update({
+          where: { id: reg.id },
+          data: {
+            status: "CANCELLED",
+            cancelledAt: new Date(),
+            cancelledBy: "STUDENT",
+          },
+        });
+        return true;
+      },
+    );
+
+    if (!cancelled) {
+      return NextResponse.json({ error: "신청 내역이 없습니다." }, { status: 404 });
+    }
+    return NextResponse.json({ success: true });
   });
-
-  return NextResponse.json({ success: true });
 }

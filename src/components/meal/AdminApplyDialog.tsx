@@ -25,7 +25,7 @@ import {
 } from "./ApplicationApplyForm";
 import type { MealKind, MealApplyMethod } from "@/lib/meal-plan";
 import { formatDateTimeKST } from "@/lib/timezone";
-import { fetcher } from "@/lib/fetcher";
+import { fetcher, errorTextOf } from "@/lib/fetcher";
 
 interface TargetUser {
   id: number;
@@ -153,7 +153,7 @@ export function AdminApplyDialog({
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(json.error ?? "등록에 실패했습니다.");
+        toast.error(errorTextOf(json, "등록에 실패했습니다."));
         return;
       }
       toast.success(isEdit ? "신청이 수정되었습니다." : "신청이 등록되었습니다.");

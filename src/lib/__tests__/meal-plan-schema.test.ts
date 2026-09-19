@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { adminApplicationSchema, studentRegisterSchema } from "@/lib/schemas/meal-plan";
+import {
+  adminApplicationSchema,
+  studentRegisterSchema,
+  YEAR_SPAN_MESSAGE,
+} from "@/lib/schemas/meal-plan";
 
 const validAdmin = {
   subject: "급식신청",
@@ -75,6 +79,71 @@ describe("adminApplicationSchema", () => {
       adminApplicationSchema.safeParse({
         ...validAdmin,
         meals: [],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("adminApplicationSchema 학년도 범위", () => {
+  it("학년도를 주지 않으면 범위 검사를 하지 않는다 (PREPARING 호환)", () => {
+    expect(adminApplicationSchema.safeParse(validAdmin).data?.academicYear).toBeUndefined();
+  });
+
+  it("학년도 안(3월~다음 해 2월)이면 통과", () => {
+    expect(
+      adminApplicationSchema.safeParse({
+        ...validAdmin,
+        academicYear: 2026,
+        startYear: 2027,
+        startMonth: 1,
+        meals: [
+          {
+            mealKind: "DINNER",
+            price: 0,
+            exemptionSelectable: false,
+            method: "DATE",
+            dates: [{ grade: 1, date: "2027-01-15" }],
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("2월에서 3월로 넘어가는 월 범위는 거절", () => {
+    const parsed = adminApplicationSchema.safeParse({
+      ...validAdmin,
+      academicYear: 2026,
+      startYear: 2027,
+      startMonth: 2,
+      monthCount: 2,
+      meals: [
+        {
+          mealKind: "DINNER",
+          price: 0,
+          exemptionSelectable: false,
+          method: "DATE",
+          dates: [{ grade: 1, date: "2027-02-10" }],
+        },
+      ],
+    });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.some((i) => i.message === YEAR_SPAN_MESSAGE)).toBe(true);
+  });
+
+  it("개설일이 학년도 밖이면 거절", () => {
+    expect(
+      adminApplicationSchema.safeParse({
+        ...validAdmin,
+        academicYear: 2025,
+        meals: [
+          {
+            mealKind: "DINNER",
+            price: 0,
+            exemptionSelectable: false,
+            method: "DATE",
+            dates: [{ grade: 1, date: "2026-07-21" }],
+          },
+        ],
       }).success,
     ).toBe(false);
   });

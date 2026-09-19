@@ -3,6 +3,11 @@ import { dateKeyToUtcDate } from "@/lib/date-range";
 import type { AdminApplicationInput, StudentRegisterInput } from "@/lib/schemas/meal-plan";
 import { buildAppTitle, monthKeyOf, weekdayOf, MEAL_LABEL } from "@/lib/meal-plan";
 import type { MealKind } from "@/lib/meal-plan";
+import type { Actor } from "@/lib/academic-year/contracts";
+import { DomainError } from "@/lib/academic-year/errors";
+import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
+import { getAcademicProfiles } from "@/lib/academic-year/profile-service";
+import { gradeFor, resolveApplicationYear, rosterMode } from "@/lib/academic-year/registration-context";
 
 type PrismaTx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
@@ -187,65 +192,186 @@ export async function writeRegistration(
 // Application management
 // ──────────────────────────────────────────────
 
-export async function saveApplication(input: AdminApplicationInput, id?: number) {
-  return prisma.$transaction(async (tx) => {
-    const data = {
-      title: buildAppTitle(input.startYear, input.startMonth, input.subject),
-      description: input.description,
-      startYear: input.startYear,
-      startMonth: input.startMonth,
-      monthCount: input.monthCount,
-      applyStartAt: new Date(input.applyStartAt),
-      applyEndAt: new Date(input.applyEndAt),
-    };
+/**
+ * 자격에 영향을 주는 입력만 골라 정규화한 지문. 제목·설명·접수 안내·금액은
+ * 학생의 확정 식사일을 바꾸지 않으므로 여기에 넣지 않는다 — 넣으면 제목만 고쳐도
+ * 모든 신청의 확정일이 지워졌다 다시 쓰인다.
+ */
+export function eligibilitySignature(source: {
+  startYear: number;
+  startMonth: number;
+  monthCount: number;
+  meals: { mealKind: string; method: string; exemptionSelectable: boolean }[];
+  dates: { mealKind: string; grade: number; date: string }[];
+}): string {
+  const meals = [...source.meals]
+    .map((m) => ({
+      mealKind: m.mealKind,
+      method: m.method,
+      exemptionSelectable: m.exemptionSelectable,
+    }))
+    .sort((a, b) => a.mealKind.localeCompare(b.mealKind));
+  const dates = [...new Set(source.dates.map((d) => `${d.mealKind}|${d.grade}|${d.date}`))].sort();
 
-    const app = id
-      ? await tx.mealApplication.update({ where: { id }, data })
-      : await tx.mealApplication.create({ data });
-
-    await tx.mealApplicationMeal.deleteMany({ where: { applicationId: app.id } });
-    await tx.mealApplicationMealDate.deleteMany({ where: { applicationId: app.id } });
-
-    await tx.mealApplicationMeal.createMany({
-      data: input.meals.map((m) => ({
-        applicationId: app.id,
-        mealKind: m.mealKind,
-        price: m.price,
-        exemptionSelectable: m.exemptionSelectable,
-        method: m.method,
-      })),
-    });
-
-    if (input.meals.some((m) => m.dates.length > 0)) {
-      await tx.mealApplicationMealDate.createMany({
-        data: input.meals.flatMap((m) =>
-          m.dates.map((d) => ({
-            applicationId: app.id,
-            mealKind: m.mealKind,
-            grade: d.grade,
-            date: dateKeyToUtcDate(d.date),
-          })),
-        ),
-        skipDuplicates: true,
-      });
-    }
-
-    if (id) await resyncRegistrations(tx, app.id);
-
-    return app;
+  return JSON.stringify({
+    months: [source.startYear, source.startMonth, source.monthCount],
+    meals,
+    dates,
   });
 }
 
+function signatureOfInput(input: AdminApplicationInput): string {
+  return eligibilitySignature({
+    startYear: input.startYear,
+    startMonth: input.startMonth,
+    monthCount: input.monthCount,
+    meals: input.meals,
+    dates: input.meals.flatMap((m) => m.dates.map((d) => ({ ...d, mealKind: m.mealKind }))),
+  });
+}
+
+async function signatureOfStored(tx: PrismaTx, applicationId: number): Promise<string> {
+  const [app, meals, dates] = await Promise.all([
+    tx.mealApplication.findUniqueOrThrow({
+      where: { id: applicationId },
+      select: { startYear: true, startMonth: true, monthCount: true },
+    }),
+    tx.mealApplicationMeal.findMany({ where: { applicationId } }),
+    tx.mealApplicationMealDate.findMany({ where: { applicationId } }),
+  ]);
+
+  return eligibilitySignature({
+    startYear: app.startYear ?? 0,
+    startMonth: app.startMonth ?? 0,
+    monthCount: app.monthCount ?? 0,
+    meals,
+    dates: dates.map((d) => ({ mealKind: d.mealKind, grade: d.grade, date: toDateKey(d.date) })),
+  });
+}
+
+export type SavedApplication = { id: number; academicYear: number; eligibilityChanged: boolean };
+
+export async function saveApplication(
+  actor: Actor,
+  input: AdminApplicationInput,
+  id?: number,
+): Promise<SavedApplication> {
+  return withEligibilityMutation<SavedApplication>(
+    prisma,
+    actor,
+    {
+      scope: "APPLICATION",
+      applicationId: id,
+      applicationIdOf: (saved) => saved.id,
+      recorded: (saved) => saved.eligibilityChanged,
+    },
+    (tx) => writeApplication(tx, input, id),
+  );
+}
+
+async function writeApplication(
+  tx: PrismaTx,
+  input: AdminApplicationInput,
+  id?: number,
+): Promise<SavedApplication> {
+  const existing = id
+    ? await tx.mealApplication.findUniqueOrThrow({
+        where: { id },
+        select: { academicYear: true },
+      })
+    : null;
+
+  const mode = await rosterMode(tx);
+  const academicYear = await resolveApplicationYear(
+    tx,
+    mode,
+    input.academicYear ?? existing?.academicYear ?? null,
+  );
+
+  if (existing && existing.academicYear !== null && existing.academicYear !== academicYear) {
+    const registrations = await tx.mealRegistration.count({ where: { applicationId: id } });
+    if (registrations > 0) {
+      throw new DomainError("YEAR_MISMATCH", "신청이 있는 공고의 학년도는 바꿀 수 없습니다.");
+    }
+  }
+
+  const before = id ? await signatureOfStored(tx, id) : null;
+  const after = signatureOfInput(input);
+
+  const data = {
+    title: buildAppTitle(input.startYear, input.startMonth, input.subject),
+    description: input.description,
+    startYear: input.startYear,
+    startMonth: input.startMonth,
+    monthCount: input.monthCount,
+    applyStartAt: new Date(input.applyStartAt),
+    applyEndAt: new Date(input.applyEndAt),
+    academicYear,
+  };
+
+  const app = id
+    ? await tx.mealApplication.update({ where: { id }, data })
+    : await tx.mealApplication.create({ data });
+
+  await tx.mealApplicationMeal.deleteMany({ where: { applicationId: app.id } });
+  await tx.mealApplicationMealDate.deleteMany({ where: { applicationId: app.id } });
+
+  await tx.mealApplicationMeal.createMany({
+    data: input.meals.map((m) => ({
+      applicationId: app.id,
+      mealKind: m.mealKind,
+      price: m.price,
+      exemptionSelectable: m.exemptionSelectable,
+      method: m.method,
+    })),
+  });
+
+  if (input.meals.some((m) => m.dates.length > 0)) {
+    await tx.mealApplicationMealDate.createMany({
+      data: input.meals.flatMap((m) =>
+        m.dates.map((d) => ({
+          applicationId: app.id,
+          mealKind: m.mealKind,
+          grade: d.grade,
+          date: dateKeyToUtcDate(d.date),
+        })),
+      ),
+      skipDuplicates: true,
+    });
+  }
+
+  const eligibilityChanged = before === null || before !== after;
+  if (id && eligibilityChanged) await resyncRegistrations(tx, app.id);
+
+  return { id: app.id, academicYear, eligibilityChanged };
+}
+
 export async function resyncRegistrations(tx: PrismaTx, applicationId: number) {
+  const application = await tx.mealApplication.findUniqueOrThrow({
+    where: { id: applicationId },
+    select: { academicYear: true },
+  });
+  const mode = await rosterMode(tx);
+  const year = await resolveApplicationYear(tx, mode, application.academicYear);
+
   const meals = await tx.mealApplicationMeal.findMany({ where: { applicationId } });
   const openDates = await tx.mealApplicationMealDate.findMany({ where: { applicationId } });
   const regs = await tx.mealRegistration.findMany({
     where: { applicationId, status: "APPROVED" },
-    include: { user: { select: { grade: true } }, meals: true },
+    include: { meals: true },
   });
 
+  // 확정일을 하나라도 지우기 전에 모든 학생의 연도 학년을 확인한다. 도중에
+  // 멈추면 이미 지운 사람만 신청이 비어 버린다.
+  const profiles = await getAcademicProfiles(tx, regs.map((reg) => reg.userId), year);
+  const gradeByUser = new Map<number, number>();
   for (const reg of regs) {
-    const grade = reg.user.grade ?? 0;
+    const grade = await gradeFor(tx, mode, profiles.get(reg.userId), reg.userId);
+    gradeByUser.set(reg.userId, grade ?? 0);
+  }
+
+  for (const reg of regs) {
+    const grade = gradeByUser.get(reg.userId) ?? 0;
     for (const meal of meals) {
       const open = openDates
         .filter((d) => d.mealKind === meal.mealKind && d.grade === grade)

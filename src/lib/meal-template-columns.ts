@@ -12,6 +12,12 @@ export type TemplateColumn =
   | { kind: MealKind; type: "DATE"; date: string } // "YYYY-MM-DD"
   | { kind: MealKind; type: "WEEKDAY"; weekday: number }; // 0=일 ~ 6=토
 
+/** 새 양식의 1열. 이 머리글이 있으면 학번이 아니라 이메일로 학생을 찾는다. */
+export const EMAIL_HEADER = "이메일";
+
+/** 새 양식의 고정 열. 식사 열은 그 다음 열부터 시작한다. */
+export const TEMPLATE_FIXED_HEADERS = [EMAIL_HEADER, "학년", "반", "번호", "이름"] as const;
+
 const MEAL_KINDS_ORDER: MealKind[] = ["BREAKFAST", "LUNCH", "DINNER"];
 
 export function buildTemplateColumns(
