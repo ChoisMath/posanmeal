@@ -141,6 +141,40 @@ describe("exportRoster", () => {
     expect(Object.keys(manifest.rows)).toEqual([]);
   });
 
+  it("지난 명부 사전 다운로드는 제외된 기존 항목도 포함하지만 삭제된 명부는 복구하지 않는다", async () => {
+    const pastYear = 2025;
+    await db.academicYear.create({ data: { year: pastYear, state: "ARCHIVED", version: 0 } });
+    await db.userAcademicRecord.createMany({ data: [
+      { year: pastYear, userId: fx.studentId, role: "STUDENT", name: "제외된학생",
+        grade: 3, classNum: 1, number: 1, gender: "MALE", memberState: "GRADUATED" },
+      { year: pastYear, userId: fx.teacherId, role: "TEACHER", name: "명부삭제교사", memberState: "RETIRED" },
+    ] });
+    const excluded = await db.rosterEntry.create({ data: {
+      year: pastYear, userId: fx.studentId, emailKey: "student-test@example.posan.kr", included: false,
+    } });
+
+    const parsed = await toParsed(await exportRoster(db, fx.main, pastYear, true, false));
+    expect(parsed.rows.map((row) => row.email)).toEqual(["student-test@example.posan.kr"]);
+    const stored = await db.rosterFile.findUniqueOrThrow({ where: { id: parsed.fileId } });
+    const manifest = stored.manifest as { rows: Record<string, { entryId: string; userId: number }> };
+    expect(Object.values(manifest.rows)).toEqual([
+      expect.objectContaining({ entryId: excluded.id, userId: fx.studentId }),
+    ]);
+    expect(await db.rosterEntry.count({ where: { year: pastYear } })).toBe(1);
+    expect(await db.userAcademicRecord.count({ where: { year: pastYear } })).toBe(2);
+  });
+
+  it.each(["ACTIVE", "DRAFT"] as const)("%s 다운로드는 제외 항목을 빼는 기존 정책을 유지한다", async (state) => {
+    const year = state === "ACTIVE" ? YEAR : NEXT_YEAR;
+    if (state === "DRAFT") {
+      await createDraftYear(db, { actor: fx.main, requestId: "excluded-export-draft",
+        expectedVersion: fx.version, kind: "DRAFT", payloadHash: "excluded-export-draft", year });
+    }
+    await db.rosterEntry.updateMany({ where: { year, userId: fx.studentId }, data: { included: false } });
+    const parsed = await toParsed(await exportRoster(db, fx.main, year, true, false));
+    expect(parsed.rows.map((row) => row.email)).toEqual(["teacher-test@example.posan.kr"]);
+  });
+
   it("includeCurrent는 현재(ACTIVE) 학년도 기록이 없는 사용자는 참고 열을 비운다", async () => {
     // 졸업생: 2026년(ACTIVE) 기록이 아예 없다.
     const graduate = await db.user.create({

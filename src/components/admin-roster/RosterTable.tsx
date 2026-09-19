@@ -3,16 +3,9 @@
 import { Button } from "@/components/ui/button";
 import { EditableSelectCell, EditableTextCell, type SaveResult } from "@/components/EditableCell";
 import type { LegacyAdminUser, RosterViewRow } from "@/hooks/useAcademicRoster";
+import type { ProfileField } from "@/lib/admin-roster/profile-edit";
 
-export type RosterField =
-  | "name"
-  | "grade"
-  | "classNum"
-  | "number"
-  | "gender"
-  | "subject"
-  | "homeroom"
-  | "position";
+export type RosterField = ProfileField;
 
 export type RosterTableProps = {
   rows: RosterViewRow[];
@@ -96,12 +89,12 @@ export function RosterTable({
                 <th className={HEAD}>담임</th>
                 <th className={HEAD}>직책</th>
                 <th className={HEAD}>성별</th>
-                <th className={HEAD}>권한</th>
+                {!recordOnly && <th className={HEAD}>권한</th>}
               </>
             )}
             <th className={HEAD}>이메일</th>
             <th className={HEAD}>상태</th>
-            <th className={HEAD}>관리</th>
+            {!recordOnly && <th className={HEAD}>관리</th>}
           </tr>
         </thead>
         <tbody>
@@ -199,7 +192,7 @@ export function RosterTable({
                     onSave={(next) => onSaveField(row, "gender", next)}
                   />
                 </td>
-                {!student && (
+                {!student && !recordOnly && (
                   <td className="p-2 align-middle">
                     <Button
                       variant="outline"
@@ -227,7 +220,7 @@ export function RosterTable({
                 <td className="p-2 align-middle">
                   <RowStatus row={row} />
                 </td>
-                <td className="p-2 align-middle">
+                {!recordOnly && <td className="p-2 align-middle">
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -248,7 +241,7 @@ export function RosterTable({
                       {account?.accessState === "INACTIVE" ? "이용 재개" : "이용 중단"}
                     </Button>
                   </div>
-                </td>
+                </td>}
               </tr>
             );
           })}

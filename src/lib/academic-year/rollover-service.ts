@@ -16,6 +16,7 @@ import type { Tx } from "./db";
 import { DomainError } from "./errors";
 import { ROSTER_TX, withAcademicMutation } from "./mutation";
 import { normalizeEmail } from "./profile-schema";
+import { getAcademicProfiles } from "./profile-service";
 import { requireAcademicReady } from "./readiness";
 import {
   activeYear,
@@ -52,6 +53,18 @@ export type RolloverMissing = {
   role: Profile["role"];
   suggested: MemberState | null;
   decision: RolloverDecision | null;
+  profile: Profile;
+  canRestore: boolean;
+};
+
+export type RolloverSummary = {
+  members: number;
+  newAccounts: number;
+  linkedAccounts: number;
+  changedStudents: number;
+  changedTeachers: number;
+  leavers: number;
+  removedDraftCandidates: number;
 };
 
 export type RolloverReview = {
@@ -63,6 +76,7 @@ export type RolloverReview = {
   missing: RolloverMissing[];
   issues: string[];
   warnings: RolloverWarnings;
+  summary: RolloverSummary;
   canActivate: boolean;
 };
 
@@ -135,6 +149,7 @@ interface RolloverPlan {
   missing: RolloverMissing[];
   issues: string[];
   warnings: RolloverWarnings;
+  summary: RolloverSummary;
   leavers: Array<{ userId: number; memberState: MemberState }>;
 }
 
@@ -266,6 +281,7 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
   );
 
   const members = await tx.$queryRawUnsafe<SourceMember[]>(SOURCE_MEMBERS_SQL, sourceYear);
+  const sourceProfiles = await getAcademicProfiles(tx, members.map((member) => member.userId), sourceYear);
   const continuing = members.filter(
     (member) => CONTINUING_STATES.has(member.memberState) && member.accessState === "ACTIVE",
   );
@@ -283,6 +299,8 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
       // 3학년은 졸업이 유력하지만 그래도 사람이 명시해야 한다.
       suggested: member.role === "STUDENT" && member.grade === 3 ? "GRADUATED" : null,
       decision: (decisions.get(member.userId)?.decision as RolloverDecision | undefined) ?? null,
+      profile: sourceProfiles.get(member.userId)!,
+      canRestore: allRows.some((row) => row.userId === member.userId),
     }));
 
   const leavers: Array<{ userId: number; memberState: MemberState }> = [];
@@ -345,6 +363,22 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
       gradeByUserId.get(row.userId) === row.profile.grade,
   ).length;
 
+  const changedCount = (role: Profile["role"], fields: Array<keyof Profile>) => rows.filter((row) => {
+    const previous = row.userId === null ? undefined : sourceProfiles.get(row.userId);
+    return row.profile.role === role && previous !== undefined &&
+      fields.some((field) => row.profile[field] !== previous[field]);
+  }).length;
+
+  const summary: RolloverSummary = {
+    members: rows.length,
+    newAccounts: rows.filter((row) => row.userId === null).length,
+    linkedAccounts: linkedByEmail.size,
+    changedStudents: changedCount("STUDENT", ["grade", "classNum", "number"]),
+    changedTeachers: changedCount("TEACHER", ["subject", "homeroom", "position"]),
+    leavers: leavers.length,
+    removedDraftCandidates: allRows.filter((row) => !row.included && row.userId === null).length,
+  };
+
   return {
     sourceYear,
     sourceVersion: source.version,
@@ -354,6 +388,7 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
     missing,
     issues,
     warnings: { ...mealDates, studentsWithSameGrade },
+    summary,
     leavers,
   };
 }
@@ -393,6 +428,7 @@ export async function reviewRollover(
       missing: plan.missing,
       issues: plan.issues,
       warnings: plan.warnings,
+      summary: plan.summary,
       canActivate: plan.issues.length === 0,
     };
   }, ROSTER_TX);

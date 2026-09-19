@@ -33,7 +33,6 @@ export type RosterToolbarProps = {
   onDownload: () => void;
   onOpenImport: () => void;
   onAddUser?: () => void;
-  /** 14b가 붙일 자리. 넘기지 않으면 아무것도 그리지 않는다. */
   rolloverAction?: ReactNode;
   archivedAction?: ReactNode;
 };

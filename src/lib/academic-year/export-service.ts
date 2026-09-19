@@ -17,7 +17,7 @@ import type { RosterRow } from "./contracts";
  */
 async function exportableRows(db: Db, year: number): Promise<{ rows: (RosterRow & { version: number })[] }> {
   const state = await readYearState(db, year);
-  const view = await listRosterView(db, year);
+  const view = await listRosterView(db, year, undefined, { includeExcluded: state === "ARCHIVED" });
 
   const rows = view
     .filter((row) => state !== "ARCHIVED" || row.entryId.length > 0)

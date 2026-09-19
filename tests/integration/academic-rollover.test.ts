@@ -157,6 +157,45 @@ describe("academic year rollover", () => {
     return (await db.academicYear.findFirstOrThrow({ where: { state: "ACTIVE" } })).year;
   }
 
+  it("전환 미리보기는 실제 계정 연결과 변경·제외 후보를 같은 계획에서 집계한다", async () => {
+    await makeDraft();
+    const entries = await listRosterView(db, TARGET_YEAR);
+    const student = entries.find((row) => row.userId === fx.studentId)!;
+    const teacher = entries.find((row) => row.userId === fx.teacherId)!;
+    await db.rosterEntry.update({ where: { id: student.entryId }, data: {
+      userId: null, draftProfile: { ...student.profile, grade: 2 },
+    } });
+    await db.rosterEntry.update({ where: { id: teacher.entryId }, data: {
+      draftProfile: { ...teacher.profile, subject: "새 담당교과", homeroom: "2-2" },
+    } });
+    await db.rosterEntry.createMany({ data: [
+      { id: "new-included", year: TARGET_YEAR, emailKey: "new@example.test", draftEmail: "new@example.test",
+        draftProfile: { ...student.profile, name: "신규", number: 50 }, included: true },
+      { id: "new-excluded", year: TARGET_YEAR, emailKey: "excluded@example.test", draftEmail: "excluded@example.test",
+        draftProfile: { ...student.profile, name: "제외후보", number: 51 }, included: false },
+    ] });
+    const current = await review();
+    expect(current.summary).toEqual({ members: 3, newAccounts: 1, linkedAccounts: 1,
+      changedStudents: 1, changedTeachers: 1, leavers: 0, removedDraftCandidates: 1 });
+    expect(await db.user.count({ where: { emailKey: "new@example.test" } })).toBe(0);
+  });
+
+  it("누락 미리보기는 원본 학년도 이름·학급과 복원 가능 여부를 구분한다", async () => {
+    await makeDraft();
+    await excludeStudent();
+    await db.rosterEntry.deleteMany({ where: { year: TARGET_YEAR, userId: fx.teacherId } });
+    await decide(fx.studentId, "GRADUATED");
+    const current = await review();
+    expect(current.missing.find((row) => row.userId === fx.studentId)).toMatchObject({
+      canRestore: true, profile: { name: "학생테스트", grade: 1, classNum: 1, number: 1 },
+    });
+    expect(current.missing.find((row) => row.userId === fx.teacherId)).toMatchObject({
+      canRestore: false, profile: { role: "TEACHER", name: "교사테스트" },
+    });
+    expect(current.summary.leavers).toBe(1);
+    expect(current.canActivate).toBe(false);
+  });
+
   // -------------------------------------------------------------------------
   // Step 1 — 누락 미확인 전환 차단
   // -------------------------------------------------------------------------

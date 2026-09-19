@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { canAddRosterUser } from "@/lib/admin-roster/labels";
 import type { SaveResult } from "@/components/EditableCell";
-import type { ImportScope, Profile } from "@/lib/academic-year/contracts";
+import type { ImportScope } from "@/lib/academic-year/contracts";
+import { rosterProfileWith } from "@/lib/admin-roster/profile-edit";
 import { sendMutation } from "@/lib/admin-roster/mutate";
 import { requestIdFor, type RequestIdSlot } from "@/lib/admin-roster/request-id";
 import {
@@ -23,6 +25,9 @@ import {
 import { RosterImportDialog } from "./RosterImportDialog";
 import { RosterTable, type RosterField } from "./RosterTable";
 import { RosterToolbar } from "./RosterToolbar";
+import { CreateDraftDialog } from "./CreateDraftDialog";
+import { RolloverDialog } from "./RolloverDialog";
+import { ArchivedRosterDialog } from "./ArchivedRosterDialog";
 
 export type RosterManagerProps = {
   canWrite: boolean;
@@ -30,33 +35,15 @@ export type RosterManagerProps = {
   /** 학년도 기능이 아직 준비 중일 때 그대로 보여 줄 기존 사용자 목록. */
   legacyFallback: ReactNode;
   onAddUser?: (role?: "STUDENT" | "TEACHER") => void;
-  /** 14b가 붙일 자리. 넘기지 않으면 아무것도 그리지 않는다. */
-  rolloverAction?: ReactNode;
-  archivedAction?: ReactNode;
 };
-
-function profileWith(row: RosterViewRow, field: RosterField, next: string): Profile {
-  const profile: Profile = { ...row.profile };
-  if (field === "grade" || field === "classNum" || field === "number") {
-    profile[field] = Number.parseInt(next.trim(), 10);
-  } else if (field === "gender") {
-    profile.gender = next === "" ? null : (next as "MALE" | "FEMALE");
-  } else if (field === "name") {
-    profile.name = next.trim();
-  } else {
-    profile[field] = next.trim() === "" ? null : next.trim();
-  }
-  return profile;
-}
 
 export function RosterManager({
   canWrite,
   isMain,
   legacyFallback,
   onAddUser,
-  rolloverAction,
-  archivedAction,
 }: RosterManagerProps) {
+  const { mutate } = useSWRConfig();
   const years = useAcademicYears();
   const [pickedYear, setPickedYear] = useState<number | null>(null);
   const [role, setRole] = useState<"STUDENT" | "TEACHER">("STUDENT");
@@ -65,6 +52,9 @@ export function RosterManager({
   const [includeExcluded, setIncludeExcluded] = useState(false);
   const [scope, setScope] = useState<ImportScope>("PARTIAL");
   const [importOpen, setImportOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [rolloverOpen, setRolloverOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [emailTarget, setEmailTarget] = useState<AccountTarget | null>(null);
   const [accessTarget, setAccessTarget] = useState<AccountTarget | null>(null);
   const [permissionsTarget, setPermissionsTarget] = useState<AccountTarget | null>(null);
@@ -76,6 +66,7 @@ export function RosterManager({
   const selectedYear = pickedYear ?? years.activeYear?.year ?? null;
   const selected = years.years.find((year) => year.year === selectedYear) ?? null;
   const archived = selected?.state === "ARCHIVED";
+  const nextDraft = years.years.find((year) => year.state === "DRAFT" && year.year === (years.activeYear?.year ?? 0) + 1);
 
   const roster = useRoster(selectedYear, role, { includeExcluded: selected?.state === "DRAFT" && canWrite && includeExcluded });
   const accountRows = useAccountRows(role);
@@ -90,6 +81,17 @@ export function RosterManager({
     }
     return (userId: number) => byId.get(userId);
   }, [roster.rows, importStudents.rows, importTeachers.rows]);
+
+  function selectYear(year: number): void {
+    setPickedYear(year);
+    setCreateOpen(false);
+    setRolloverOpen(false);
+    setArchiveOpen(false);
+    setImportOpen(false);
+    setEmailTarget(null);
+    setAccessTarget(null);
+    setPermissionsTarget(null);
+  }
 
   if (years.notReady) {
     return (
@@ -109,6 +111,7 @@ export function RosterManager({
     await Promise.all([
       roster.mutate(), accountRows.mutate(), years.mutate(),
       importStudents.mutate(), importTeachers.mutate(),
+      mutate((key) => typeof key === "string" && key.startsWith("/api/admin/checkins?")),
     ]);
   }
 
@@ -131,7 +134,7 @@ export function RosterManager({
         requestId: slot.requestId,
         expectedRowVersion: row.version,
         email: row.email,
-        profile: profileWith(row, field, next),
+        profile: rosterProfileWith(row.profile, field, next),
         ...(row.entryId ? { entryId: row.entryId } : {}),
       },
       "수정에 실패했습니다.",
@@ -196,7 +199,7 @@ export function RosterManager({
         includeCurrent={includeCurrent}
         includeExcluded={includeExcluded}
         canAdd={canAdd}
-        onSelectYear={setPickedYear}
+        onSelectYear={selectYear}
         onSelectRole={setRole}
         onToggleIncludeData={setIncludeData}
         onToggleIncludeCurrent={setIncludeCurrent}
@@ -204,8 +207,13 @@ export function RosterManager({
         onDownload={download}
         onOpenImport={() => setImportOpen(true)}
         onAddUser={onAddUser ? () => onAddUser(role) : undefined}
-        rolloverAction={rolloverAction}
-        archivedAction={archivedAction}
+        rolloverAction={canWrite && years.activeYear && years.controlVersion !== null && <>
+          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => nextDraft ? selectYear(nextDraft.year) : setCreateOpen(true)}>
+            {nextDraft ? "준비 중 명부 열기" : "다음 학년도 준비"}
+          </Button>
+          {selected?.state === "DRAFT" && <Button className="min-h-11 whitespace-nowrap" onClick={() => setRolloverOpen(true)}>학년도 전환 검토</Button>}
+        </>}
+        archivedAction={archived && <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => setArchiveOpen(true)}>지난 명부·표시 정보</Button>}
       />
 
       {years.error && (
@@ -224,7 +232,7 @@ export function RosterManager({
           rows={roster.rows}
           role={role}
           accounts={accountRows.accounts}
-          canWrite={canWrite}
+          canWrite={canWrite && !archived}
           isMain={isMain}
           recordOnly={archived}
           onSaveField={saveField}
@@ -242,6 +250,23 @@ export function RosterManager({
           }}
         />
       </div>
+
+      {years.activeYear && years.controlVersion !== null && <CreateDraftDialog
+        open={createOpen} activeYear={years.activeYear.year} controlVersion={years.controlVersion}
+        onCreated={(year) => { selectYear(year); void refreshAll(); }}
+        onClose={() => setCreateOpen(false)}
+      />}
+      {selected?.state === "DRAFT" && <RolloverDialog
+        open={rolloverOpen} year={selected.year} isMain={isMain}
+        onChanged={() => void refreshAll()}
+        onActivated={(year) => { selectYear(year); void refreshAll(); }}
+        onClose={() => setRolloverOpen(false)}
+      />}
+      {selected?.state === "ARCHIVED" && <ArchivedRosterDialog
+        open={archiveOpen} year={selected} controlVersion={years.controlVersion}
+        isMain={isMain} canWrite={canWrite} onChanged={refreshAll}
+        onClose={() => setArchiveOpen(false)}
+      />}
 
       {selectedYear !== null && (
         <RosterImportDialog

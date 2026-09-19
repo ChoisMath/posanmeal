@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { academicYearOfDate } from "@/lib/academic-year/calendar";
+import { todayKST } from "@/lib/timezone";
 import {
   buildMonthlyMealColumns,
   getDateDayKey,
@@ -30,19 +32,29 @@ interface UserRecord {
   classNum: number | null;
   subject: string | null;
   homeroom: string | null;
+  profileWarning?: string;
   checkIns: CheckInRecord[];
 }
 
-type Category = "teacher" | "1" | "2" | "3";
+type Category = "teacher" | "1" | "2" | "3" | "unknown";
+const CATEGORIES: Array<{ value: Category; label: string }> = [
+  { value: "teacher", label: "교사" },
+  { value: "1", label: "1학년" },
+  { value: "2", label: "2학년" },
+  { value: "3", label: "3학년" },
+  { value: "unknown", label: "확인 필요" },
+];
+const EMPTY_USERS: UserRecord[] = [];
 
 function MealGrid({ category, year, month, readonly = false }: { category: Category; year: number; month: number; readonly?: boolean }) {
-  const { data, mutate: mutateGrid } = useSWR(
+  const { data, error, isLoading, mutate: mutateGrid } = useSWR(
     `/api/admin/checkins?year=${year}&month=${month}&category=${category}`,
     fetcher,
     { revalidateOnFocus: false }
   );
-  const users: UserRecord[] = data?.users ?? [];
+  const users: UserRecord[] = data?.users ?? EMPTY_USERS;
   const isTeacher = category === "teacher";
+  const needsProfile = category === "unknown";
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const mealColumns: MealColumn[] = data?.mealColumns ?? buildMonthlyMealColumns(year, month);
@@ -64,7 +76,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
   // 컬럼 하이라이트용 hovered day
   const [hoveredDay, setHoveredDay] = useState<number | null>(null);
   const colHoverStyle = (day: number): CSSProperties | undefined =>
-    hoveredDay === day ? { backgroundColor: "rgba(251, 191, 36, 0.28)" } : undefined;
+    hoveredDay === day ? { backgroundColor: "rgb(254, 240, 188)" } : undefined;
 
   // 일자별 합계 계산 (memoized)
   const { dailyTotals, grandTotal } = useMemo(() => {
@@ -120,17 +132,24 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
     }
   }
 
+  if (error) {
+    return <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+      <p className="break-keep">급식 기록을 불러오지 못했습니다.</p>
+      <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => void mutateGrid()}>다시 불러오기</Button>
+    </div>;
+  }
+  if (isLoading) return <p className="py-8 text-center text-sm text-muted-foreground">기록을 불러오는 중…</p>;
   if (users.length === 0) {
     return <p className="text-center text-muted-foreground py-8 text-sm">데이터가 없습니다.</p>;
   }
 
   return (
-    <div className="border rounded-lg overflow-auto max-h-[70dvh]">
+    <div className="flex-1 min-h-0 border rounded-lg overflow-auto">
       <table className="text-xs border-collapse w-full whitespace-nowrap">
-        <thead className="sticky top-0 z-20">
+        <thead>
           <tr>
-            <th className="sticky left-0 z-30 bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[100px] text-fit-sm">
-              {isTeacher ? "이름" : "반 번호 이름"}
+            <th className="sticky top-0 left-0 z-[4] bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[100px] text-fit-sm">
+              {isTeacher || needsProfile ? "이름" : "반 번호 이름"}
             </th>
             {mealColumns.map((column) => {
               const weekend = isWeekend(column.day);
@@ -143,7 +162,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
               return (
                 <th
                   key={column.key}
-                  className={`px-1 py-2 text-center font-medium border-b min-w-[28px] ${
+                  className={`sticky top-0 z-[2] px-1 py-2 text-center font-medium border-b min-w-11 ${
                     weekend
                       ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                       : mealHeaderClass
@@ -160,15 +179,15 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
             })}
             {isTeacher && (
               <>
-                <th className="bg-green-50 dark:bg-green-950 px-2 py-2 text-center font-medium text-green-700 dark:text-green-300 border-b border-l min-w-[44px] text-fit-sm">
+                <th className="sticky top-0 z-[2] bg-green-50 dark:bg-green-950 px-2 py-2 text-center font-medium text-green-700 dark:text-green-300 border-b border-l min-w-[44px] text-fit-sm">
                   개인
                 </th>
-                <th className="bg-blue-50 dark:bg-blue-950 px-2 py-2 text-center font-medium text-blue-700 dark:text-blue-300 border-b border-l min-w-[44px] text-fit-sm">
+                <th className="sticky top-0 z-[2] bg-blue-50 dark:bg-blue-950 px-2 py-2 text-center font-medium text-blue-700 dark:text-blue-300 border-b border-l min-w-[44px] text-fit-sm">
                   근무
                 </th>
               </>
             )}
-            <th className="sticky right-0 z-30 bg-muted px-2 py-2 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
+            <th className="sticky top-0 right-0 z-[4] bg-muted px-2 py-2 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
               합계
             </th>
           </tr>
@@ -181,9 +200,9 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
 
             return (
               <tr key={user.id} className="hover:bg-muted/50">
-                <td className="sticky left-0 z-10 bg-background px-2 py-1.5 border-b border-r">
+                <td className="sticky left-0 z-[3] bg-background px-2 py-1.5 border-b border-r">
                   <div className="text-fit-sm">
-                    {isTeacher ? (
+                    {isTeacher || needsProfile ? (
                       <span className="font-semibold">{user.name}</span>
                     ) : (
                       <>
@@ -193,16 +212,17 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                       </>
                     )}
                   </div>
+                  {user.profileWarning && <p className="whitespace-nowrap text-xs text-amber-700">{user.profileWarning}</p>}
                 </td>
                 {mealColumns.map((column) => {
                   const checkIn = checkedDaysMap.get(column.key);
                   const weekend = isWeekend(column.day);
                   const pending = pendingCells.has(`${user.id}:${column.key}`);
-                  const clickable = !readonly && !pending;
+                  const clickable = !readonly && !needsProfile && !pending;
                   return (
                     <td
                       key={column.key}
-                      className={`text-center border-b px-0.5 py-1.5 ${
+                      className={`h-11 min-w-11 text-center border-b px-0.5 py-1.5 ${
                         checkIn
                           ? isTeacher
                             ? checkIn.type === "WORK"
@@ -249,8 +269,8 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                     </>
                   );
                 })()}
-                <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-1.5 font-medium">
-                  {user.checkIns.length}{isTeacher ? "" : `/${mealColumns.filter((c) => c.mealKind === "DINNER").length}`}
+                <td className="sticky right-0 z-[3] bg-background text-center border-b border-l px-2 py-1.5 font-medium">
+                  {user.checkIns.length}{isTeacher || needsProfile ? "" : `/${mealColumns.filter((c) => c.mealKind === "DINNER").length}`}
                 </td>
               </tr>
             );
@@ -261,7 +281,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
           {isTeacher ? (
             <>
               <tr>
-                <td className="sticky left-0 z-30 bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
+                <td className="sticky left-0 z-[3] bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
@@ -277,12 +297,12 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                 <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
-                <td className="sticky right-0 z-30 bg-blue-50 dark:bg-blue-950 text-center border-t border-l px-2 py-1.5 font-bold text-blue-700 dark:text-blue-300">
+                <td className="sticky right-0 z-[3] bg-blue-50 dark:bg-blue-950 text-center border-t border-l px-2 py-1.5 font-bold text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
               </tr>
               <tr>
-                <td className="sticky left-0 z-30 bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
+                <td className="sticky left-0 z-[3] bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
@@ -298,12 +318,12 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                   {dailyTotals.reduce((s, d) => s + d.personal, 0)}
                 </td>
                 <td className="text-center border-t border-l px-2 py-1.5 bg-green-50 dark:bg-green-950 opacity-30">0</td>
-                <td className="sticky right-0 z-30 bg-green-50 dark:bg-green-950 text-center border-t border-l px-2 py-1.5 font-bold text-green-700 dark:text-green-300">
+                <td className="sticky right-0 z-[3] bg-green-50 dark:bg-green-950 text-center border-t border-l px-2 py-1.5 font-bold text-green-700 dark:text-green-300">
                   {dailyTotals.reduce((s, d) => s + d.personal, 0)}
                 </td>
               </tr>
               <tr>
-                <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+                <td className="sticky left-0 z-[3] bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
@@ -321,20 +341,20 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
                 <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
-                <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+                <td className="sticky right-0 z-[3] bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
                   {grandTotal}
                 </td>
               </tr>
             </>
           ) : (
             <tr>
-              <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+              <td className="sticky left-0 z-[3] bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
               {dailyTotals.map((d, i) => (
                 <td key={mealColumns[i]?.key ?? i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
                   {d.total || ""}
                 </td>
               ))}
-              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+              <td className="sticky right-0 z-[3] bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
                 {grandTotal}
               </td>
             </tr>
@@ -346,10 +366,12 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
 }
 
 export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}) {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const today = todayKST();
+  const [year, setYear] = useState(Number(today.slice(0, 4)));
+  const [month, setMonth] = useState(Number(today.slice(5, 7)));
   const [tab, setTab] = useState<Category>("teacher");
+  const [exporting, setExporting] = useState(false);
+  const academicYear = academicYearOfDate(`${year}-${String(month).padStart(2, "0")}-01`);
 
   const prevMonth = () => {
     if (month === 1) { setMonth(12); setYear(year - 1); }
@@ -362,40 +384,54 @@ export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}
   };
 
   async function handleExport() {
-    const res = await fetch(`/api/admin/export?year=${year}&month=${month}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `석식현황_${year}_${month}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    setExporting(true);
+    try {
+      const res = await fetch(`/api/admin/export?year=${year}&month=${month}`);
+      if (!res.ok) {
+        toast.error(errorTextOf(await res.json().catch(() => null), "내려받기에 실패했습니다."));
+        return;
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `급식현황_${year}_${month}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error("연결을 확인한 뒤 다시 내려받아 주세요.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
-    <div>
-      <Tabs value={tab} onValueChange={(v) => setTab(v as Category)}>
-        <TabsList className="grid w-full grid-cols-4 mb-4">
-          <TabsTrigger value="teacher">교사</TabsTrigger>
-          <TabsTrigger value="1">1학년</TabsTrigger>
-          <TabsTrigger value="2">2학년</TabsTrigger>
-          <TabsTrigger value="3">3학년</TabsTrigger>
-        </TabsList>
+    <div className="h-full min-h-0 min-w-0">
+      <Tabs className="h-full min-h-0 gap-2" value={tab} onValueChange={(v) => setTab(v as Category)}>
+        <div className="shrink-0 overflow-x-auto">
+          <TabsList className="w-full min-w-max gap-2 group-data-horizontal/tabs:h-auto">
+            {CATEGORIES.map(({ value, label }) => <TabsTrigger key={value} value={value} className="min-h-11 min-w-11 whitespace-nowrap px-3">{label}</TabsTrigger>)}
+          </TabsList>
+        </div>
 
-        {(["teacher", "1", "2", "3"] as const).map((cat) => (
-          <TabsContent key={cat} value={cat}>
-            <div className="flex items-center justify-center gap-4 mb-4">
-              <Button variant="ghost" size="icon" onClick={prevMonth}>
+        {CATEGORIES.map(({ value: cat }) => (
+          <TabsContent key={cat} value={cat} className="flex min-h-0 flex-col gap-2 overflow-hidden">
+            <div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
+              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={prevMonth} aria-label="이전 달" disabled={year === 2000 && month === 1}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <h3 className="font-semibold text-fit-base">{year}년 {month}월</h3>
-              <Button variant="ghost" size="icon" onClick={nextMonth}>
+              <h3 className="font-semibold text-fit-base whitespace-nowrap">{year}년 {month}월</h3>
+              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={nextMonth} aria-label="다음 달" disabled={year === 2100 && month === 12}>
                 <ChevronRight className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={handleExport} title="전체 월별 Excel 다운로드">
+              <Button variant="outline" size="sm" className="min-h-11 whitespace-nowrap" onClick={handleExport} disabled={exporting} title="전체 월별 Excel 다운로드">
                 <Download className="h-4 w-4 mr-1" /> Excel
               </Button>
             </div>
+            <p className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{academicYear}학년도 최종 소속 기준</p>
+            {cat === "unknown" && <p className="shrink-0 break-keep rounded-lg bg-amber-50 p-2 text-sm text-amber-800">
+              해당 학년도 표시 정보가 없는 식사 기록입니다. 현재 학급으로 대신 표시하지 않습니다.
+              사용자 관리에서 해당 학년도 정보를 확인해 주세요. 이 목록에서는 체크인을 변경할 수 없습니다.
+            </p>}
             <MealGrid category={cat} year={year} month={month} readonly={readonly} />
           </TabsContent>
         ))}
