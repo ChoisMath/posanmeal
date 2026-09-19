@@ -55,8 +55,14 @@ export async function exportLocalCheckInsXlsx(rows: LocalCheckInRow[]): Promise<
  * 오프라인 구조 경로용. exceljs 청크를 받지 못한 키오스크에서도 내보내기가 끝나야
  * 강제 초기화를 할 수 있으므로, 추가 import 없이 만드는 CSV를 함께 둔다.
  */
+/** 스프레드시트가 셀을 수식으로 해석하지 않게 한다(서버 사유 문자열이 그대로 들어온다). */
+function neutralize(value: string | number): string {
+  const text = String(value);
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+}
+
 export function buildLocalCheckInsCsv(rows: LocalCheckInRow[]): Blob {
-  const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+  const escape = (value: string | number) => `"${neutralize(value).replace(/"/g, '""')}"`;
   const lines = [HEADERS.map(escape).join(","), ...rows.map((r) => cells(r).map(escape).join(","))];
   // BOM 없이는 Excel이 한글을 깨뜨린다.
   return new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });

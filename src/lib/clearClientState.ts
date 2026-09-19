@@ -1,7 +1,6 @@
 import { signOut } from "next-auth/react";
 import {
   DB_NAME,
-  clearRosterKeepCheckIns,
   decideClientStateReset,
   getPendingCheckInCounts,
   type PendingCheckInCounts,
@@ -78,14 +77,9 @@ export async function clearClientBrowserState(): Promise<ClearClientStateResult>
     counts = { unsynced: 1, review: 0 };
   }
 
+  // 남겨야 할 때는 키오스크 DB를 통째로 둔다(명부·자격·얼굴·근거·설정·기록·기기 번호).
+  // 명부만 비우면 로컬 모드 체크인이 전부 실패하고, 복구에 방금 끝낸 관리자 로그인이 필요하다.
   const keepKioskDb = decideClientStateReset(counts) === "KEEP_KIOSK_DB";
-  if (keepKioskDb) {
-    try {
-      await clearRosterKeepCheckIns();
-    } catch {
-      // best-effort — 기록만 지키면 된다.
-    }
-  }
 
   await Promise.all([
     clearCaches(),

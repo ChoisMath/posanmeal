@@ -36,6 +36,8 @@ export interface LocalCheckIn {
   stale?: boolean;
   /** 서버가 종결한 거절. 다시 보내지 않지만 사유와 함께 화면·내보내기에 남는다. */
   terminal?: "REJECTED";
+  /** 서버가 종결을 알려 온 시각. 보존 기간은 체크인 시각이 아니라 이 시각부터 센다. */
+  acknowledgedAt?: string;
 }
 
 /** v6 이전 기록은 mealKind가 없을 수 있다. 읽을 때만 쓰는 타입이며 새 insert에는 쓰지 않는다. */
@@ -345,9 +347,10 @@ export const TERMINAL_RETENTION_DAYS = 30;
 /** 정리 대상인가. 종결 거절은 보존 기간이 지난 뒤에만 지운다. */
 export function shouldClearSyncedCheckIn(record: StoredLocalCheckIn, now: Date): boolean {
   if (record.terminal !== "REJECTED") return true;
-  const checkedAt = Date.parse(record.checkedAt);
-  if (!Number.isFinite(checkedAt)) return false;
-  return now.getTime() - checkedAt > TERMINAL_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  // 오래 전 오프라인에서 찍힌 기록이 오늘 거절될 수 있다. 사람이 볼 시간은 통보 시각부터 센다.
+  const acknowledgedAt = record.acknowledgedAt === undefined ? NaN : Date.parse(record.acknowledgedAt);
+  if (!Number.isFinite(acknowledgedAt)) return false;
+  return now.getTime() - acknowledgedAt > TERMINAL_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 }
 
 export async function clearSyncedCheckIns(now: Date = new Date()): Promise<number> {
@@ -491,7 +494,10 @@ export interface CheckInAcknowledgement {
   rejectedFinal: Array<{ clientId: number; reason: string }>;
 }
 
-export async function applyCheckInAcknowledgement(ack: CheckInAcknowledgement): Promise<void> {
+export async function applyCheckInAcknowledgement(
+  ack: CheckInAcknowledgement,
+  now: Date = new Date(),
+): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readwrite");
@@ -509,7 +515,7 @@ export async function applyCheckInAcknowledgement(ack: CheckInAcknowledgement): 
       patch(id, (record) =>
         reason === undefined
           ? { ...record, synced: 1 }
-          : { ...record, synced: 1, terminal: "REJECTED", reviewReason: reason },
+          : { ...record, synced: 1, terminal: "REJECTED", reviewReason: reason, acknowledgedAt: now.toISOString() },
       );
     }
     for (const item of ack.review) {
@@ -569,25 +575,15 @@ export function decideResetGuard(counts: PendingCheckInCounts): ResetDecision {
 }
 
 /**
- * 로그아웃은 절대 막지 않되, 서버에 없는 기록이 있으면 키오스크 DB는 지우지 않는다.
- * 관리자는 동기화하려고 바로 그 태블릿에서 로그인하므로, 로그아웃 한 번에 기록이 사라지면 안 된다.
+ * 로그아웃은 절대 막지 않되, 서버에 없는 기록이 있으면 키오스크 DB를 통째로 남긴다.
+ * 관리자는 동기화하려고 바로 그 태블릿에서 로그인한다. 명부만 지워도 로컬 모드 체크인이
+ * 전부 "등록되지 않은 사용자"가 되고, 되살리려면 방금 끝낸 로그인이 다시 필요해 줄이 멈춘다.
  */
 export function decideClientStateReset(counts: PendingCheckInCounts): "FULL" | "KEEP_KIOSK_DB" {
   return decideResetGuard(counts) === "NEEDS_FORCED" ? "KEEP_KIOSK_DB" : "FULL";
 }
 
-/** 로그아웃 시 남겨야 할 때 쓰는 부분 정리: 명부·자격·얼굴만 비우고 기록과 기기 번호는 둔다. */
-export async function clearRosterKeepCheckIns(): Promise<void> {
-  const db = await openDB();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(["users", "eligibleEntries", "faceProfiles"], "readwrite");
-    tx.objectStore("users").clear();
-    tx.objectStore("eligibleEntries").clear();
-    tx.objectStore("faceProfiles").clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
+
 
 export const FORCE_RESET_PHRASE = "초기화";
 

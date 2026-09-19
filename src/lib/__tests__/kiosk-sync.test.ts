@@ -359,29 +359,34 @@ describe("로그아웃 보호 (RA)", () => {
     expect(decideClientStateReset({ unsynced: 0, review: 0 })).toBe("FULL");
   });
 
-  it("미전송·검토 대기가 있으면 키오스크 DB는 남긴다", () => {
+  it("미전송·검토 대기가 있으면 키오스크 DB를 통째로 남긴다", () => {
     expect(decideClientStateReset({ unsynced: 1, review: 0 })).toBe("KEEP_KIOSK_DB");
     expect(decideClientStateReset({ unsynced: 0, review: 2 })).toBe("KEEP_KIOSK_DB");
   });
 });
 
 describe("종결 거절 보존 (RB)", () => {
-  const terminal = (checkedAt: string): StoredLocalCheckIn =>
-    record({ synced: 1, terminal: "REJECTED", reviewReason: "USER_NOT_FOUND", checkedAt });
+  const now = new Date("2026-10-01T00:00:00Z");
+  const daysAgo = (days: number) => new Date(now.getTime() - days * 86400_000).toISOString();
+  const terminal = (over: Partial<StoredLocalCheckIn>): StoredLocalCheckIn =>
+    record({ synced: 1, terminal: "REJECTED", reviewReason: "USER_NOT_FOUND", ...over });
 
-  it("보존 기간 안의 종결 거절은 정리하지 않는다", () => {
-    const now = new Date("2026-10-01T00:00:00Z");
-    expect(shouldClearSyncedCheckIn(terminal("2026-09-25T00:00:00Z"), now)).toBe(false);
+  it("오래된 기록이라도 오늘 거절을 받았으면 남긴다", () => {
+    const old = terminal({ checkedAt: daysAgo(40), acknowledgedAt: now.toISOString() });
+    expect(shouldClearSyncedCheckIn(old, now)).toBe(false);
   });
 
-  it("보존 기간이 지나면 정리한다", () => {
-    const now = new Date("2026-10-01T00:00:00Z");
-    const old = new Date(now.getTime() - (TERMINAL_RETENTION_DAYS + 1) * 86400_000).toISOString();
-    expect(shouldClearSyncedCheckIn(terminal(old), now)).toBe(true);
+  it("통보가 보존 기간을 넘겼으면 정리한다", () => {
+    const old = terminal({ checkedAt: daysAgo(40), acknowledgedAt: daysAgo(TERMINAL_RETENTION_DAYS + 1) });
+    expect(shouldClearSyncedCheckIn(old, now)).toBe(true);
+  });
+
+  it("통보 시각이 없으면 지우지 않는다", () => {
+    expect(shouldClearSyncedCheckIn(terminal({ checkedAt: daysAgo(40) }), now)).toBe(false);
   });
 
   it("보통의 전송 완료 기록은 예전처럼 바로 정리한다", () => {
-    expect(shouldClearSyncedCheckIn(record({ synced: 1 }), new Date("2026-09-05T10:00:00Z"))).toBe(true);
+    expect(shouldClearSyncedCheckIn(record({ synced: 1 }), now)).toBe(true);
   });
 });
 
@@ -420,5 +425,51 @@ describe("오프라인 내보내기 (RC)", () => {
     expect(text).toContain("USER_NOT_FOUND");
     expect(text).toContain("snap-1");
     expect(text).toContain("device-1");
+  });
+
+  it("수식으로 해석될 수 있는 사유는 무력화한다", async () => {
+    const text = await buildLocalCheckInsCsv([
+      {
+        id: 1, userId: 7, userLabel: "2-3-7", name: "김학생", date: "2026-09-05",
+        mealKind: "DINNER", type: "STUDENT", checkedAt: "2026-09-05T09:00:00.000Z",
+        status: "거절 확정", reason: "=HYPERLINK(\"http://x\")",
+      },
+    ]).text();
+    expect(text).toContain("\"'=HYPERLINK");
+  });
+});
+
+describe("얼굴 후보 보존 (/check 동기화)", () => {
+  beforeEach(() => {
+    dbState.unsynced = [];
+    dbState.stores = {};
+    vi.stubGlobal("navigator", { onLine: true });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const download = (operationMode: string, faceProfiles: unknown[] = []) => ({
+    status: 200,
+    body: { operationMode, users: [], eligibleEntries: [], faceProfiles },
+  });
+
+  it("얼굴을 받지 않는 로컬 모드 동기화는 기존 후보를 건드리지 않는다", async () => {
+    mockFetch({ download: download("local") });
+    await performKioskSync({ faces: false });
+    expect(dbState.stores.faceProfiles ?? []).toEqual([]);
+  });
+
+  it("얼굴을 받지 않아도 서버가 온라인 모드면 후보를 지운다 (보관 정책)", async () => {
+    mockFetch({ download: download("online") });
+    await performKioskSync({ faces: false });
+    expect(dbState.stores.faceProfiles).toEqual([{ op: "clear" }]);
+  });
+
+  it("얼굴을 받는 동기화는 같은 트랜잭션에서 통째로 바꾼다", async () => {
+    mockFetch({ download: download("local", [{ userId: 1, embeddings: [[1]] }]) });
+    await performKioskSync({ faces: true });
+    expect(dbState.stores.faceProfiles).toEqual([
+      { op: "clear" },
+      { op: "put", value: { userId: 1, embeddings: [[1]] }, key: undefined },
+    ]);
   });
 });

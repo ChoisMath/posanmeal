@@ -235,7 +235,16 @@ export function readKioskDownload(data: unknown): KioskDownload {
  * 명부·근거·설정을 한 트랜잭션에서 통째로 바꾼다. 중간에 실패하면 abort되어
  * 직전 명부가 그대로 남는다. 체크인 기록은 이 트랜잭션에 넣지 않는다.
  */
-export function applyKioskSnapshot(db: IDBDatabase, download: KioskDownload): Promise<void> {
+export interface ApplySnapshotOptions {
+  /** 이번 내려받기가 얼굴 임베딩을 함께 받았는가. 받지 않았으면 기존 후보를 건드리지 않는다. */
+  replaceFaces?: boolean;
+}
+
+export function applyKioskSnapshot(
+  db: IDBDatabase,
+  download: KioskDownload,
+  options: ApplySnapshotOptions = {},
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["users", "eligibleEntries", "faceProfiles", "settings"], "readwrite");
     tx.oncomplete = () => {
@@ -255,10 +264,16 @@ export function applyKioskSnapshot(db: IDBDatabase, download: KioskDownload): Pr
       for (const entry of download.eligibleEntries) eligible.put(entry);
 
       const faces = tx.objectStore("faceProfiles");
-      faces.clear();
-      // 보관 정책: 서버가 로컬 모드일 때만 임베딩을 기기에 둔다.
-      if (download.operationMode === "local") {
-        for (const profile of download.faceProfiles) faces.put(profile);
+      if (options.replaceFaces) {
+        faces.clear();
+        // 보관 정책: 서버가 로컬 모드일 때만 임베딩을 기기에 둔다.
+        if (download.operationMode === "local") {
+          for (const profile of download.faceProfiles) faces.put(profile);
+        }
+      } else if (download.operationMode === "online") {
+        // 얼굴을 받지 않은 동기화라도 보관 정책은 지킨다. 로컬 모드면 `/facecheck`가
+        // 쓰는 후보를 그대로 둔다 — `/check` 동기화가 지우면 오프라인에서 얼굴 인식이 죽는다.
+        faces.clear();
       }
 
       const settings = tx.objectStore("settings");
@@ -364,9 +379,7 @@ export async function performKioskSync(options: KioskSyncOptions = {}): Promise<
 
   const download = readKioskDownload(await downRes.json());
   const db = await openDB();
-  await applyKioskSnapshot(db, download);
-  // 보관 정책: 얼굴을 받지 않는 호출에서도 온라인 모드면 기기에 남은 임베딩을 지운다.
-  if (!options.faces && download.operationMode === "online") await clearFaceProfiles();
+  await applyKioskSnapshot(db, download, { replaceFaces: options.faces === true });
 
   const faceCount = download.operationMode === "local" ? download.faceProfiles.length : 0;
   const drift =

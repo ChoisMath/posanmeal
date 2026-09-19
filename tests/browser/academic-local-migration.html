@@ -83,7 +83,7 @@ async function run(name, version, withMealKind) {
       // 구조화 복제가 불가능한 값 — put에서 던진다
       faceProfiles: [{ userId: 1, embeddings: () => 1 }],
       snapshot: null,
-    });
+    }, { replaceFaces: true });
   } catch (err) {
     applyError = err && err.name ? err.name : String(err);
   }
