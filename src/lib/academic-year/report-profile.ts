@@ -230,7 +230,8 @@ export async function getReportProfiles(
 }
 
 export type YearMemberFilter = {
-  role: "STUDENT" | "TEACHER";
+  /** 비우면 그 해 기록이 있는 사람 전부. */
+  role?: "STUDENT" | "TEACHER";
   grade?: number;
   classNum?: number;
   enrolledOnly?: boolean;
@@ -251,7 +252,7 @@ export async function listYearMemberIds(
     const rows = await db.userAcademicRecord.findMany({
       where: {
         year,
-        role: filter.role,
+        ...(filter.role === undefined ? {} : { role: filter.role }),
         ...(filter.grade === undefined ? {} : { grade: filter.grade }),
         ...(filter.classNum === undefined ? {} : { classNum: filter.classNum }),
         ...(filter.enrolledOnly
@@ -265,7 +266,7 @@ export async function listYearMemberIds(
 
   const users = await db.user.findMany({
     where: {
-      role: filter.role,
+      ...(filter.role === undefined ? {} : { role: filter.role }),
       ...(filter.grade === undefined ? {} : { grade: filter.grade }),
       ...(filter.classNum === undefined ? {} : { classNum: filter.classNum }),
     },
@@ -317,33 +318,41 @@ export function isReportCategory(value: string): value is ReportCategory {
   return (REPORT_CATEGORIES as readonly string[]).includes(value);
 }
 
-function matchesCategory(report: ReportProfile | undefined, category: ReportCategory): boolean {
-  const profile = report?.historical;
-  if (category === "unknown") return !profile;
-  if (!profile) return false;
-  if (category === "teacher") return profile.role === "TEACHER";
-  return profile.role === "STUDENT" && profile.grade === Number.parseInt(category, 10);
-}
+const KNOWN_GRADES = new Set([1, 2, 3]);
 
 /**
- * 한 달/기간 보고서의 명단. 그 해 기록과 그 기간 자료를 합친 뒤 **그 해 Profile로**
- * 분류한다. 기록이 없는 사람은 학년을 추측하지 않고 "확인 필요"로만 묶이므로,
- * 네 분류와 확인 필요 묶음을 더하면 그 기간 전체와 정확히 같아진다.
+ * 분류의 단 하나의 규칙. 월별 표·월별 엑셀·일별 엑셀이 각자 갈래를 세면 언젠가
+ * 어긋나고, 어느 칸에도 들지 못한 사람은 조용히 사라진다. 구체적인 칸에 넣을 수
+ * 없는 사람(기록 없음, 학년이 비었거나 1~3 밖, 뜻밖의 역할)은 전부 "확인 필요"다.
  */
-export async function listPeriodCategory(
+export function reportBucketOf(report: ReportProfile | undefined): ReportCategory {
+  const profile = report?.historical;
+  if (!profile) return "unknown";
+  if (profile.role === "TEACHER") return "teacher";
+  if (profile.role === "STUDENT" && profile.grade !== null && KNOWN_GRADES.has(profile.grade)) {
+    return String(profile.grade) as ReportCategory;
+  }
+  return "unknown";
+}
+
+export type PeriodBuckets = {
+  profiles: Map<number, ReportProfile>;
+  byCategory: Map<ReportCategory, number[]>;
+};
+
+/**
+ * 한 기간 보고서의 전체 명단을 한 번에 가른다. 그 해 기록과 그 기간 자료를 합친 뒤
+ * `reportBucketOf`로만 분류하므로 다섯 묶음은 서로 겹치지 않고, 더하면 그 기간
+ * 전체와 정확히 같다. 조회는 명부 1회 + 기간 자료 2회 + Profile 1회뿐이다.
+ */
+export async function listPeriodBuckets(
   db: Db,
   year: number,
   range: { startDate: Date; endDate: Date },
-  category: ReportCategory,
   includeCurrent: boolean,
-): Promise<{ ids: number[]; profiles: Map<number, ReportProfile> }> {
+): Promise<PeriodBuckets> {
   const [rosterIds, dataIds] = await Promise.all([
-    category === "unknown"
-      ? Promise.resolve<number[]>([])
-      : listYearMemberIds(db, year, {
-          role: category === "teacher" ? "TEACHER" : "STUDENT",
-          ...(category === "teacher" ? {} : { grade: Number.parseInt(category, 10) }),
-        }),
+    listYearMemberIds(db, year, {}),
     collectPeriodUserIds(db, range),
   ]);
 
@@ -351,15 +360,38 @@ export async function listPeriodCategory(
   const profiles = await getReportProfiles(db, candidates, year, includeCurrent);
   const dataSet = new Set(dataIds);
 
-  const ids = candidates
-    .filter((id) => matchesCategory(profiles.get(id), category))
-    // 기록 없는 사람은 그 기간에 실제 자료가 있을 때만 올린다.
-    .filter((id) => (category === "unknown" ? dataSet.has(id) : true))
-    .sort((a, b) =>
-      compareByProfile(profiles.get(a), profiles.get(b), category === "teacher" ? "TEACHER" : "STUDENT"),
-    );
+  const byCategory = new Map<ReportCategory, number[]>(
+    REPORT_CATEGORIES.map((category) => [category, []]),
+  );
+  for (const id of candidates) {
+    const report = profiles.get(id);
+    // 기록이 없는 사람은 그 기간에 실제 자료가 있을 때만 올린다.
+    if (!report?.historical && !dataSet.has(id)) continue;
+    byCategory.get(reportBucketOf(report))!.push(id);
+  }
 
-  return { ids, profiles };
+  for (const [category, ids] of byCategory) {
+    ids.sort((a, b) =>
+      compareByProfile(
+        profiles.get(a),
+        profiles.get(b),
+        category === "teacher" ? "TEACHER" : "STUDENT",
+      ),
+    );
+  }
+
+  return { profiles, byCategory };
+}
+
+export async function listPeriodCategory(
+  db: Db,
+  year: number,
+  range: { startDate: Date; endDate: Date },
+  category: ReportCategory,
+  includeCurrent: boolean,
+): Promise<{ ids: number[]; profiles: Map<number, ReportProfile> }> {
+  const { profiles, byCategory } = await listPeriodBuckets(db, year, range, includeCurrent);
+  return { ids: byCategory.get(category) ?? [], profiles };
 }
 
 /** 이름 → 학급 → 번호. 기록이 없는 사람은 뒤로 민다. */

@@ -11,7 +11,8 @@ import {
   currentClassLabelOf,
   displayNameOf,
   getReportProfiles,
-  listPeriodCategory,
+  listPeriodBuckets,
+  reportBucketOf,
   MISSING_PROFILE_WARNING,
   UNKNOWN_CATEGORY_LABEL,
   type ReportCategory,
@@ -62,28 +63,29 @@ async function exportMonthly(
   const { startDate, endDate, daysInMonth } = buildMonthDateRange(year, month);
   const academicYear = academicYearOfDate(formatMonthDateKey(year, month, 1));
 
-  async function loadCategory(category: ReportCategory): Promise<ExportUser[]> {
-    const { ids, profiles } = await listPeriodCategory(
-      prisma,
-      academicYear,
-      { startDate, endDate },
-      category,
-      includeCurrent,
-    );
-    const checkIns = await prisma.checkIn.findMany({
-      where: { userId: { in: ids }, date: { gte: startDate, lte: endDate } },
-      select: { userId: true, date: true, type: true, mealKind: true },
-      orderBy: [{ date: "asc" }, { mealKind: "asc" }],
-    });
+  // 다섯 묶음을 한 번에 가른다. 시트마다 다시 세면 서로 어긋날 수 있다.
+  const { profiles, byCategory } = await listPeriodBuckets(
+    prisma,
+    academicYear,
+    { startDate, endDate },
+    includeCurrent,
+  );
+  const allIds = [...byCategory.values()].flat();
+  const checkIns = await prisma.checkIn.findMany({
+    where: { userId: { in: allIds }, date: { gte: startDate, lte: endDate } },
+    select: { userId: true, date: true, type: true, mealKind: true },
+    orderBy: [{ date: "asc" }, { mealKind: "asc" }],
+  });
 
-    const byUser = new Map<number, ExportCheckIn[]>();
-    for (const { userId, ...rest } of checkIns) {
-      const list = byUser.get(userId);
-      if (list) list.push(rest);
-      else byUser.set(userId, [rest]);
-    }
+  const byUser = new Map<number, ExportCheckIn[]>();
+  for (const { userId, ...rest } of checkIns) {
+    const list = byUser.get(userId);
+    if (list) list.push(rest);
+    else byUser.set(userId, [rest]);
+  }
 
-    return ids.map((id) => {
+  function usersOf(category: ReportCategory): ExportUser[] {
+    return (byCategory.get(category) ?? []).map((id) => {
       const report: ReportProfile | undefined = profiles.get(id);
       const profile = report?.historical;
       return {
@@ -97,9 +99,9 @@ async function exportMonthly(
     });
   }
 
-  const [teachers, grade1, grade2, grade3, unknown] = await Promise.all(
-    (["teacher", "1", "2", "3", "unknown"] as const).map((category) => loadCategory(category)),
-  );
+  const [teachers, grade1, grade2, grade3, unknown] = (
+    ["teacher", "1", "2", "3", "unknown"] as const
+  ).map(usersOf);
 
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.default.Workbook();
@@ -358,15 +360,13 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   const rows: Row[] = checkIns.map((c) => {
     const report = profiles.get(c.userId);
     const profile = report?.historical;
-    // 기록이 없는 사람을 교사로 세지 않는다. 학년도 추측하지 않고 따로 모은다.
-    let category: Row["category"];
-    if (!profile) {
-      category = "확인 필요";
-    } else if (profile.role === "STUDENT") {
-      category = profile.grade === 1 ? "1학년" : profile.grade === 2 ? "2학년" : "3학년";
-    } else {
-      category = c.type === "WORK" ? "교사 근무" : "교사 개인";
-    }
+    // 분류는 월별과 같은 규칙 하나로만 한다. 어느 칸에도 못 넣는 사람은 "확인 필요"다.
+    const bucket = reportBucketOf(report);
+    const category: Row["category"] = bucket === "unknown"
+      ? UNKNOWN_CATEGORY_LABEL
+      : bucket === "teacher"
+        ? (c.type === "WORK" ? "교사 근무" : "교사 개인")
+        : (`${bucket}학년` as Row["category"]);
     return {
       category,
       grade: profile?.grade ?? null,
@@ -435,14 +435,15 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   widths.forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
 
   for (const r of rows) {
-    const isStudent = r.category.endsWith("학년") && r.category !== "확인 필요";
+    const isTeacherRow = r.category.startsWith("교사");
+    // "확인 필요" 줄도 남아 있는 값(반·번호)은 그대로 보여 준다 — 사람을 찾아 고쳐야 한다.
     const row = sheet.addRow([
       r.category,
-      isStudent ? r.grade : "",
-      isStudent ? r.classNum : "",
-      isStudent ? r.number : "",
+      isTeacherRow ? "" : r.grade ?? "",
+      isTeacherRow ? "" : r.classNum ?? "",
+      isTeacherRow ? "" : r.number ?? "",
       r.name,
-      isStudent ? "" : (r.subject ?? ""),
+      isTeacherRow ? (r.subject ?? "") : "",
       MEAL_LABEL[r.mealKind],
       formatDateTimeKST(r.checkedAt),
       sourceLabel(r.source),

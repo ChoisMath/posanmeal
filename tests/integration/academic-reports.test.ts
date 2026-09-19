@@ -495,7 +495,46 @@ describe("academic year reports", () => {
     expect(secondRow).toMatchObject({ grade: 2, classNum: 5 });
   });
 
+  /** 학년이 비어 있는(보완 필요) 기록. 어느 학년 칸에도 넣을 수 없다. */
+  async function seedGradelessStudent(): Promise<User> {
+    const user = await db.user.create({
+      data: {
+        email: "gradeless-test@example.posan.kr",
+        emailKey: "gradeless-test@example.posan.kr",
+        name: "학년없음",
+        role: "STUDENT",
+        grade: 1,
+        classNum: 2,
+        number: 3,
+      },
+    });
+    await db.userAcademicRecord.create({
+      data: {
+        year: SOURCE_YEAR,
+        userId: user.id,
+        role: "STUDENT",
+        name: "학년없음",
+        grade: null,
+        classNum: 2,
+        number: 3,
+        memberState: "ENROLLED",
+        needsReview: true,
+      },
+    });
+    await db.checkIn.create({
+      data: {
+        userId: user.id,
+        date: new Date("2026-09-18T00:00:00.000Z"),
+        mealKind: "DINNER",
+        type: "STUDENT",
+        source: "QR",
+      },
+    });
+    return user;
+  }
+
   it("그 해 기록이 없어도 자료가 있으면 월별 보기·엑셀의 확인 필요 묶음에 남는다", async () => {
+    const gradeless = await seedGradelessStudent();
     await db.userAcademicRecord.deleteMany({
       where: { year: SOURCE_YEAR, userId: fx.studentId },
     });
@@ -512,6 +551,10 @@ describe("academic year reports", () => {
       profileWarning: "학년도 정보 확인 필요",
     });
     expect(row.checkIns.length).toBeGreaterThan(0);
+
+    // 학년이 비어 있는 기록도 학년 칸에 우겨넣지 않고 같은 묶음에 남는다.
+    const gradelessRow = unknown.users.find((u: { id: number }) => u.id === gradeless.id);
+    expect(gradelessRow).toMatchObject({ name: "학년없음", grade: null, classNum: 2, number: 3 });
 
     const grade1 = await (
       await routes.adminCheckins.GET(getRequest("?year=2026&month=9&category=1"))
@@ -552,8 +595,16 @@ describe("academic year reports", () => {
     await dailyBook.xlsx.load(await daily.arrayBuffer());
     const dailySheet = dailyBook.getWorksheet("2026-09-18")!;
     const summary = String(dailySheet.getCell("A2").value);
-    expect(summary).toContain("확인 필요 1");
+    expect(summary).toContain("확인 필요 2");
     expect(summary).toContain("교사 근무 1");
+
+    // 일별 구분 합계 = 그 날 체크인 수.
+    const dayTotal = await db.checkIn.count({
+      where: { date: new Date("2026-09-18T00:00:00.000Z") },
+    });
+    const dailyCounts = [...summary.matchAll(/(\d+)(?= ·|$)/g)].map((m) => Number(m[1]));
+    expect(dailyCounts.at(-1)).toBe(dayTotal);
+    expect(dailyCounts.slice(0, -1).reduce((sum, n) => sum + n, 0)).toBe(dayTotal);
     const categoriesInSheet: unknown[] = [];
     dailySheet.eachRow((r, i) => { if (i >= 5) categoriesInSheet.push(r.getCell(1).value); });
     expect(categoriesInSheet).toContain("확인 필요");
