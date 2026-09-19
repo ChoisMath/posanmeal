@@ -6,6 +6,7 @@ import {
   ACADEMIC_BACKFILL_KEY,
   INITIAL_ACADEMIC_YEAR,
   backfill2026,
+  copyAcademicRecords,
   verifyBackfill,
 } from "@/lib/academic-year/backfill";
 import { enableAcademicMode, requireAcademicReady } from "@/lib/academic-year/readiness";
@@ -15,6 +16,7 @@ import {
   assertUrlMatchesTarget,
   parseCliArgs,
   parseMigrationTargetConfig,
+  safeErrorKind,
 } from "../../scripts/academic-year/db-target";
 import { openAcademicTestDb, openAcademicTestPgClient, resetAcademicTestDb } from "./support/db";
 import { seedLegacyFixture, type LegacyFixtureIds } from "./support/legacy-fixture";
@@ -203,6 +205,53 @@ describe("2026 backfill", () => {
     expect(await db.userAcademicRecord.count()).toBe(2);
   });
 
+  it("copies users the preflight never saw without a unique violation", async () => {
+    // 사전 점검을 전혀 거치지 않고 복사 단계만 호출해, 문장 스스로 충돌 그룹을
+    // 계산하는지 본다. 운영 중 사전 점검과 복사 사이에 들어온 행과 같은 상황이다.
+    const seatTwin = await db.user.create({
+      data: {
+        email: "late-seat@example.posan.kr",
+        name: "늦은학생",
+        role: "STUDENT",
+        grade: 1,
+        classNum: 1,
+        number: 1,
+        gender: "FEMALE",
+      },
+    });
+    const emailTwin = await db.user.create({
+      data: {
+        email: "STUDENT-TEST@example.posan.kr",
+        name: "늦은중복",
+        role: "STUDENT",
+        grade: 2,
+        classNum: 2,
+        number: 2,
+        gender: "MALE",
+      },
+    });
+
+    const before = await captureLegacyFingerprint(pgClient);
+    const inserted = await db.$transaction((tx) => copyAcademicRecords(tx, INITIAL_ACADEMIC_YEAR));
+
+    expect(inserted).toBe(4);
+    const records = await db.userAcademicRecord.findMany({ orderBy: { userId: "asc" } });
+    const flagged = new Map(records.map((record) => [record.userId, record.needsReview]));
+    expect(flagged.get(fixture.studentId)).toBe(true);
+    expect(flagged.get(seatTwin.id)).toBe(true);
+    expect(flagged.get(emailTwin.id)).toBe(true);
+    expect(flagged.get(fixture.teacherId)).toBe(false);
+
+    const users = await db.user.findMany({ orderBy: { id: "asc" }, select: { id: true, emailKey: true } });
+    const keys = new Map(users.map((user) => [user.id, user.emailKey]));
+    expect(keys.get(fixture.studentId)).toBeNull();
+    expect(keys.get(emailTwin.id)).toBeNull();
+    expect(keys.get(seatTwin.id)).toBe("late-seat@example.posan.kr");
+
+    expect(await db.rosterEntry.count()).toBe(2);
+    expect(compareLegacyFingerprints(before, await captureLegacyFingerprint(pgClient)).equal).toBe(true);
+  });
+
   it("reports an existing record that disagrees with the legacy source", async () => {
     await db.userAcademicRecord.create({
       data: {
@@ -381,6 +430,22 @@ describe("migration CLI guards", () => {
         parsed,
       ).hostname,
     ).toBe("127.0.0.1");
+  });
+
+  it("reduces an error to a kind and never leaks the violating value", () => {
+    const pgError = Object.assign(new Error('duplicate key value: Key ("emailKey")=(leak@example.kr) already exists'), {
+      code: "23505",
+      constraint: "User_emailKey_key",
+    });
+    expect(safeErrorKind(pgError)).toBe("Postgres:23505:User_emailKey_key");
+    expect(safeErrorKind(pgError)).not.toContain("leak@example.kr");
+
+    const prismaError = Object.assign(new Error("Unique constraint failed on leak@example.kr"), { code: "P2002" });
+    expect(safeErrorKind(prismaError)).toBe("Prisma:P2002");
+
+    const domainError = Object.assign(new Error("leak@example.kr"), { name: "DomainError", code: "NOT_READY" });
+    expect(safeErrorKind(domainError)).toBe("DomainError:NOT_READY");
+    expect(safeErrorKind(new Error("leak@example.kr"))).toBe("Error:UNKNOWN");
   });
 
   it("rejects a config whose marker scope is not one of the two known targets", () => {

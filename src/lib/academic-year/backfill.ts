@@ -4,6 +4,7 @@ import { compareLegacyFingerprints } from "../../../scripts/academic-year/finger
 import { academicYearBounds } from "./calendar";
 import type { Db, Tx } from "./db";
 import { DomainError } from "./errors";
+import { ROSTER_TX } from "./mutation";
 
 /** 초기 이전 대상 학년도. 운영 DB의 ACTIVE 학년도와 일치해야 실행된다. */
 export const INITIAL_ACADEMIC_YEAR = 2026;
@@ -31,13 +32,6 @@ export interface PreflightReport {
   /** 개인 식별 정보를 담지 않는 종류별 건수. */
   issues: string[];
   notes: string[];
-  needsReviewUserIds: number[];
-  emailCollisionUserIds: number[];
-  yearScopedApplicationIds: number[];
-}
-
-interface GroupRow {
-  ids: number[];
 }
 
 function issue(code: string, count: number): string {
@@ -48,173 +42,136 @@ async function activeYear(db: Db): Promise<number> {
   const rows = await db.$queryRaw<{ year: number }[]>`
     SELECT year FROM "AcademicYear" WHERE state = 'ACTIVE'
   `;
-  const year = rows[0]?.year;
-  if (year !== INITIAL_ACADEMIC_YEAR) {
-    throw new DomainError("YEAR_MISMATCH", "초기 이전은 2026 학년도가 활성일 때만 실행할 수 있습니다.");
+  if (rows.length !== 1 || rows[0]?.year !== INITIAL_ACADEMIC_YEAR) {
+    throw new DomainError("YEAR_MISMATCH", "초기 이전은 2026 학년도 하나만 활성일 때 실행할 수 있습니다.");
   }
-  return year;
+  return INITIAL_ACADEMIC_YEAR;
 }
 
-/**
- * 읽기 전용 사전 점검. 자동 병합·값 보정을 하지 않고, 사람이 고쳐야 하는
- * 충돌만 종류와 건수로 보고한다.
- */
-export async function runPreflight(db: Db, year: number = INITIAL_ACADEMIC_YEAR): Promise<PreflightReport> {
-  const bounds = academicYearBounds(year);
+// 복사와 점검이 같은 규칙을 쓰도록, 충돌 그룹 판정을 SQL 안에 둔다. 미리 계산한
+// id 목록에 의존하지 않으므로 사이에 들어온 행이 있어도 23505가 나지 않는다.
+const CONFLICT_GROUPS_CTE = `
+  "keyed" AS (
+    SELECT u.*, lower(btrim(u.email)) AS "emailKeyValue" FROM "User" u
+  ),
+  "emailDup" AS (
+    SELECT "emailKeyValue" FROM "keyed" GROUP BY "emailKeyValue" HAVING count(*) > 1
+  ),
+  "seatDup" AS (
+    SELECT "grade", "classNum", "number" FROM "keyed"
+    WHERE "role" = 'STUDENT' AND "grade" IS NOT NULL AND "classNum" IS NOT NULL AND "number" IS NOT NULL
+    GROUP BY "grade", "classNum", "number" HAVING count(*) > 1
+  )
+`;
 
-  const emailGroups = await db.$queryRaw<GroupRow[]>`
-    SELECT array_agg(id ORDER BY id)::int[] AS ids
-    FROM "User"
-    GROUP BY lower(btrim(email))
-    HAVING count(*) > 1
-  `;
+const NEEDS_REVIEW_EXPR = `
+  (
+    (k."role" = 'STUDENT' AND (k."grade" IS NULL OR k."classNum" IS NULL OR k."number" IS NULL OR k."gender" IS NULL))
+    OR (k."role" = 'STUDENT' AND EXISTS (
+      SELECT 1 FROM "seatDup" s
+      WHERE s."grade" = k."grade" AND s."classNum" = k."classNum" AND s."number" = k."number"
+    ))
+    OR EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = k."emailKeyValue")
+  )
+`;
 
-  const seatGroups = await db.$queryRaw<GroupRow[]>`
-    SELECT array_agg(id ORDER BY id)::int[] AS ids
-    FROM "User"
-    WHERE role = 'STUDENT' AND grade IS NOT NULL AND "classNum" IS NOT NULL AND number IS NOT NULL
-    GROUP BY grade, "classNum", number
-    HAVING count(*) > 1
-  `;
-
-  const missingSeat = await db.$queryRaw<{ id: number }[]>`
-    SELECT id FROM "User"
-    WHERE role = 'STUDENT' AND (grade IS NULL OR "classNum" IS NULL OR number IS NULL)
-  `;
-
-  const missingGender = await db.$queryRaw<{ id: number }[]>`
-    SELECT id FROM "User" WHERE role = 'STUDENT' AND gender IS NULL
-  `;
-
-  const applications = await db.$queryRaw<{ id: number; minDate: Date | null; maxDate: Date | null }[]>`
-    WITH "dates" AS (
-      SELECT "applicationId" AS "appId", "date" FROM "MealApplicationMealDate"
-      UNION ALL
-      SELECT r."applicationId", d."date"
-      FROM "MealRegistrationMealDate" d
-      JOIN "MealRegistration" r ON r.id = d."registrationId"
-      WHERE r.status = 'APPROVED'
-    )
-    SELECT a.id, min(d."date") AS "minDate", max(d."date") AS "maxDate"
-    FROM "MealApplication" a
-    LEFT JOIN "dates" d ON d."appId" = a.id
-    GROUP BY a.id
-  `;
-
-  const registrationsWithoutDates = await db.$queryRaw<{ n: number }[]>`
-    SELECT count(*)::int AS n
-    FROM "MealRegistration" r
-    WHERE r.status = 'APPROVED'
-      AND NOT EXISTS (SELECT 1 FROM "MealRegistrationMealDate" d WHERE d."registrationId" = r.id)
-  `;
-
-  const counts = await db.$queryRaw<{ users: number; students: number; teachers: number }[]>`
-    SELECT count(*)::int AS users,
-           count(*) FILTER (WHERE role = 'STUDENT')::int AS students,
-           count(*) FILTER (WHERE role = 'TEACHER')::int AS teachers
-    FROM "User"
-  `;
-
-  const inScope: number[] = [];
-  let outOfYear = 0;
-  let unknownYear = 0;
-  for (const application of applications) {
-    if (!application.minDate || !application.maxDate) {
-      unknownYear += 1;
-      continue;
-    }
-    const min = application.minDate.toISOString().slice(0, 10);
-    const max = application.maxDate.toISOString().slice(0, 10);
-    if (min >= bounds.startDate && max <= bounds.endDate) {
-      inScope.push(application.id);
-    } else {
-      outOfYear += 1;
-    }
-  }
-
-  const emailCollisionUserIds = emailGroups.flatMap((group) => group.ids);
-  const duplicateSeatUserIds = seatGroups.flatMap((group) => group.ids);
-  const needsReviewUserIds = [
-    ...new Set([
-      ...duplicateSeatUserIds,
-      ...missingSeat.map((row) => row.id),
-      ...missingGender.map((row) => row.id),
-      ...emailCollisionUserIds,
-    ]),
-  ].sort((a, b) => a - b);
-
-  const issues: string[] = [];
-  if (emailGroups.length > 0) issues.push(issue("EMAIL_COLLISION", emailGroups.length));
-  if (seatGroups.length > 0) issues.push(issue("DUPLICATE_SEAT", seatGroups.length));
-  if (missingSeat.length > 0) issues.push(issue("MISSING_SEAT", missingSeat.length));
-  if (outOfYear > 0) issues.push(issue("APPLICATION_OUT_OF_YEAR", outOfYear));
-  if (unknownYear > 0) issues.push(issue("APPLICATION_YEAR_UNKNOWN", unknownYear));
-  const orphanRegistrations = registrationsWithoutDates[0]?.n ?? 0;
-  if (orphanRegistrations > 0) issues.push(issue("REGISTRATION_WITHOUT_DATES", orphanRegistrations));
-
-  const notes: string[] = [];
-  if (missingGender.length > 0) notes.push(issue("MISSING_GENDER", missingGender.length));
-
-  return {
-    counts: {
-      users: counts[0]?.users ?? 0,
-      students: counts[0]?.students ?? 0,
-      teachers: counts[0]?.teachers ?? 0,
-      applications: applications.length,
-    },
-    issues: issues.sort(),
-    notes,
-    needsReviewUserIds,
-    emailCollisionUserIds: [...emailCollisionUserIds].sort((a, b) => a - b),
-    yearScopedApplicationIds: inScope.sort((a, b) => a - b),
-  };
-}
-
-// 고정 SQL + 바인딩 파라미터만 사용한다. 식별자 보간은 하지 않으며,
-// id 목록은 jsonb 한 개로 넘겨 드라이버의 배열 직렬화에 의존하지 않는다.
 const INSERT_RECORDS_SQL = `
+  WITH ${CONFLICT_GROUPS_CTE}
   INSERT INTO "UserAcademicRecord" (
     "year", "userId", "role", "name", "grade", "classNum", "number", "gender",
     "subject", "homeroom", "position", "memberState", "needsReview", "version", "updatedAt"
   )
-  SELECT $1::int, u.id, u.role, u.name, u.grade, u."classNum", u.number, u.gender,
-         u.subject, u.homeroom, u.position,
-         CASE WHEN u.role = 'STUDENT' THEN 'ENROLLED' ELSE 'EMPLOYED' END,
-         u.id IN (SELECT (jsonb_array_elements_text($2::jsonb))::int),
+  SELECT $1::int, k."id", k."role", k."name", k."grade", k."classNum", k."number", k."gender",
+         k."subject", k."homeroom", k."position",
+         CASE WHEN k."role" = 'STUDENT' THEN 'ENROLLED' ELSE 'EMPLOYED' END,
+         ${NEEDS_REVIEW_EXPR},
          0, CURRENT_TIMESTAMP
-  FROM "User" u
+  FROM "keyed" k
   ON CONFLICT DO NOTHING
 `;
 
 const INSERT_ENTRIES_SQL = `
+  WITH ${CONFLICT_GROUPS_CTE}
   INSERT INTO "RosterEntry" ("id", "year", "userId", "emailKey", "included", "baseUserVersion", "version")
-  SELECT 'backfill-' || $1::text || '-' || u.id::text, $1::int, u.id, lower(btrim(u.email)),
-         true, u."profileVersion", 0
-  FROM "User" u
-  WHERE u.id NOT IN (SELECT (jsonb_array_elements_text($2::jsonb))::int)
+  SELECT 'backfill-' || $1::text || '-' || k."id"::text, $1::int, k."id", k."emailKeyValue",
+         true, k."profileVersion", 0
+  FROM "keyed" k
+  WHERE NOT EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = k."emailKeyValue")
   ON CONFLICT DO NOTHING
 `;
 
 const FILL_EMAIL_KEY_SQL = `
-  UPDATE "User" SET "emailKey" = lower(btrim(email))
-  WHERE "emailKey" IS NULL
-    AND id NOT IN (SELECT (jsonb_array_elements_text($1::jsonb))::int)
+  WITH ${CONFLICT_GROUPS_CTE}
+  UPDATE "User" u SET "emailKey" = lower(btrim(u."email"))
+  WHERE u."emailKey" IS NULL
+    AND NOT EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = lower(btrim(u."email")))
+`;
+
+// 신청의 확정일 범위 판정은 SQL의 date 비교로 끝낸다. JS Date 재해석을 거치지 않는다.
+const APPLICATION_DATES_CTE = `
+  "appDates" AS (
+    SELECT "applicationId" AS "appId", "date" FROM "MealApplicationMealDate"
+    UNION ALL
+    SELECT r."applicationId", d."date"
+    FROM "MealRegistrationMealDate" d
+    JOIN "MealRegistration" r ON r."id" = d."registrationId"
+    WHERE r."status" = 'APPROVED'
+  ),
+  "appRange" AS (
+    SELECT a."id", min(d."date") AS "minDate", max(d."date") AS "maxDate"
+    FROM "MealApplication" a
+    LEFT JOIN "appDates" d ON d."appId" = a."id"
+    GROUP BY a."id"
+  )
 `;
 
 const FILL_APPLICATION_YEAR_SQL = `
-  UPDATE "MealApplication" SET "academicYear" = $1::int
-  WHERE "academicYear" IS NULL
-    AND id IN (SELECT (jsonb_array_elements_text($2::jsonb))::int)
+  WITH ${APPLICATION_DATES_CTE}
+  UPDATE "MealApplication" a SET "academicYear" = $1::int
+  FROM "appRange" r
+  WHERE r."id" = a."id"
+    AND a."academicYear" IS NULL
+    AND r."minDate" >= $2::date
+    AND r."maxDate" <= $3::date
+`;
+
+const COUNT_APPLICATION_SCOPE_SQL = `
+  WITH ${APPLICATION_DATES_CTE}
+  SELECT count(*)::int AS "total",
+         count(*) FILTER (WHERE "minDate" IS NULL)::int AS "unknown",
+         count(*) FILTER (
+           WHERE "minDate" IS NOT NULL AND ("minDate" < $1::date OR "maxDate" > $2::date)
+         )::int AS "outOfYear"
+  FROM "appRange"
+`;
+
+const COUNT_CONFLICTS_SQL = `
+  WITH ${CONFLICT_GROUPS_CTE}
+  SELECT
+    (SELECT count(*)::int FROM "emailDup") AS "emailGroups",
+    (SELECT count(*)::int FROM "seatDup") AS "seatGroups",
+    (SELECT count(*)::int FROM "keyed" k
+      WHERE k."role" = 'STUDENT' AND (k."grade" IS NULL OR k."classNum" IS NULL OR k."number" IS NULL)
+    ) AS "missingSeat",
+    (SELECT count(*)::int FROM "keyed" k WHERE k."role" = 'STUDENT' AND k."gender" IS NULL) AS "missingGender",
+    (SELECT count(*)::int FROM "keyed") AS "users",
+    (SELECT count(*)::int FROM "keyed" k WHERE k."role" = 'STUDENT') AS "students",
+    (SELECT count(*)::int FROM "keyed" k WHERE k."role" = 'TEACHER') AS "teachers",
+    (SELECT count(*)::int FROM "MealRegistration" r
+      WHERE r."status" = 'APPROVED'
+        AND NOT EXISTS (SELECT 1 FROM "MealRegistrationMealDate" d WHERE d."registrationId" = r."id")
+    ) AS "orphanRegistrations"
 `;
 
 const COUNT_RECORD_MISMATCH_SQL = `
   SELECT count(*)::int AS n
   FROM "UserAcademicRecord" r
-  JOIN "User" u ON u.id = r."userId"
+  JOIN "User" u ON u."id" = r."userId"
   WHERE r."year" = $1::int
     AND (
       r."role" <> u."role"
       OR r."name" <> u."name"
+      OR r."memberState" <> CASE WHEN u."role" = 'STUDENT' THEN 'ENROLLED' ELSE 'EMPLOYED' END
       OR r."grade" IS DISTINCT FROM u."grade"
       OR r."classNum" IS DISTINCT FROM u."classNum"
       OR r."number" IS DISTINCT FROM u."number"
@@ -225,9 +182,80 @@ const COUNT_RECORD_MISMATCH_SQL = `
     )
 `;
 
+interface ConflictCounts {
+  emailGroups: number;
+  seatGroups: number;
+  missingSeat: number;
+  missingGender: number;
+  users: number;
+  students: number;
+  teachers: number;
+  orphanRegistrations: number;
+}
+
+/**
+ * 읽기 전용 사전 점검. 자동 병합·값 보정을 하지 않고, 사람이 고쳐야 하는
+ * 충돌만 종류와 건수로 보고한다. 복사와 같은 트랜잭션에서 호출하면 보고한
+ * 건수와 실제로 복사된 내용이 같은 스냅샷을 본다.
+ */
+export async function runPreflight(db: Db, year: number = INITIAL_ACADEMIC_YEAR): Promise<PreflightReport> {
+  const bounds = academicYearBounds(year);
+
+  const conflictRows = await db.$queryRawUnsafe<ConflictCounts[]>(COUNT_CONFLICTS_SQL);
+  const conflicts = conflictRows[0];
+  if (!conflicts) throw new DomainError("MISSING_PROFILE", "사전 점검 결과를 읽지 못했습니다.");
+
+  const scopeRows = await db.$queryRawUnsafe<{ total: number; unknown: number; outOfYear: number }[]>(
+    COUNT_APPLICATION_SCOPE_SQL,
+    bounds.startDate,
+    bounds.endDate,
+  );
+  const scope = scopeRows[0] ?? { total: 0, unknown: 0, outOfYear: 0 };
+
+  const issues: string[] = [];
+  if (conflicts.emailGroups > 0) issues.push(issue("EMAIL_COLLISION", conflicts.emailGroups));
+  if (conflicts.seatGroups > 0) issues.push(issue("DUPLICATE_SEAT", conflicts.seatGroups));
+  if (conflicts.missingSeat > 0) issues.push(issue("MISSING_SEAT", conflicts.missingSeat));
+  if (scope.outOfYear > 0) issues.push(issue("APPLICATION_OUT_OF_YEAR", scope.outOfYear));
+  if (scope.unknown > 0) issues.push(issue("APPLICATION_YEAR_UNKNOWN", scope.unknown));
+  if (conflicts.orphanRegistrations > 0) {
+    issues.push(issue("REGISTRATION_WITHOUT_DATES", conflicts.orphanRegistrations));
+  }
+
+  const notes: string[] = [];
+  if (conflicts.missingGender > 0) notes.push(issue("MISSING_GENDER", conflicts.missingGender));
+
+  return {
+    counts: {
+      users: conflicts.users,
+      students: conflicts.students,
+      teachers: conflicts.teachers,
+      applications: scope.total,
+    },
+    issues: issues.sort(),
+    notes,
+  };
+}
+
 async function countRecordMismatch(db: Db, year: number): Promise<number> {
   const rows = await db.$queryRawUnsafe<{ n: number }[]>(COUNT_RECORD_MISMATCH_SQL, year);
   return rows[0]?.n ?? 0;
+}
+
+/**
+ * 복사 단계. 네 개의 집합 기반 문장이 스스로 충돌 그룹을 계산하므로, 사전
+ * 점검 이후 들어온 행이 있어도 unique 위반 없이 같은 규칙으로 처리된다.
+ * 이미 있는 행은 덮어쓰지 않고, 새 컬럼 두 개만 채운다.
+ */
+export async function copyAcademicRecords(tx: Tx, year: number = INITIAL_ACADEMIC_YEAR): Promise<number> {
+  const bounds = academicYearBounds(year);
+
+  const inserted = await tx.$executeRawUnsafe(INSERT_RECORDS_SQL, year);
+  await tx.$executeRawUnsafe(INSERT_ENTRIES_SQL, year);
+  await tx.$executeRawUnsafe(FILL_EMAIL_KEY_SQL);
+  await tx.$executeRawUnsafe(FILL_APPLICATION_YEAR_SQL, year, bounds.startDate, bounds.endDate);
+
+  return inserted;
 }
 
 function buildManifest(
@@ -247,64 +275,46 @@ function buildManifest(
 
 /**
  * 기존 User 전체를 2026 학년도 기록·명부로 한 번 복사한다. 운영 중에 돌아가므로
- * 이미 있는 행은 덮어쓰지 않고, 기존 컬럼은 어떤 경로로도 수정하지 않는다.
- * 이미 COPIED 이후라면 다시 복사하지 않고 사전 점검 결과만 갱신한다.
+ * control 행을 배타 잠금해 호환 쓰기와 줄을 세우고, 점검·복사·상태 기록을 한
+ * 트랜잭션에서 끝낸다. 이미 COPIED 이후라면 다시 복사하지 않는다.
  */
 export async function backfill2026(db: PrismaClient, source: LegacyFingerprint): Promise<BackfillResult> {
-  const year = await activeYear(db);
-  const existing = await db.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } });
+  return db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR UPDATE`;
+    const year = await activeYear(tx);
 
-  if (existing && existing.state !== "PENDING") {
-    const report = await runPreflight(db, year);
-    const issues = [...report.issues];
-    const mismatch = await countRecordMismatch(db, year);
-    if (mismatch > 0) issues.push(issue("RECORD_MISMATCH", mismatch));
-    issues.sort();
+    const existing = await tx.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    const alreadyCopied = existing !== null && existing.state !== "PENDING";
 
-    await db.academicBackfill.update({
-      where: { key: ACADEMIC_BACKFILL_KEY },
-      data: { sourceManifest: buildManifest(source, report, issues) },
-    });
-    return { inserted: 0, blockingIssues: issues };
-  }
-
-  const report = await runPreflight(db, year);
-
-  return db.$transaction(async (tx: Tx) => {
-    const needsReview = JSON.stringify(report.needsReviewUserIds);
-    const collided = JSON.stringify(report.emailCollisionUserIds);
-
-    const inserted = await tx.$executeRawUnsafe(INSERT_RECORDS_SQL, year, needsReview);
-    await tx.$executeRawUnsafe(INSERT_ENTRIES_SQL, year, collided);
-    await tx.$executeRawUnsafe(FILL_EMAIL_KEY_SQL, collided);
-    await tx.$executeRawUnsafe(
-      FILL_APPLICATION_YEAR_SQL,
-      year,
-      JSON.stringify(report.yearScopedApplicationIds),
-    );
+    const report = await runPreflight(tx, year);
+    const inserted = alreadyCopied ? 0 : await copyAcademicRecords(tx, year);
 
     const issues = [...report.issues];
     const mismatch = await countRecordMismatch(tx, year);
     if (mismatch > 0) issues.push(issue("RECORD_MISMATCH", mismatch));
     issues.sort();
 
-    await tx.academicBackfill.upsert({
-      where: { key: ACADEMIC_BACKFILL_KEY },
-      create: {
-        key: ACADEMIC_BACKFILL_KEY,
-        state: "COPIED",
-        sourceManifest: buildManifest(source, report, issues),
-        completedAt: new Date(),
-      },
-      update: {
-        state: "COPIED",
-        sourceManifest: buildManifest(source, report, issues),
-        completedAt: new Date(),
-      },
-    });
+    const manifest = buildManifest(source, report, issues);
+    if (alreadyCopied) {
+      await tx.academicBackfill.update({
+        where: { key: ACADEMIC_BACKFILL_KEY },
+        data: { sourceManifest: manifest },
+      });
+    } else {
+      await tx.academicBackfill.upsert({
+        where: { key: ACADEMIC_BACKFILL_KEY },
+        create: {
+          key: ACADEMIC_BACKFILL_KEY,
+          state: "COPIED",
+          sourceManifest: manifest,
+          completedAt: new Date(),
+        },
+        update: { state: "COPIED", sourceManifest: manifest, completedAt: new Date() },
+      });
+    }
 
     return { inserted, blockingIssues: issues };
-  });
+  }, ROSTER_TX);
 }
 
 /**

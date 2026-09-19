@@ -133,6 +133,34 @@ export function assertApplyAllowed(options: CliOptions, config: MigrationTargetC
   }
 }
 
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+const PRISMA_CODE_PATTERN = /^P\d{4}$/;
+const IDENTIFIER_PATTERN = /^[A-Za-z0-9_]+$/;
+
+function readField(source: unknown, key: string): unknown {
+  if (typeof source !== "object" || source === null) return undefined;
+  return (source as Record<string, unknown>)[key];
+}
+
+/**
+ * CLI 출력용 안전 표기. 에러 message/detail에는 제약 위반 값(이메일 등)이
+ * 섞여 나올 수 있으므로 종류만 남기고 원문은 절대 내보내지 않는다.
+ */
+export function safeErrorKind(error: unknown): string {
+  const name = readField(error, "name");
+  const code = readField(error, "code");
+
+  if (name === "DomainError" && typeof code === "string") return `DomainError:${code}`;
+  if (typeof code === "string" && PRISMA_CODE_PATTERN.test(code)) return `Prisma:${code}`;
+  if (typeof code === "string" && SQLSTATE_PATTERN.test(code)) {
+    const constraint = readField(error, "constraint");
+    return typeof constraint === "string" && IDENTIFIER_PATTERN.test(constraint)
+      ? `Postgres:${code}:${constraint}`
+      : `Postgres:${code}`;
+  }
+  return "Error:UNKNOWN";
+}
+
 async function assertMarker(client: pg.ClientBase, config: MigrationTargetConfig): Promise<void> {
   const identity = await client.query<{ db: string; usr: string }>(
     "SELECT current_database() AS db, current_user AS usr",
@@ -148,11 +176,17 @@ async function assertMarker(client: pg.ClientBase, config: MigrationTargetConfig
   }
 }
 
+export interface MigrationTarget {
+  db: PrismaClient;
+  /** 외부에서 만든 pool은 Prisma가 닫지 않으므로 호출자가 직접 끊는다. */
+  close: () => Promise<void>;
+}
+
 /**
  * 연결 전 URL 대조와 연결 후 current_database/current_user/marker 대조를 모두
  * 통과한 뒤에만 client를 돌려준다. marker를 새로 만들지 않는다.
  */
-export async function openMigrationTarget(configPath: string): Promise<PrismaClient> {
+export async function openMigrationTarget(configPath: string): Promise<MigrationTarget> {
   const config = readMigrationTargetConfig(configPath);
   const rawUrl = process.env[MIGRATION_URL_ENV];
   if (!rawUrl) {
@@ -171,7 +205,14 @@ export async function openMigrationTarget(configPath: string): Promise<PrismaCli
   }
   probe.release();
 
-  return new PrismaClient({ adapter: new PrismaPg(pool) });
+  const db = new PrismaClient({ adapter: new PrismaPg(pool) });
+  return {
+    db,
+    close: async () => {
+      await db.$disconnect();
+      await pool.end();
+    },
+  };
 }
 
 /** fingerprint 계산처럼 raw SQL이 필요한 경로용. 같은 가드를 다시 적용한다. */

@@ -4,7 +4,13 @@ import fs from "node:fs";
 import type { LegacyFingerprint } from "./fingerprint";
 import { captureLegacyFingerprint } from "./fingerprint";
 import { verifyBackfill } from "../../src/lib/academic-year/backfill";
-import { openMigrationPgClient, openMigrationTarget, parseCliArgs, readMigrationTargetConfig } from "./db-target";
+import {
+  openMigrationPgClient,
+  openMigrationTarget,
+  parseCliArgs,
+  readMigrationTargetConfig,
+  safeErrorKind,
+} from "./db-target";
 
 function readFingerprint(filePath: string): LegacyFingerprint {
   const parsed: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -22,7 +28,8 @@ async function main(): Promise<void> {
   const config = readMigrationTargetConfig(options.targetConfigPath);
   const before = readFingerprint(options.beforePath);
 
-  const db = await openMigrationTarget(options.targetConfigPath);
+  const target = await openMigrationTarget(options.targetConfigPath);
+  const db = target.db;
   const pgClient = await openMigrationPgClient(options.targetConfigPath);
   try {
     const after = await captureLegacyFingerprint(pgClient);
@@ -33,13 +40,13 @@ async function main(): Promise<void> {
     console.info(`issues=${verified.issues.join(",") || "none"}`);
   } finally {
     await pgClient.end();
-    await db.$disconnect();
+    await target.close();
   }
 }
 
 if (require.main === module) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : "원본 검증 CLI 실패");
+    console.error(`failed kind=${safeErrorKind(error)}`);
     process.exitCode = 1;
   });
 }

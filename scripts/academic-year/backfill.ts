@@ -11,6 +11,7 @@ import {
   openMigrationTarget,
   parseCliArgs,
   readMigrationTargetConfig,
+  safeErrorKind,
 } from "./db-target";
 
 async function main(): Promise<void> {
@@ -22,7 +23,8 @@ async function main(): Promise<void> {
   const config = readMigrationTargetConfig(options.targetConfigPath);
   assertApplyAllowed(options, config);
 
-  const db = await openMigrationTarget(options.targetConfigPath);
+  const target = await openMigrationTarget(options.targetConfigPath);
+  const db = target.db;
   try {
     if (options.mode === "inspect") {
       const report = await runPreflight(db);
@@ -56,13 +58,13 @@ async function main(): Promise<void> {
       await pgClient.end();
     }
   } finally {
-    await db.$disconnect();
+    await target.close();
   }
 }
 
 if (require.main === module) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : "초기 이전 CLI 실패");
+    console.error(`failed kind=${safeErrorKind(error)}`);
     process.exitCode = 1;
   });
 }
