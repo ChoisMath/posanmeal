@@ -227,6 +227,55 @@ describe("guarded mutations", () => {
     expect(users.filter((user) => user.profileVersion === 1)).toHaveLength(1);
   });
 
+  it.each(["same", "payload", "actor", "kind"])("rechecks a same-user receipt after waiting for its row lock: %s", async (variant) => {
+    const shared = { actor: MAIN, requestId: "same-user-replay", userId: fixture.studentId,
+      expectedRowVersion: 0, kind: "EDIT", payloadHash: "same-hash" };
+    let release!: () => void;
+    const resumed = new Promise<void>((resolve) => { release = resolve; });
+    let firstEntered = false;
+    let secondSawMissingReceipt = false;
+    let writes = 0;
+    const secondDb = db.$extends({ query: { rosterMutation: {
+      async findUnique({ args, query }) {
+        const result = await query(args);
+        if (args.where.requestId === shared.requestId && result === null) secondSawMissingReceipt = true;
+        return result;
+      },
+    } } }) as unknown as PrismaClient;
+    const first = withUserMutation(db, shared, allow, async () => {
+      firstEntered = true;
+      writes += 1;
+      await resumed;
+      return { changed: 1, ids: [fixture.studentId] };
+    }).then((value) => ({ value }), (error: unknown) => ({ error }));
+    try {
+      await expect.poll(() => firstEntered, { timeout: 2000 }).toBe(true);
+      const changed = variant === "payload" ? { payloadHash: "different" }
+        : variant === "kind" ? { kind: "OTHER" }
+        : variant === "actor" ? { actor: { kind: "USER", userId: fixture.teacherId, sessionVersion: 0 } as Actor }
+        : {};
+      const second = withUserMutation(secondDb, { ...shared, ...changed }, allow, async () => {
+        writes += 1;
+        return { changed: 1, ids: [fixture.studentId] };
+      }).then((value) => ({ value }), (error: unknown) => ({ error }));
+      try {
+        await expect.poll(() => secondSawMissingReceipt, { timeout: 2000 }).toBe(true);
+      } finally {
+        release();
+        await second;
+      }
+      expect(await first).toHaveProperty("value");
+      if (variant === "same") expect(await second).toEqual(await first);
+      else expect(await second).toMatchObject({ error: { code: "REQUEST_REUSED" } });
+      expect(writes).toBe(1);
+      expect((await db.user.findUniqueOrThrow({ where: { id: fixture.studentId } })).profileVersion).toBe(1);
+      expect(await db.rosterMutation.count()).toBe(1);
+    } finally {
+      release();
+      await first;
+    }
+  });
+
   it("rejects a shared request key carrying a different payload", async () => {
     await withUserMutation(
       db,

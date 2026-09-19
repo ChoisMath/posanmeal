@@ -174,6 +174,9 @@ async function runUserMutation<T extends Summary>(
     const locked = await tx.$queryRaw<{ id: number; profileVersion: number }[]>`
       SELECT id, "profileVersion" FROM "User" WHERE id = ${input.userId} FOR UPDATE
     `;
+    // 잠금 대기 중 완료된 요청은 오래된 입력 버전보다 저장된 결과를 우선한다.
+    const completed = await tx.rosterMutation.findUnique({ where: { requestId: input.requestId } });
+    if (completed) return replayReceipt<T>(completed, identity);
     const target = locked[0];
     if (!target) {
       throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");

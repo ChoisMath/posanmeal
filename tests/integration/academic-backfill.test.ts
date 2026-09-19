@@ -44,6 +44,66 @@ describe("2026 backfill", () => {
     fixture = await seedLegacyFixture(db);
   });
 
+  it.each(["verify", "enable"])("%s waits for an in-flight application write and validates its committed state", async (operation) => {
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before);
+    const after = await captureLegacyFingerprint(pgClient);
+    await verifyBackfill(db, before, after);
+    await pgClient.query("BEGIN");
+    await pgClient.query('UPDATE "MealApplication" SET "academicYear" = NULL WHERE id = $1', [fixture.applicationId]);
+    const pending = operation === "verify"
+      ? verifyBackfill(db, before, after)
+      : enableAcademicMode(db, MAIN);
+    const outcome = pending.then((value) => ({ value }), (error: unknown) => ({ error }));
+    try {
+      await expect.poll(async () => {
+        await pgClient.query("SELECT pg_stat_clear_snapshot()");
+        const waiting = await pgClient.query<{ count: number }>(`
+          SELECT count(*)::int AS count FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'
+            AND query LIKE 'LOCK TABLE "MealApplication"%'
+        `);
+        return waiting.rows[0]?.count ?? 0;
+      }, { timeout: 2000, interval: 10 }).toBeGreaterThan(0);
+    } finally {
+      await pgClient.query("COMMIT");
+      await outcome;
+    }
+
+    if (operation === "verify") {
+      expect(await outcome).toMatchObject({ value: { canEnable: false, issues: ["APPLICATION_YEAR_MISSING:1"] } });
+      expect(await db.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } }))
+        .toMatchObject({ state: "COPIED", verifiedAt: null });
+    } else {
+      expect(await outcome).toMatchObject({ error: { code: "NOT_READY" } });
+    }
+    expect((await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).mode).toBe("PREPARING");
+    expect(await db.rosterMutation.count()).toBe(0);
+  });
+
+  it.each(["missing", "unsupported"])("READY rejects %s fingerprint proof format until explicitly reverified", async (format) => {
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before);
+    const after = await captureLegacyFingerprint(pgClient);
+    await verifyBackfill(db, before, after);
+    const stamp = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    const manifest = JSON.parse(JSON.stringify(stamp.sourceManifest));
+    if (format === "missing") {
+      delete manifest.fingerprintFormat;
+      delete manifest.fingerprintVersion;
+    } else {
+      manifest.fingerprintVersion = 1;
+    }
+    await db.academicBackfill.update({ where: { key: ACADEMIC_BACKFILL_KEY }, data: { sourceManifest: manifest } });
+
+    await expect(enableAcademicMode(db, MAIN)).rejects.toMatchObject({ code: "NOT_READY" });
+    expect((await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).mode).toBe("PREPARING");
+    expect(await db.rosterMutation.count()).toBe(0);
+    expect((await verifyBackfill(db, before, after)).canEnable).toBe(true);
+    await enableAcademicMode(db, MAIN);
+    expect((await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).mode).toBe("READY");
+  });
+
   it("leaves every legacy table untouched and never recreates a roster deleted after COPIED", async () => {
     const before = await captureLegacyFingerprint(pgClient);
     await backfill2026(db, before);
@@ -378,6 +438,51 @@ describe("backfill verification and readiness", () => {
       enableAcademicMode(db, { kind: "USER", userId: teacher.id, sessionVersion: 0 }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     expect((await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).mode).toBe("PREPARING");
+  });
+
+  it("revokes a previous VERIFIED stamp when an explicit recheck fails", async () => {
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before);
+    await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+    await db.systemSetting.update({ where: { key: "faceMatchThreshold" }, data: { value: "0.6" } });
+
+    const result = await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+    expect(result.canEnable).toBe(false);
+    const stamp = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    expect(stamp.state).toBe("COPIED");
+    expect(stamp.verifiedAt).toBeNull();
+    expect(stamp.sourceManifest).toMatchObject({ issues: ["LEGACY_MODIFIED:SystemSetting"] });
+    await expect(enableAcademicMode(db, MAIN)).rejects.toMatchObject({ code: "NOT_READY" });
+  });
+
+  it("checks current record consistency before enabling even without another verification", async () => {
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before);
+    await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+    const record = await db.userAcademicRecord.findFirstOrThrow();
+    await db.userAcademicRecord.update({ where: { id: record.id }, data: { name: "불일치 합성 이름" } });
+
+    await expect(enableAcademicMode(db, MAIN)).rejects.toMatchObject({ code: "NOT_READY" });
+    expect((await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).mode).toBe("PREPARING");
+    expect(await db.rosterMutation.count()).toBe(0);
+  });
+
+  it("refuses READY if an application lost its year after verification", async () => {
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before);
+    await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+    await db.mealApplication.updateMany({ data: { academicYear: null } });
+
+    await expect(enableAcademicMode(db, MAIN)).rejects.toMatchObject({ code: "NOT_READY" });
+  });
+
+  it("does not freeze ordinary legacy writes between verification and READY", async () => {
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before);
+    await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+    await db.systemSetting.update({ where: { key: "faceMatchThreshold" }, data: { value: "0.6" } });
+
+    await expect(enableAcademicMode(db, MAIN)).resolves.toBeUndefined();
   });
 });
 
