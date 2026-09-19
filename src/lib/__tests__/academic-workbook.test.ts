@@ -179,6 +179,89 @@ describe("buildRosterWorkbook / parseRosterWorkbook round trip", () => {
     });
   });
 
+  it("표준 열 이름이 같은 시트에 중복되면 INVALID_FILE이다", async () => {
+    const manifest: WorkbookManifest = { schemaVersion: 1, fileId: "file-1", year: 2026, version: 0, rows: {} };
+    const buffer = await buildRosterWorkbook({ year: 2026, rows: [], includeData: false, manifest });
+
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const sheet = book.getWorksheet("학생")!;
+    sheet.getRow(1).getCell(2).value = "이메일"; // "학년" 자리에 "이메일"을 또 넣어 중복시킨다
+    const dupHeaderBuffer = await book.xlsx.writeBuffer();
+
+    await expect(
+      parseRosterWorkbook(Uint8Array.from(Buffer.from(dupHeaderBuffer)).buffer),
+    ).rejects.toMatchObject({ code: "INVALID_FILE" });
+  });
+
+  it("__meta 시트가 없으면 INVALID_FILE이다", async () => {
+    const manifest: WorkbookManifest = { schemaVersion: 1, fileId: "file-1", year: 2026, version: 0, rows: {} };
+    const buffer = await buildRosterWorkbook({ year: 2026, rows: [], includeData: false, manifest });
+
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    book.removeWorksheet("__meta");
+    const withoutMeta = await book.xlsx.writeBuffer();
+
+    await expect(
+      parseRosterWorkbook(Uint8Array.from(Buffer.from(withoutMeta)).buffer),
+    ).rejects.toMatchObject({ code: "INVALID_FILE" });
+  });
+
+  it("schemaVersion이 다르면 INVALID_FILE이다", async () => {
+    const manifest: WorkbookManifest = { schemaVersion: 1, fileId: "file-1", year: 2026, version: 0, rows: {} };
+    const buffer = await buildRosterWorkbook({ year: 2026, rows: [], includeData: false, manifest });
+
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const meta = book.getWorksheet("__meta")!;
+    meta.getRow(1).getCell(2).value = 999;
+    const wrongVersionBuffer = await book.xlsx.writeBuffer();
+
+    await expect(
+      parseRosterWorkbook(Uint8Array.from(Buffer.from(wrongVersionBuffer)).buffer),
+    ).rejects.toMatchObject({ code: "INVALID_FILE" });
+  });
+
+  it("정수 열에 소수(1.5)가 들어오면 정확한 열로 이슈가 된다", async () => {
+    const rows = [studentRow()];
+    const manifest = manifestFor(rows);
+    const buffer = await buildRosterWorkbook({ year: 2026, rows, includeData: true, manifest });
+
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const sheet = book.getWorksheet("학생")!;
+    sheet.getRow(2).getCell(2).value = 1.5; // 학년
+
+    const decimalBuffer = await book.xlsx.writeBuffer();
+    const parsed = await parseRosterWorkbook(Uint8Array.from(Buffer.from(decimalBuffer)).buffer);
+
+    expect(parsed.rows).toHaveLength(0);
+    expect(
+      parsed.issues.some((i) => i.sheet === "학생" && i.row === 2 && i.column === "학년"),
+    ).toBe(true);
+  });
+
+  it("공유 수식(sharedFormula) 셀도 거절한다", async () => {
+    const rows = [studentRow(), studentRow({ entryId: "entry-student-2", email: "student2@posan.hs.kr", emailKey: "student2@posan.hs.kr" })];
+    const manifest = manifestFor(rows);
+    const buffer = await buildRosterWorkbook({ year: 2026, rows, includeData: true, manifest });
+
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const sheet = book.getWorksheet("학생")!;
+    // 4번째 컬럼(번호)에 걸쳐 공유 수식을 채운다: 2행이 마스터, 3행이 follower(sharedFormula).
+    sheet.fillFormula("D2:D3", "ROW()", [2, 3]);
+    expect((sheet.getCell("D3").value as { sharedFormula?: string }).sharedFormula).toBeDefined();
+
+    const sharedFormulaBuffer = await book.xlsx.writeBuffer();
+    const parsed = await parseRosterWorkbook(Uint8Array.from(Buffer.from(sharedFormulaBuffer)).buffer);
+
+    expect(
+      parsed.issues.some((i) => i.code === "FORMULA_NOT_ALLOWED" && i.sheet === "학생" && i.row === 3),
+    ).toBe(true);
+  });
+
   it("부분적으로만 채운 행은 정확한 시트·행·열로 이슈가 된다", async () => {
     const rows = [studentRow()];
     const manifest = manifestFor(rows);

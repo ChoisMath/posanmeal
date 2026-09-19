@@ -4,6 +4,7 @@ import type { Client } from "pg";
 import type { Actor } from "@/lib/academic-year/contracts";
 import { isDomainError } from "@/lib/academic-year/errors";
 import { exportRoster } from "@/lib/academic-year/export-service";
+import { createDraftYear, upsertRosterProfile } from "@/lib/academic-year/roster-service";
 import { parseRosterWorkbook } from "@/lib/academic-year/workbook-parser";
 import {
   openAcademicTestDb,
@@ -13,6 +14,28 @@ import {
 import { prepareAcademicFixture, type AcademicFixture } from "./support/academic-fixture";
 
 const YEAR = 2026;
+const NEXT_YEAR = 2027;
+
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn(),
+  client: { current: null as unknown as PrismaClient },
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: new Proxy(
+    {},
+    {
+      get(_target, key) {
+        const holder = mocks.client.current as unknown as Record<string | symbol, unknown>;
+        const value = holder[key];
+        return typeof value === "function" ? value.bind(holder) : value;
+      },
+    },
+  ),
+}));
+vi.mock("@/auth", () => ({ auth: mocks.auth }));
+
+const MAIN_SESSION = { user: { dbUserId: 0, role: "ADMIN", adminLevel: "ADMIN" } };
 
 async function toParsed(buffer: Buffer) {
   return parseRosterWorkbook(Uint8Array.from(buffer).buffer);
@@ -37,6 +60,7 @@ describe("exportRoster", () => {
   beforeAll(async () => {
     db = await openAcademicTestDb();
     pgClient = await openAcademicTestPgClient();
+    mocks.client.current = db;
   });
 
   afterAll(async () => {
@@ -46,6 +70,7 @@ describe("exportRoster", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.auth.mockResolvedValue(MAIN_SESSION);
     await resetAcademicTestDb(db);
     fx = await prepareAcademicFixture(db, pgClient);
   });
@@ -173,5 +198,74 @@ describe("exportRoster", () => {
   it("PREPARING 상태에서는 503으로 막힌다", async () => {
     await db.rosterControl.update({ where: { id: 1 }, data: { mode: "PREPARING" } });
     await expectDomainCode(exportRoster(db, fx.main, YEAR, true, false), "NOT_READY");
+  });
+
+  it("초안 학년도를 내보내면 아직 User가 없는 신규 행도 entryId·version이 일치한다", async () => {
+    await createDraftYear(db, {
+      actor: fx.main,
+      requestId: "export-draft",
+      expectedVersion: fx.version,
+      kind: "DRAFT",
+      payloadHash: "export-draft",
+      year: NEXT_YEAR,
+    });
+
+    const control = await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
+    await upsertRosterProfile(db, {
+      actor: fx.main,
+      requestId: "draft-new-row",
+      expectedRowVersion: 0,
+      expectedVersion: control.version,
+      kind: "ROSTER_ROW",
+      payloadHash: "draft-new-row",
+      year: NEXT_YEAR,
+      email: "draft.new@example.posan.kr",
+      profile: { role: "STUDENT", name: "초안신입", grade: 2, classNum: 5, number: 9, gender: "MALE", subject: null, homeroom: null, position: null },
+    });
+
+    const entry = await db.rosterEntry.findFirstOrThrow({
+      where: { year: NEXT_YEAR, emailKey: "draft.new@example.posan.kr" },
+    });
+    expect(entry.userId).toBeNull();
+
+    const buffer = await exportRoster(db, fx.main, NEXT_YEAR, true, false);
+    const files = await db.rosterFile.findMany({ where: { year: NEXT_YEAR } });
+    expect(files).toHaveLength(1);
+    const manifest = files[0]!.manifest as {
+      rows: Record<string, { entryId: string; userId: number | null; email: string; version: number }>;
+    };
+
+    const parsed = await toParsed(buffer);
+    const draftRow = parsed.rows.find((r) => r.email === "draft.new@example.posan.kr")!;
+    expect(draftRow).toBeDefined();
+    const manifestRow = manifest.rows[draftRow.rowToken!]!;
+    expect(manifestRow.entryId).toBe(entry.id);
+    expect(manifestRow.userId).toBeNull();
+    expect(manifestRow.version).toBe(entry.version);
+  });
+
+  describe("GET /api/admin/academic-years/[year]/template", () => {
+    async function callRoute(url: string) {
+      const { GET } = await import("@/app/api/admin/academic-years/[year]/template/route");
+      const match = url.match(/academic-years\/([^/?]+)\/template/);
+      const year = match![1]!;
+      return GET(new Request(`http://localhost${url}`), { params: Promise.resolve({ year }) });
+    }
+
+    it("잘못된 학년도 경로 값은 422다", async () => {
+      const res = await callRoute("/api/admin/academic-years/not-a-year/template");
+      expect(res.status).toBe(422);
+    });
+
+    it("잘못된 includeData 값은 422다", async () => {
+      const res = await callRoute(`/api/admin/academic-years/${YEAR}/template?includeData=yes`);
+      expect(res.status).toBe(422);
+    });
+
+    it("정상 요청은 xlsx를 내려준다", async () => {
+      const res = await callRoute(`/api/admin/academic-years/${YEAR}/template?includeData=1`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toContain("spreadsheetml");
+    });
   });
 });

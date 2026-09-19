@@ -43,7 +43,10 @@ function readCellText(cell: ExcelJSType.Cell): CellReadResult {
 
   if (typeof value === "string") return { ok: true, text: value.trim() };
   if (typeof value === "number") {
-    return { ok: true, text: Number.isInteger(value) ? String(value) : String(value) };
+    // 정수든 아니든 화면 그대로 문자열로 넘긴다 — "1.5"가 학년 같은 정수 열에
+    // 들어오면 이후 zod 검증(정수 아님)이 위치 있는 이슈로 잡아내야 하므로
+    // 여기서 미리 자르거나 반올림하지 않는다.
+    return { ok: true, text: String(value) };
   }
   if (typeof value === "boolean") {
     return { ok: false, code: "UNSUPPORTED_CELL_TYPE", message: "지원하지 않는 셀 형식입니다." };
@@ -78,25 +81,41 @@ function readCellText(cell: ExcelJSType.Cell): CellReadResult {
   return { ok: false, code: "UNSUPPORTED_CELL_TYPE", message: "지원하지 않는 셀 형식입니다." };
 }
 
-function headerIndexOf(headerRow: ExcelJSType.Row, header: string): number | null {
+function headerIndicesOf(headerRow: ExcelJSType.Row, header: string): number[] {
   const count = headerRow.cellCount;
+  const indices: number[] = [];
   for (let i = 1; i <= count; i++) {
     const cell = headerRow.getCell(i);
     const value = cell.value;
-    if (typeof value === "string" && value.trim() === header) return i;
+    if (typeof value === "string" && value.trim() === header) indices.push(i);
   }
-  return null;
+  return indices;
 }
 
+function headerIndexOf(headerRow: ExcelJSType.Row, header: string): number | null {
+  return headerIndicesOf(headerRow, header)[0] ?? null;
+}
+
+/**
+ * 표준 열이 같은 시트에 두 번 있으면 두 번째 칸의 값은 조용히 버려진다
+ * (첫 일치만 읽으므로). 그 값이 사라진 것을 관리자가 알아챌 방법이 없으므로
+ * 파일 자체를 거절한다.
+ */
 function requireColumn(headerRow: ExcelJSType.Row, header: string, sheetLabel: string): number {
-  const idx = headerIndexOf(headerRow, header);
-  if (idx === null) {
+  const indices = headerIndicesOf(headerRow, header);
+  if (indices.length === 0) {
     throw new DomainError(
       "INVALID_FILE",
       `${sheetLabel} 시트에 "${header}" 열이 없습니다. 표준 양식을 새로 내려받아 사용하세요.`,
     );
   }
-  return idx;
+  if (indices.length > 1) {
+    throw new DomainError(
+      "INVALID_FILE",
+      `${sheetLabel} 시트에 "${header}" 열이 중복되어 있습니다. 표준 양식을 새로 내려받아 사용하세요.`,
+    );
+  }
+  return indices[0]!;
 }
 
 function readMeta(workbook: ExcelJSType.Workbook): { fileId: string; year: number; templateOnly: boolean } {
