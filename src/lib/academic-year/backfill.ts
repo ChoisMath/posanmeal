@@ -79,6 +79,10 @@ const FILL_EMAIL_KEY_SQL = `
   UPDATE "User" u SET "emailKey" = lower(btrim(u."email"))
   WHERE u."emailKey" IS NULL
     AND NOT EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = lower(btrim(u."email")))
+    -- 남이 이미 쥔 키를 다시 쓰면 unique 위반으로 전체가 멈춘다.
+    AND NOT EXISTS (
+      SELECT 1 FROM "User" o WHERE o."id" <> u."id" AND o."emailKey" = lower(btrim(u."email"))
+    )
 `;
 
 // 신청의 확정일 범위 판정은 SQL의 date 비교로 끝낸다. JS Date 재해석을 거치지 않는다.

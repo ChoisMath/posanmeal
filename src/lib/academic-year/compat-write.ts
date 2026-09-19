@@ -3,32 +3,43 @@ import { INITIAL_ACADEMIC_YEAR } from "./backfill";
 import type { Tx } from "./db";
 import { DomainError } from "./errors";
 import { ROSTER_TX } from "./mutation";
-import { CONFLICT_GROUPS_CTE, NEEDS_REVIEW_EXPR } from "./roster-sql";
+import { CONFLICT_GROUPS_CTE, MIRROR_CONFLICT_GROUPS_CTE, NEEDS_REVIEW_EXPR } from "./roster-sql";
 
-const BATCH_CTE = `
-  ${CONFLICT_GROUPS_CTE},
-  "batch" AS (SELECT * FROM "keyed" WHERE "id" = ANY($2::int[]))
-`;
-
-// 옛 주소로 남은 키는 다른 사용자의 정규화 주소를 막을 수 있으므로 먼저 비운다.
-const CLEAR_STALE_EMAIL_KEY_SQL = `
-  UPDATE "User" u SET "emailKey" = NULL
-  WHERE u."id" = ANY($1::int[])
-    AND u."emailKey" IS NOT NULL
-    AND u."emailKey" <> lower(btrim(u.email))
-`;
-
-const FILL_EMAIL_KEY_SQL = `
-  WITH ${CONFLICT_GROUPS_CTE}
-  UPDATE "User" u SET "emailKey" = lower(btrim(u.email))
-  WHERE u."id" = ANY($1::int[])
-    AND u."emailKey" IS NULL
-    AND NOT EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = lower(btrim(u.email)))
+const EMAIL_DUP_CTE = `
+  "emailDup" AS (
+    SELECT lower(btrim(u.email)) AS "emailKeyValue" FROM "User" u
+    GROUP BY lower(btrim(u.email)) HAVING count(*) > 1
+  )
 `;
 
 /**
- * 좌석이 바뀌는 기록만 부분 unique 색인 밖으로 잠시 빼 둔다. 같은 문장 안에서
- * 두 학생이 좌석을 맞바꾸면 행 단위 검사가 중간 상태에서 23505를 낼 수 있다.
+ * 충돌 그룹의 구성원은 한 명도 키를 쥐지 못한다. 옛 주소로 남은 키도 함께 비운다 —
+ * 남의 정규화 주소를 막아 다음 채우기를 unique 위반으로 실패시킬 수 있다.
+ */
+const CLEAR_EMAIL_KEYS_SQL = `
+  WITH ${EMAIL_DUP_CTE}
+  UPDATE "User" u SET "emailKey" = NULL
+  WHERE u."emailKey" IS NOT NULL
+    AND (
+      u."emailKey" <> lower(btrim(u.email))
+      OR EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = lower(btrim(u.email)))
+    )
+`;
+
+// 충돌이 풀린 사용자도 이 문장에서 키를 되찾으므로 배치로 좁히지 않는다.
+const FILL_EMAIL_KEYS_SQL = `
+  WITH ${EMAIL_DUP_CTE}
+  UPDATE "User" u SET "emailKey" = lower(btrim(u.email))
+  WHERE u."emailKey" IS NULL
+    AND NOT EXISTS (SELECT 1 FROM "emailDup" e WHERE e."emailKeyValue" = lower(btrim(u.email)))
+    AND NOT EXISTS (
+      SELECT 1 FROM "User" o WHERE o."id" <> u."id" AND o."emailKey" = lower(btrim(u.email))
+    )
+`;
+
+/**
+ * 좌석이 바뀌는 기록을 부분 unique 색인 밖으로 먼저 뺀다. 같은 문장 안에서 두
+ * 학생이 좌석을 맞바꾸면 행 단위 검사가 중간 상태에서 23505를 낼 수 있다.
  * 값이 그대로인 기록은 건드리지 않아 뒤따르는 upsert가 헛되이 version을 올리지 않는다.
  */
 const PARK_MOVED_RECORDS_SQL = `
@@ -53,8 +64,15 @@ const RECORD_SEAT_TAKEN_EXPR = `
   )
 `;
 
+/**
+ * 배치 구성원의 기록을 `User` 현재값으로 맞춘다. PARK이 좌석을 옮기는 행을 미리
+ * 색인에서 빼 두었고, 여기서 다시 색인에 들어가는 행은 배치 안팎 어느 좌석과도
+ * 겹치지 않음을 확인한 것뿐이라 23505가 날 수 없다. 역할이 뒤집힐 때만 반대 역할의
+ * 칸을 비우고 소속 상태를 그 역할의 기본값으로 되돌린다.
+ */
 const UPSERT_RECORDS_SQL = `
-  WITH ${BATCH_CTE}
+  WITH ${CONFLICT_GROUPS_CTE},
+  "batch" AS (SELECT * FROM "keyed" WHERE "id" = ANY($2::int[]))
   INSERT INTO "UserAcademicRecord" (
     "year", "userId", "role", "name", "grade", "classNum", "number", "gender",
     "subject", "homeroom", "position", "memberState", "needsReview", "version", "updatedAt"
@@ -68,65 +86,72 @@ const UPSERT_RECORDS_SQL = `
   ON CONFLICT ("year", "userId") DO UPDATE SET
     "role" = EXCLUDED."role",
     "name" = EXCLUDED."name",
-    "grade" = EXCLUDED."grade",
-    "classNum" = EXCLUDED."classNum",
-    "number" = EXCLUDED."number",
-    "gender" = EXCLUDED."gender",
-    "subject" = EXCLUDED."subject",
-    "homeroom" = EXCLUDED."homeroom",
-    "position" = EXCLUDED."position",
-    "memberState" = EXCLUDED."memberState",
+    "grade" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'TEACHER' THEN NULL ELSE EXCLUDED."grade" END,
+    "classNum" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'TEACHER' THEN NULL ELSE EXCLUDED."classNum" END,
+    "number" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'TEACHER' THEN NULL ELSE EXCLUDED."number" END,
+    "gender" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'TEACHER' THEN NULL ELSE EXCLUDED."gender" END,
+    "subject" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'STUDENT' THEN NULL ELSE EXCLUDED."subject" END,
+    "homeroom" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'STUDENT' THEN NULL ELSE EXCLUDED."homeroom" END,
+    "position" = CASE WHEN "UserAcademicRecord"."role" <> EXCLUDED."role" AND EXCLUDED."role" = 'STUDENT' THEN NULL ELSE EXCLUDED."position" END,
+    "memberState" = CASE
+      WHEN "UserAcademicRecord"."role" = EXCLUDED."role" THEN "UserAcademicRecord"."memberState"
+      ELSE EXCLUDED."memberState"
+    END,
     "needsReview" = EXCLUDED."needsReview",
     "version" = "UserAcademicRecord"."version" + 1,
     "updatedAt" = CURRENT_TIMESTAMP
-  WHERE (
-    "UserAcademicRecord"."role", "UserAcademicRecord"."name", "UserAcademicRecord"."grade",
-    "UserAcademicRecord"."classNum", "UserAcademicRecord"."number", "UserAcademicRecord"."gender",
-    "UserAcademicRecord"."subject", "UserAcademicRecord"."homeroom", "UserAcademicRecord"."position",
-    "UserAcademicRecord"."memberState", "UserAcademicRecord"."needsReview"
-  ) IS DISTINCT FROM (
-    EXCLUDED."role", EXCLUDED."name", EXCLUDED."grade",
-    EXCLUDED."classNum", EXCLUDED."number", EXCLUDED."gender",
-    EXCLUDED."subject", EXCLUDED."homeroom", EXCLUDED."position",
-    EXCLUDED."memberState", EXCLUDED."needsReview"
-  )
+  WHERE "UserAcademicRecord"."role" IS DISTINCT FROM EXCLUDED."role"
+     OR (
+       "UserAcademicRecord"."name", "UserAcademicRecord"."grade", "UserAcademicRecord"."classNum",
+       "UserAcademicRecord"."number", "UserAcademicRecord"."gender", "UserAcademicRecord"."subject",
+       "UserAcademicRecord"."homeroom", "UserAcademicRecord"."position",
+       "UserAcademicRecord"."needsReview"
+     ) IS DISTINCT FROM (
+       EXCLUDED."name", EXCLUDED."grade", EXCLUDED."classNum",
+       EXCLUDED."number", EXCLUDED."gender", EXCLUDED."subject",
+       EXCLUDED."homeroom", EXCLUDED."position", EXCLUDED."needsReview"
+     )
+  RETURNING "userId"
 `;
 
-// 충돌은 양쪽의 문제이므로 부딪힌 기존 기록도 검토 대상으로 올린다. 색인에서
-// 빠지기만 하므로 유일성은 깨지지 않는다.
-const FLAG_COLLIDING_RECORDS_SQL = `
+const BUMP_PROFILE_VERSION_SQL = `
+  UPDATE "User" SET "profileVersion" = "profileVersion" + 1 WHERE "id" = ANY($1::int[])
+`;
+
+// 올리는 쪽을 먼저 돌려야 색인에서 빠질 행이 전부 빠진 뒤에 내리는 쪽이 들어간다.
+const REVIEW_SET_SQL = `
+  WITH ${MIRROR_CONFLICT_GROUPS_CTE}
   UPDATE "UserAcademicRecord" r
   SET "needsReview" = true, "version" = r."version" + 1, "updatedAt" = CURRENT_TIMESTAMP
-  WHERE r."year" = $1::int
-    AND NOT (r."userId" = ANY($2::int[]))
-    AND r."needsReview" = false
-    AND r."role" = 'STUDENT' AND r."memberState" = 'ENROLLED'
-    AND EXISTS (
-      SELECT 1 FROM "UserAcademicRecord" b
-      WHERE b."year" = $1::int AND b."userId" = ANY($2::int[])
-        AND b."role" = 'STUDENT' AND b."memberState" = 'ENROLLED'
-        AND b."grade" = r."grade" AND b."classNum" = r."classNum" AND b."number" = r."number"
-    )
+  FROM "keyed" k
+  WHERE k."id" = r."id" AND r."needsReview" = false AND ${NEEDS_REVIEW_EXPR}
 `;
 
-const DROP_UNKEYED_ENTRIES_SQL = `
-  DELETE FROM "RosterEntry" e
-  USING "User" u
-  WHERE e."year" = $1::int AND e."userId" = u."id"
-    AND u."id" = ANY($2::int[]) AND u."emailKey" IS NULL
+const REVIEW_CLEAR_SQL = `
+  WITH ${MIRROR_CONFLICT_GROUPS_CTE}
+  UPDATE "UserAcademicRecord" r
+  SET "needsReview" = false, "version" = r."version" + 1, "updatedAt" = CURRENT_TIMESTAMP
+  FROM "keyed" k
+  WHERE k."id" = r."id" AND r."needsReview" = true AND NOT ${NEEDS_REVIEW_EXPR}
 `;
 
+/**
+ * 기록이 있는 사용자면 명부 항목도 따라온다. 충돌로 키를 잃은 사람의 항목은 지우지
+ * 않고 그대로 두며, 키가 비어 있는 동안에는 새로 만들지도 않는다. 충돌이 풀리면
+ * 이 문장이 그때 만들어 준다.
+ */
 const UPSERT_ENTRIES_SQL = `
-  WITH "batch" AS (SELECT * FROM "User" WHERE "id" = ANY($2::int[]) AND "emailKey" IS NOT NULL)
   INSERT INTO "RosterEntry" ("id", "year", "userId", "emailKey", "included", "baseUserVersion", "version")
-  SELECT 'compat-' || $1::text || '-' || k."id"::text, $1::int, k."id", k."emailKey",
-         true, k."profileVersion", 0
-  FROM "batch" k
-  WHERE NOT EXISTS (
-    SELECT 1 FROM "RosterEntry" o
-    WHERE o."year" = $1::int AND o."emailKey" = k."emailKey"
-      AND (o."userId" IS NULL OR o."userId" <> k."id")
-  )
+  SELECT 'compat-' || $1::text || '-' || u."id"::text, $1::int, u."id", u."emailKey",
+         true, u."profileVersion", 0
+  FROM "User" u
+  JOIN "UserAcademicRecord" r ON r."userId" = u."id" AND r."year" = $1::int
+  WHERE u."emailKey" IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM "RosterEntry" o
+      WHERE o."year" = $1::int AND o."emailKey" = u."emailKey"
+        AND (o."userId" IS NULL OR o."userId" <> u."id")
+    )
   ON CONFLICT ("year", "userId") DO UPDATE SET
     "emailKey" = EXCLUDED."emailKey",
     "baseUserVersion" = EXCLUDED."baseUserVersion",
@@ -139,7 +164,10 @@ async function activeYear(tx: Tx): Promise<number> {
   const rows = await tx.$queryRaw<{ year: number }[]>`SELECT year FROM "AcademicYear" WHERE state = 'ACTIVE'`;
   if (rows.length === 1) return rows[0]!.year;
   if (rows.length > 1) {
-    throw new DomainError("YEAR_MISMATCH", "활성 학년도가 하나가 아닙니다.");
+    throw new DomainError(
+      "YEAR_MISMATCH",
+      "활성 학년도가 둘 이상입니다. 관리자 설정에서 활성 학년도를 하나만 남긴 뒤 다시 시도하세요.",
+    );
   }
 
   // 마이그레이션이 미리 넣어 두는 것이 정상이고, 이 삽입은 방어용이다.
@@ -151,15 +179,19 @@ async function activeYear(tx: Tx): Promise<number> {
 
   const retry = await tx.$queryRaw<{ year: number }[]>`SELECT year FROM "AcademicYear" WHERE state = 'ACTIVE'`;
   if (retry.length !== 1) {
-    throw new DomainError("YEAR_MISMATCH", "활성 학년도를 찾지 못했습니다.");
+    throw new DomainError(
+      "YEAR_MISMATCH",
+      "활성 학년도가 없어 사용자 정보를 저장할 수 없습니다. 관리자 설정에서 학년도를 활성으로 바꾼 뒤 다시 시도하세요.",
+    );
   }
   return retry[0]!.year;
 }
 
 /**
- * ACTIVE 학년도의 기록·명부를 `User` 현재값에 맞춘다. 집합 기반 고정 문장만
- * 쓰므로 어떤 입력도 unique·check 위반으로 기존 쓰기를 실패시키지 못한다.
- * 좌석·이메일이 겹치면 값을 지어내지 않고 양쪽을 `needsReview`로 남긴다.
+ * ACTIVE 학년도의 기록·명부를 `User` 현재값에 맞춘다. 집합 기반 고정 문장만 쓰므로
+ * 어떤 입력도 unique·check 위반으로 기존 쓰기를 실패시키지 못한다. 좌석·이메일이
+ * 겹치면 값을 지어내지 않고 양쪽을 `needsReview`로 남기고, 겹침이 풀리면 같은
+ * 식으로 다시 계산해 양쪽에서 내린다.
  */
 export async function mirrorUsersToActiveYear(tx: Tx, userIds: number[]): Promise<void> {
   const ids = [...new Set(userIds)];
@@ -167,17 +199,24 @@ export async function mirrorUsersToActiveYear(tx: Tx, userIds: number[]): Promis
 
   const year = await activeYear(tx);
 
-  await tx.$executeRawUnsafe(CLEAR_STALE_EMAIL_KEY_SQL, ids);
-  await tx.$executeRawUnsafe(FILL_EMAIL_KEY_SQL, ids);
+  await tx.$executeRawUnsafe(CLEAR_EMAIL_KEYS_SQL);
+  await tx.$executeRawUnsafe(FILL_EMAIL_KEYS_SQL);
 
   await tx.$executeRawUnsafe(PARK_MOVED_RECORDS_SQL, year, ids);
-  const changedRecords = await tx.$executeRawUnsafe(UPSERT_RECORDS_SQL, year, ids);
-  const flagged = await tx.$executeRawUnsafe(FLAG_COLLIDING_RECORDS_SQL, year, ids);
+  const written = await tx.$queryRawUnsafe<{ userId: number }[]>(UPSERT_RECORDS_SQL, year, ids);
 
-  await tx.$executeRawUnsafe(DROP_UNKEYED_ENTRIES_SQL, year, ids);
-  await tx.$executeRawUnsafe(UPSERT_ENTRIES_SQL, year, ids);
+  // 명부 값이 실제로 바뀐 사람만 행 버전을 올린다. Release B의 오래된 파일 판정이
+  // 기존 경로의 수정도 보게 하려면 baseUserVersion을 찍기 전에 끝나야 한다.
+  if (written.length > 0) {
+    await tx.$executeRawUnsafe(BUMP_PROFILE_VERSION_SQL, written.map((row) => row.userId));
+  }
 
-  if (changedRecords + flagged > 0) {
+  const flagged = await tx.$executeRawUnsafe(REVIEW_SET_SQL, year);
+  const cleared = await tx.$executeRawUnsafe(REVIEW_CLEAR_SQL, year);
+
+  await tx.$executeRawUnsafe(UPSERT_ENTRIES_SQL, year);
+
+  if (written.length + flagged + cleared > 0) {
     await tx.$executeRaw`
       UPDATE "AcademicYear" SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
       WHERE "year" = ${year}

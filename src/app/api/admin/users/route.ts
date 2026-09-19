@@ -173,9 +173,15 @@ export async function PUT(request: Request) {
  * 물리 삭제는 Cascade로 신청·체크인 이력까지 지우므로 닫는다. 이용을 끊어야 하면
  * `PUT /api/admin/users/[id]/access`로 INACTIVE 처리한다.
  */
-export async function DELETE() {
+export async function DELETE(request: Request) {
   return routeResponse(async () => {
     await requireActor("WRITE_ADMIN");
+
+    const { searchParams } = new URL(request.url);
+    if (!searchParams.get("id")) {
+      return NextResponse.json({ error: "ID is required" }, { status: 400 });
+    }
+
     return NextResponse.json(
       {
         error: "Conflict",

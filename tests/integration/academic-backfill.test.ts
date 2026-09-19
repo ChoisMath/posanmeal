@@ -162,19 +162,44 @@ describe("2026 backfill", () => {
   });
 
   it("rolls the whole copy back when a write fails right before completion", async () => {
-    // 호환 쓰기와 다른 정규화로 심긴 emailKey는 뒤따르는 교사 행 UPDATE와
-    // unique 충돌을 일으킨다. 이 시점에는 기록·명부가 이미 INSERT된 뒤다.
-    await db.$executeRaw`
-      UPDATE "User" SET "emailKey" = 'teacher-test@example.posan.kr' WHERE id = ${fixture.studentId}
-    `;
+    // 복사의 마지막 문장(신청 학년도 채우기)에서만 터지는 오류를 심는다. 이 시점에는
+    // 기록·명부가 이미 INSERT된 뒤라 롤백 범위를 제대로 볼 수 있다.
+    await db.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION academic_test_fail() RETURNS trigger AS $fn$
+      BEGIN RAISE EXCEPTION 'injected failure'; END;
+      $fn$ LANGUAGE plpgsql
+    `);
+    await db.$executeRawUnsafe(`
+      CREATE TRIGGER academic_test_fail_trg BEFORE UPDATE ON "MealApplication"
+      FOR EACH ROW EXECUTE FUNCTION academic_test_fail()
+    `);
 
     const before = await captureLegacyFingerprint(pgClient);
-    await expect(backfill2026(db, before)).rejects.toThrow();
+    try {
+      await expect(backfill2026(db, before)).rejects.toThrow();
+    } finally {
+      await db.$executeRawUnsafe(`DROP TRIGGER academic_test_fail_trg ON "MealApplication"`);
+      await db.$executeRawUnsafe(`DROP FUNCTION academic_test_fail()`);
+    }
 
     expect(await db.userAcademicRecord.count()).toBe(0);
     expect(await db.rosterEntry.count()).toBe(0);
     expect(await db.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } })).toBeNull();
     expect(compareLegacyFingerprints(before, await captureLegacyFingerprint(pgClient)).equal).toBe(true);
+  });
+
+  it("finishes the copy when another row already holds a user's normalized email key", async () => {
+    // 옛 정규화로 심긴 키가 남의 자리를 차지해도 복사를 멈추지 않는다. 키를 못 받은
+    // 쪽은 비워 둘 뿐이다.
+    await db.$executeRaw`
+      UPDATE "User" SET "emailKey" = 'teacher-test@example.posan.kr' WHERE id = ${fixture.studentId}
+    `;
+
+    const result = await backfill2026(db, await captureLegacyFingerprint(pgClient));
+
+    expect(result.inserted).toBe(2);
+    const teacher = await db.user.findUniqueOrThrow({ where: { id: fixture.teacherId } });
+    expect(teacher.emailKey).toBeNull();
   });
 
   it("skips a record the compat path already wrote instead of overwriting it", async () => {

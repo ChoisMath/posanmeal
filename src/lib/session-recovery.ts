@@ -36,7 +36,11 @@ export function recoverSession(status: number, body: unknown): void {
   if (action === "NONE") return;
 
   recovering = true;
-  void signOut({ callbackUrl: action === "SIGN_OUT_ADMIN" ? "/admin/login" : "/" });
+  const target = action === "SIGN_OUT_ADMIN" ? "/admin/login" : "/";
+  // signOut이 실패해도 한 번 플래그가 서므로, 실패하면 직접 옮겨 화면에 가둬 두지 않는다.
+  void signOut({ callbackUrl: target }).catch(() => {
+    window.location.href = target;
+  });
 }
 
 /**
