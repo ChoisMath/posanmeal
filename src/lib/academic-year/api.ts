@@ -30,7 +30,13 @@ export function domainErrorStatus(code: DomainErrorCode): number {
 export function errorResponse(error: unknown): NextResponse {
   if (isDomainError(error)) {
     return NextResponse.json(
-      { error: { code: error.code, message: error.message } },
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.issues ? { issues: error.issues } : {}),
+        },
+      },
       { status: STATUS[error.code] },
     );
   }

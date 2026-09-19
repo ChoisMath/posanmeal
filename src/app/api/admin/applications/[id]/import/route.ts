@@ -207,7 +207,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       : await matchByStudentNumber(rows.map((r) => r.key), year, mode === "READY");
 
     let skippedNotFound = 0;
-    const targets: { userId: number; marks: MealInput[] }[] = [];
+    const targets: { userId: number; rowNumber: number; marks: MealInput[] }[] = [];
     for (const row of rows) {
       const userId = resolvedUsers.get(row.key);
       if (userId === undefined) {
@@ -218,7 +218,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         skippedInvalid++;
         continue;
       }
-      targets.push({ userId, marks: row.marks });
+      targets.push({ userId, rowNumber: row.rowNumber, marks: row.marks });
+    }
+
+    // 쓸 것이 없으면 트랜잭션도 자격 검사도 열지 않는다. 예전과 같은 요약을
+    // 그대로 돌려준다.
+    if (targets.length === 0) {
+      return NextResponse.json({
+        added: 0,
+        updated: 0,
+        skippedNotFound,
+        skippedInvalid,
+        ignoredMarks: 0,
+        total: skippedNotFound,
+      });
     }
 
     // 한 명이라도 자격 검사에 걸리면 이 트랜잭션 전체가 되돌아간다. 대상이 학년
@@ -255,6 +268,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           targets.map((target) => ({
             userId: target.userId,
             intent: intentFor(statusByUser.get(target.userId)),
+            row: target.rowNumber,
           })),
         );
 
@@ -297,7 +311,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             context.resolveContextFor(grade),
           );
           if (!resolved.ok) {
-            throw new DomainError("INVALID_INPUT", resolved.error);
+            throw new DomainError("INVALID_INPUT", resolved.error, [
+              { row: target.rowNumber, code: "INVALID_SELECTION" },
+            ]);
           }
 
           const result = await writeRegistration(

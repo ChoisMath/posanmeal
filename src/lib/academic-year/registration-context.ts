@@ -16,7 +16,12 @@ export type RegistrationContext = {
   resolveContext: ResolveContext;
 };
 
-export type RegistrationTarget = { userId: number; intent: RegistrationIntent };
+export type RegistrationTarget = {
+  userId: number;
+  intent: RegistrationIntent;
+  /** 일괄 경로의 원본 시트 줄 번호. 실패를 개인정보 없이 짚어 주기 위해서만 쓴다. */
+  row?: number;
+};
 
 export type RegistrationBatchContext = {
   year: number;
@@ -127,6 +132,32 @@ function profileFromUser(user: FallbackUser, year: number): AcademicProfile {
 const CREATING: ReadonlySet<RegistrationIntent> = new Set<RegistrationIntent>(["CREATE", "RESTORE"]);
 
 /**
+ * 학생 본인 경로인지. 대상이 비어 있으면 "모두 본인"이 공허하게 참이 되므로,
+ * 대상이 한 명 이상이고 그 전부가 요청자 자신일 때만 본인 경로로 본다. 그
+ * 밖은 전부 대리 경로이고 쓰기 관리자여야 한다.
+ */
+function isSelfService(actor: Actor, targets: RegistrationTarget[]): boolean {
+  return (
+    actor.kind === "USER" &&
+    targets.length > 0 &&
+    targets.every((target) => target.userId === actor.userId)
+  );
+}
+
+/** 대상이 정해진 실패는 줄 번호를 함께 알린다(값은 담지 않는다). */
+function targetError(
+  target: RegistrationTarget,
+  code: "MISSING_PROFILE" | "ACCOUNT_INACTIVE" | "INVALID_INPUT",
+  message: string,
+): DomainError {
+  return new DomainError(
+    code,
+    message,
+    target.row === undefined ? undefined : [{ row: target.row, code }],
+  );
+}
+
+/**
  * 신청의 모든 분기(학생 본인·관리자 대리·상태 복원·Excel 일괄)가 공유하는 자격
  * 검사. 학년도를 먼저 정하고 그 해의 Profile만으로 판정하므로, 진급한 학생의
  * 지난 공고도 당시 학년으로 처리된다. 대상이 몇 명이든 공고·명단·개설일은 한
@@ -155,9 +186,7 @@ export async function getRegistrationBatchContext(
     throw new DomainError("YEAR_MISMATCH", "초안 학년도 공고에는 신청할 수 없습니다.");
   }
 
-  const selfOnly =
-    actor.kind === "USER" && targets.every((target) => target.userId === actor.userId);
-  if (selfOnly) {
+  if (isSelfService(actor, targets)) {
     await assertActor(tx, actor, "STUDENT");
     if (year !== current) {
       throw new DomainError("YEAR_MISMATCH", "지난 학년도 공고는 직접 수정할 수 없습니다.");
@@ -182,31 +211,31 @@ export async function getRegistrationBatchContext(
   for (const target of targets) {
     const user = userById.get(target.userId);
     if (!user) {
-      throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
+      throw targetError(target, "MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
     }
 
     const record = stored.get(target.userId);
     if (!record && mode === "READY") {
-      throw new DomainError("MISSING_PROFILE", "해당 학년도의 학적 정보가 없습니다.");
+      throw targetError(target, "MISSING_PROFILE", "해당 학년도의 학적 정보가 없습니다.");
     }
     const profile = record ?? profileFromUser(user, year);
 
     if (profile.role !== "STUDENT") {
-      throw new DomainError("INVALID_INPUT", "학생만 신청할 수 있습니다.");
+      throw targetError(target, "INVALID_INPUT", "학생만 신청할 수 있습니다.");
     }
 
     if (CREATING.has(target.intent)) {
       if (profile.memberState !== "ENROLLED") {
-        throw new DomainError("MISSING_PROFILE", "재학 중인 학생만 신청할 수 있습니다.");
+        throw targetError(target, "MISSING_PROFILE", "재학 중인 학생만 신청할 수 있습니다.");
       }
       if (user.accessState !== "ACTIVE") {
-        throw new DomainError("ACCOUNT_INACTIVE", "이용이 중지된 계정입니다.");
+        throw targetError(target, "ACCOUNT_INACTIVE", "이용이 중지된 계정입니다.");
       }
     }
 
     const grade = record?.grade ?? (mode === "READY" ? null : user.grade);
     if (grade === null || grade === undefined) {
-      throw new DomainError("MISSING_PROFILE", "해당 학년도의 학년 정보가 없습니다.");
+      throw targetError(target, "MISSING_PROFILE", "해당 학년도의 학년 정보가 없습니다.");
     }
 
     profiles.set(target.userId, { ...profile, grade });

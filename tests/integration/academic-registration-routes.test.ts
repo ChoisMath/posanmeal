@@ -36,17 +36,25 @@ function jsonRequest(method: string, body: unknown): Request {
   });
 }
 
-async function emailSheet(email: string): Promise<File> {
+async function emailSheet(...emails: string[]): Promise<File> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("일괄신청양식");
   [...TEMPLATE_FIXED_HEADERS, ...MEAL_HEADERS].forEach((h, i) => {
     sheet.getRow(1).getCell(i + 1).value = h;
   });
   sheet.getRow(2).getCell(1).value = "안내";
-  [email, 1, 1, 1, "초안전용", "O", ""].forEach((value, i) => {
-    sheet.getRow(3).getCell(i + 1).value = value;
+  emails.forEach((email, r) => {
+    [email, 1, 1, 1, "대상", "O", ""].forEach((value, i) => {
+      sheet.getRow(3 + r).getCell(i + 1).value = value;
+    });
   });
   return new File([await workbook.xlsx.writeBuffer()], "import.xlsx");
+}
+
+function importRequest(file: File): Request {
+  const form = new FormData();
+  form.set("file", file);
+  return new Request("http://localhost/api", { method: "POST", body: form });
 }
 
 describe("registration route guards", () => {
@@ -192,14 +200,90 @@ describe("registration route guards", () => {
       (await db.mealRegistration.findUniqueOrThrow({ where: { id: cancelled.id } })).status,
     ).toBe("CANCELLED");
 
-    const form = new FormData();
-    form.set("file", await emailSheet(draftOnly.email));
     const importResponse = await routes.adminImport.POST(
-      new Request("http://localhost/api", { method: "POST", body: form }),
+      importRequest(await emailSheet(draftOnly.email)),
       appParams(),
     );
     expect(importResponse.status).toBe(422);
     expect(await db.mealRegistrationMeal.count({ where: { registrationId: cancelled.id } })).toBe(0);
+  });
+
+  it("교사 관리자 계정의 일괄 등록: 아무도 맞지 않아도 200과 예전 요약을 돌려준다", async () => {
+    await db.eligibilityEvent.deleteMany({});
+    const response = await routes.adminImport.POST(
+      importRequest(await emailSheet("없는사람@example.posan.kr")),
+      appParams(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      added: 0,
+      updated: 0,
+      skippedNotFound: 1,
+      total: 1,
+    });
+    expect(await db.eligibilityEvent.count()).toBe(0);
+  });
+
+  it("교사 관리자 계정의 일괄 등록: 맞는 사람이 있으면 그대로 등록된다", async () => {
+    const response = await routes.adminImport.POST(
+      importRequest(await emailSheet("student-test@example.posan.kr")),
+      appParams(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ updated: 1, total: 1 });
+  });
+
+  it("일괄 등록 실패는 개인정보 없이 문제가 된 시트 줄만 알린다", async () => {
+    const draftOnly = await makeDraftOnlyStudent();
+    const response = await routes.adminImport.POST(
+      importRequest(await emailSheet("student-test@example.posan.kr", draftOnly.email)),
+      appParams(),
+    );
+
+    expect(response.status).toBe(422);
+    const body = (await response.json()) as {
+      error: { code: string; message: string; issues?: { row: number; code: string }[] };
+    };
+    expect(body.error.issues).toEqual([{ row: 4, code: "MISSING_PROFILE" }]);
+    const serialised = JSON.stringify(body);
+    expect(serialised).not.toContain(draftOnly.email);
+    expect(serialised).not.toContain(draftOnly.name);
+    // 전체 rollback: 맞는 사람도 바뀌지 않는다.
+    expect(await db.mealRegistrationMealDate.count()).toBe(2);
+  });
+
+  it("학생 본인은 자기 신청을 그대로 할 수 있다", async () => {
+    await db.mealRegistration.deleteMany({ where: { id: fx.registrationId } });
+    const studentRow = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+    asUser(studentRow);
+
+    const response = await routes.studentRegister.POST(
+      jsonRequest("POST", {
+        signature: "서명",
+        meals: [{ mealKind: "DINNER", applied: true, exempt: false, selectedDates: [OPEN_DATE] }],
+      }),
+      appParams(),
+    );
+    expect(response.status).toBe(201);
+  });
+
+  it("학생이 남의 id로 대리 신청하면 거절된다", async () => {
+    const other = await db.user.create({
+      data: { email: "other@example.posan.kr", name: "다른학생", role: "STUDENT", grade: 1 },
+    });
+    const studentRow = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+    asUser(studentRow);
+
+    const response = await routes.adminRegistrations.POST(
+      jsonRequest("POST", {
+        userId: other.id,
+        meals: [{ mealKind: "DINNER", applied: true, exempt: false, selectedDates: [OPEN_DATE] }],
+      }),
+      appParams(),
+    );
+    expect(response.status).toBe(403);
   });
 
   it("라우트 진입 뒤 권한이 내려가면 공고 쓰기가 트랜잭션 안에서 막힌다", async () => {
