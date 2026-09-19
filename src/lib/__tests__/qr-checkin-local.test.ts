@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { isLocalQR, parseLocalQR, runLocalQrCheckIn, type LocalQrRepo } from "@/lib/qr-checkin-local";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
-import { LEGACY_SNAPSHOT_STATE, type LocalSnapshotState } from "@/lib/academic-year/local-snapshot";
+import { LEGACY_SNAPSHOT_STATE, toLocalSnapshot, type LocalSnapshotState } from "@/lib/academic-year/local-snapshot";
 
 const OPEN = {
   breakfast: { start: "00:00", end: "00:00" },
@@ -153,7 +153,7 @@ describe("runLocalQrCheckIn — 명부 근거", () => {
     eligible: [],
     profiles: [],
   };
-  const state = { snapshotMode: true, snapshot, serverActiveYear: 2026 };
+  const state = { snapshotMode: true, snapshot: toLocalSnapshot(snapshot), serverActiveYear: 2026 };
 
   it("근거 모드가 아니면 기존과 똑같이 저장한다 (PREPARING 서버)", async () => {
     const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), { qrGeneration: "3" });

@@ -105,18 +105,23 @@ export async function runLocalFaceCheckIn(
 
   // 확인 창을 띄우기 전에 한 번, 저장 직전에 다시 판정한다. 확인창이 떠 있는 동안
   // 자정이 지나거나 학년도가 바뀔 수 있다.
-  let freshness: SnapshotFreshness | null;
   const state = await repo.getSnapshotState();
-  try {
-    freshness = guardLocalCheckIn(state, { now: now(), userId: user.id, dateKey: date });
-  } catch (error) {
-    if (error instanceof LocalSnapshotError) {
-      return { success: false, matched: true, ...score, user: faceUser, mealKind, error: error.message };
+  const judge = (): SnapshotFreshness | null | FaceCheckResult => {
+    try {
+      return guardLocalCheckIn(state, { now: now(), userId: user.id, dateKey: date });
+    } catch (error) {
+      if (error instanceof LocalSnapshotError) {
+        return { success: false, matched: true, ...score, user: faceUser, mealKind, error: error.message };
+      }
+      throw error;
     }
-    throw error;
-  }
+  };
+  const isBlocked = (verdict: ReturnType<typeof judge>): verdict is FaceCheckResult =>
+    verdict !== null && typeof verdict === "object";
 
   if (!confirmation || (user.role === "TEACHER" && !input.type)) {
+    const verdict = judge();
+    if (isBlocked(verdict)) return verdict;
     return {
       success: false, matched: true, needConfirmation: true, needType: user.role === "TEACHER",
       user: faceUser, mealKind, date, ...score,
@@ -136,6 +141,11 @@ export async function runLocalFaceCheckIn(
       error: `이미 ${MEAL_LABEL[mealKind]} 체크인 하였습니다.`,
     };
   }
+
+  // 중복은 근거보다 먼저 답한다 — 이미 먹은 사람에게 동기화 얘기를 할 이유가 없다.
+  const verdict = judge();
+  if (isBlocked(verdict)) return verdict;
+  const freshness = verdict;
 
   let type: LocalCheckIn["type"];
   if (user.role === "TEACHER") {
@@ -166,7 +176,7 @@ export async function runLocalFaceCheckIn(
     type,
     synced: 0,
     deviceId: await repo.getDeviceId(),
-    ...(state.snapshot ? { snapshotId: state.snapshot.id } : {}),
+    ...(state.snapshot ? { snapshotId: state.snapshot.header.id } : {}),
     ...(stale ? { stale: true } : {}),
   });
   return { success: true, matched: true, user: faceUser, type, mealKind, checkedAt, ...score, ...(stale ? { stale: true } : {}) };

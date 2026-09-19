@@ -42,6 +42,56 @@ export type SnapshotEvidence = {
   profiles: SnapshotProfile[];
 };
 
+/** 판정에 필요한 머리말만. 스캔마다 수 MB짜리 근거를 다시 parse하지 않기 위해 따로 저장한다. */
+export type SnapshotHeader = {
+  id: string;
+  version: number;
+  lastEligibilityEventId: number;
+  activeYear: number;
+  issuedAt: string;
+  freshUntil: string;
+  coversUntil: string;
+};
+
+/** 머리말 + 명단 id 집합. 소속 확인은 O(1)이어야 한다(식당 줄 경로). */
+export type LocalSnapshot = {
+  header: SnapshotHeader;
+  members: ReadonlySet<number>;
+};
+
+export function snapshotHeaderOf(evidence: SnapshotEvidence): SnapshotHeader {
+  return {
+    id: evidence.id,
+    version: evidence.version,
+    lastEligibilityEventId: evidence.lastEligibilityEventId,
+    activeYear: evidence.activeYear,
+    issuedAt: evidence.issuedAt,
+    freshUntil: evidence.freshUntil,
+    coversUntil: evidence.coversUntil,
+  };
+}
+
+export function snapshotMemberIds(evidence: SnapshotEvidence): number[] {
+  return (evidence.users ?? []).map((user) => user.userId);
+}
+
+/** 서버 응답이 근거로 쓸 만한 모양인지. 반쪽짜리 근거로 판정하면 줄이 멈춘다. */
+export function isUsableSnapshot(value: unknown): value is SnapshotEvidence {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<SnapshotEvidence>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.activeYear === "number" &&
+    typeof candidate.freshUntil === "string" &&
+    typeof candidate.coversUntil === "string" &&
+    Array.isArray(candidate.users)
+  );
+}
+
+export function toLocalSnapshot(evidence: SnapshotEvidence): LocalSnapshot {
+  return { header: snapshotHeaderOf(evidence), members: new Set(snapshotMemberIds(evidence)) };
+}
+
 export type SnapshotFreshness = "FRESH" | "STALE";
 
 export type LocalSnapshotErrorCode = "NO_SNAPSHOT" | "YEAR_MISMATCH" | "BEYOND_COVERAGE" | "USER_NOT_IN_SNAPSHOT";
@@ -61,7 +111,7 @@ export class LocalSnapshotError extends Error {
  */
 export type LocalSnapshotState = {
   snapshotMode: boolean;
-  snapshot: SnapshotEvidence | null;
+  snapshot: LocalSnapshot | null;
   serverActiveYear: number | null;
 };
 
@@ -83,23 +133,27 @@ export function isSnapshotMode(state: LocalSnapshotState): boolean {
   return state.snapshotMode;
 }
 
-export function checkLocalSnapshot(
-  snapshot: SnapshotEvidence | null,
-  input: LocalSnapshotInput,
-): SnapshotFreshness {
+export function checkLocalSnapshot(snapshot: LocalSnapshot | null, input: LocalSnapshotInput): SnapshotFreshness {
   if (!snapshot) {
     throw new LocalSnapshotError("NO_SNAPSHOT", "명부 근거가 없습니다. 동기화가 필요합니다");
   }
-  if (input.serverActiveYear !== null && input.serverActiveYear !== snapshot.activeYear) {
+  const { header } = snapshot;
+  if (input.serverActiveYear !== null && input.serverActiveYear !== header.activeYear) {
     throw new LocalSnapshotError("YEAR_MISMATCH", "학년도 전환 후 동기화가 필요합니다");
   }
-  if (input.dateKey > snapshot.coversUntil) {
+  if (input.dateKey > header.coversUntil) {
     throw new LocalSnapshotError("BEYOND_COVERAGE", "내려받은 명부의 사용 기간이 지났습니다. 동기화가 필요합니다");
   }
-  if (!snapshot.users.some((user) => user.userId === input.userId)) {
+  if (!snapshot.members.has(input.userId)) {
     throw new LocalSnapshotError("USER_NOT_IN_SNAPSHOT", "명단에 없는 사용자입니다. 동기화가 필요합니다");
   }
-  return input.now.getTime() >= Date.parse(snapshot.freshUntil) ? "STALE" : "FRESH";
+  return isSnapshotStale(header, input.now) ? "STALE" : "FRESH";
+}
+
+/** 화면의 "재동기화 필요" 표시와 판정이 같은 규칙을 쓰도록 한 자리에 둔다. */
+export function isSnapshotStale(header: SnapshotHeader | null, now: Date): boolean {
+  if (!header) return false;
+  return now.getTime() >= Date.parse(header.freshUntil);
 }
 
 /**
@@ -112,4 +166,28 @@ export function guardLocalCheckIn(
 ): SnapshotFreshness | null {
   if (!isSnapshotMode(state)) return null;
   return checkLocalSnapshot(state.snapshot, { ...input, serverActiveYear: state.serverActiveYear });
+}
+
+/**
+ * 스캔마다 저장소를 다시 읽지 않도록 한 페이지 수명 동안 파싱 결과를 들고 있는다.
+ * 근거가 바뀌는 자리(동기화·초기화)에서만 버린다.
+ */
+export function createSnapshotStateCache(load: () => Promise<LocalSnapshotState>) {
+  let cached: LocalSnapshotState | null = null;
+  let inflight: Promise<LocalSnapshotState> | null = null;
+  return {
+    async get(): Promise<LocalSnapshotState> {
+      if (cached) return cached;
+      inflight ??= load().then((state) => {
+        cached = state;
+        inflight = null;
+        return state;
+      });
+      return inflight;
+    },
+    invalidate(): void {
+      cached = null;
+      inflight = null;
+    },
+  };
 }

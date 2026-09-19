@@ -36,6 +36,7 @@ const sampleRows: LocalCheckInRow[] = [
     mealKind: "DINNER",
     type: "STUDENT",
     checkedAt: "2026-05-10T09:32:11.000Z",
+    status: "미전송",
   },
   {
     id: 43,
@@ -46,6 +47,10 @@ const sampleRows: LocalCheckInRow[] = [
     mealKind: "BREAKFAST",
     type: "WORK",
     checkedAt: "2026-05-10T00:15:00.000Z",
+    status: "거절 확정",
+    reason: "USER_NOT_FOUND",
+    snapshotId: "snap-1",
+    deviceId: "device-1",
   },
 ];
 
@@ -67,6 +72,7 @@ describe("exportLocalCheckInsXlsx", () => {
     const header = ws.getRow(1).values as Array<string | undefined>;
     expect(header.slice(1)).toEqual([
       "IDB ID", "사용자ID", "학년반번호", "이름", "날짜", "식사", "종류", "체크시각(KST)",
+      "상태", "사유", "근거ID", "기기ID",
     ]);
   });
 
@@ -76,9 +82,12 @@ describe("exportLocalCheckInsXlsx", () => {
     const ws = wb.getWorksheet("로컬 미동기")!;
     expect(ws.rowCount).toBe(3);
     const row2 = ws.getRow(2).values as Array<unknown>;
-    expect(row2.slice(1)).toEqual([42, 1, "1-2-15", "홍길동", "2026-05-10", "석", "STUDENT", "2026-05-10 18:32:11"]);
+    expect(row2.slice(1)).toEqual([42, 1, "1-2-15", "홍길동", "2026-05-10", "석", "STUDENT", "2026-05-10 18:32:11", "미전송", "", "", ""]);
     const row3 = ws.getRow(3).values as Array<unknown>;
-    expect(row3.slice(1)).toEqual([43, 2, "교사", "김선생", "2026-05-10", "조", "WORK", "2026-05-10 09:15:00"]);
+    expect(row3.slice(1)).toEqual([
+      43, 2, "교사", "김선생", "2026-05-10", "조", "WORK", "2026-05-10 09:15:00",
+      "거절 확정", "USER_NOT_FOUND", "snap-1", "device-1",
+    ]);
   });
 
   it("translates BREAKFAST to '조' and DINNER to '석'", async () => {

@@ -4,8 +4,10 @@ import {
   getDeviceId,
   getSetting,
   getUnsyncedCheckIns,
+  invalidateLocalSnapshotCache,
   openDB,
   setServerActiveYear,
+  SNAPSHOT_SETTING_KEYS,
   setSetting,
   type CheckInAcknowledgement,
   type LocalEligibleEntry,
@@ -13,7 +15,12 @@ import {
   type LocalUser,
   type StoredLocalCheckIn,
 } from "@/lib/local-db";
-import type { SnapshotEvidence } from "@/lib/academic-year/local-snapshot";
+import {
+  isUsableSnapshot,
+  snapshotHeaderOf,
+  snapshotMemberIds,
+  type SnapshotEvidence,
+} from "@/lib/academic-year/local-snapshot";
 import { DEFAULT_MEAL_WINDOWS, type MealWindows } from "@/lib/meal-kind-local";
 import { DEFAULT_FACE_MATCH_MARGIN, DEFAULT_FACE_MATCH_THRESHOLD } from "@/lib/face-constants";
 
@@ -159,6 +166,7 @@ export function readUploadResponse(data: unknown): UploadOutcome {
 
   const finalIds = new Set<number>(syncedIds);
   const review: CheckInAcknowledgement["review"] = [];
+  const rejectedFinal: CheckInAcknowledgement["rejectedFinal"] = [];
   const counts: UploadCounts = { accepted: 0, duplicate: 0, review: 0, rejected: 0 };
 
   for (const decision of decisions) {
@@ -166,7 +174,11 @@ export function readUploadResponse(data: unknown): UploadOutcome {
     if (decision.final) finalIds.add(decision.clientId);
     if (decision.status === "ACCEPTED") counts.accepted += 1;
     else if (decision.status === "DUPLICATE") counts.duplicate += 1;
-    else if (decision.status === "REJECTED") counts.rejected += 1;
+    else if (decision.status === "REJECTED") {
+      counts.rejected += 1;
+      // 종결 거절은 다시 보내지 않지만 사유 없이 사라지면 아무도 알 수 없다.
+      rejectedFinal.push({ clientId: decision.clientId, reason: decision.reason ?? "서버가 거절했습니다." });
+    }
     else if (decision.status === "REVIEW") {
       counts.review += 1;
       review.push({ clientId: decision.clientId, reviewId: decision.reviewId, reason: decision.reason });
@@ -186,7 +198,7 @@ export function readUploadResponse(data: unknown): UploadOutcome {
     counts.rejected = typeof body.rejectedCount === "number" ? body.rejectedCount : rejected.length;
   }
 
-  return { ack: { finalIds: [...finalIds], review, rejected }, counts };
+  return { ack: { finalIds: [...finalIds], review, rejected, rejectedFinal }, counts };
 }
 
 // --- 다운로드 ---
@@ -205,7 +217,7 @@ export interface KioskDownload {
 
 export function readKioskDownload(data: unknown): KioskDownload {
   const body = (data ?? {}) as Record<string, unknown>;
-  const snapshot = body.snapshot as SnapshotEvidence | undefined;
+  const snapshot = isUsableSnapshot(body.snapshot) ? body.snapshot : null;
   return {
     operationMode: toMode(body.operationMode),
     qrGeneration: typeof body.qrGeneration === "number" ? body.qrGeneration : undefined,
@@ -214,7 +226,7 @@ export function readKioskDownload(data: unknown): KioskDownload {
     mealWindows: (body.mealWindows ?? DEFAULT_MEAL_WINDOWS) as MealWindows,
     faceMatch: (body.faceMatch ?? DEFAULT_FACE_MATCH) as KioskSettings["faceMatch"],
     faceProfiles: (body.faceProfiles ?? []) as LocalFaceProfile[],
-    snapshot: snapshot ?? null,
+    snapshot,
     serverTime: typeof body.serverTime === "string" ? body.serverTime : undefined,
   };
 }
@@ -226,38 +238,49 @@ export function readKioskDownload(data: unknown): KioskDownload {
 export function applyKioskSnapshot(db: IDBDatabase, download: KioskDownload): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(["users", "eligibleEntries", "faceProfiles", "settings"], "readwrite");
-    const users = tx.objectStore("users");
-    users.clear();
-    for (const user of download.users) users.put(user);
-
-    const eligible = tx.objectStore("eligibleEntries");
-    eligible.clear();
-    for (const entry of download.eligibleEntries) eligible.put(entry);
-
-    const faces = tx.objectStore("faceProfiles");
-    faces.clear();
-    // 보관 정책: 서버가 로컬 모드일 때만 임베딩을 기기에 둔다.
-    if (download.operationMode === "local") {
-      for (const profile of download.faceProfiles) faces.put(profile);
-    }
-
-    const settings = tx.objectStore("settings");
-    settings.put(download.operationMode, "operationMode");
-    settings.put(JSON.stringify(download.mealWindows), "mealWindows");
-    settings.put(JSON.stringify(download.faceMatch), "faceMatch");
-    if (download.qrGeneration !== undefined) settings.put(String(download.qrGeneration), "qrGeneration");
-    settings.put(new Date().toISOString(), "lastSyncAt");
-    settings.put(download.snapshot ? "1" : "0", "snapshotMode");
-    if (download.snapshot) {
-      settings.put(JSON.stringify(download.snapshot), "snapshot");
-      settings.put(String(download.snapshot.activeYear), "serverActiveYear");
-    } else {
-      settings.delete("snapshot");
-    }
-
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      invalidateLocalSnapshotCache();
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error("명부 교체가 중단되었습니다."));
+
+    try {
+      const users = tx.objectStore("users");
+      users.clear();
+      for (const user of download.users) users.put(user);
+
+      const eligible = tx.objectStore("eligibleEntries");
+      eligible.clear();
+      for (const entry of download.eligibleEntries) eligible.put(entry);
+
+      const faces = tx.objectStore("faceProfiles");
+      faces.clear();
+      // 보관 정책: 서버가 로컬 모드일 때만 임베딩을 기기에 둔다.
+      if (download.operationMode === "local") {
+        for (const profile of download.faceProfiles) faces.put(profile);
+      }
+
+      const settings = tx.objectStore("settings");
+      settings.put(download.operationMode, "operationMode");
+      settings.put(JSON.stringify(download.mealWindows), "mealWindows");
+      settings.put(JSON.stringify(download.faceMatch), "faceMatch");
+      if (download.qrGeneration !== undefined) settings.put(String(download.qrGeneration), "qrGeneration");
+      settings.put(new Date().toISOString(), "lastSyncAt");
+      settings.put(download.snapshot ? "1" : "0", SNAPSHOT_SETTING_KEYS.mode);
+      if (download.snapshot) {
+        // 판정에 쓰는 머리말과 명단 id를 따로 둔다 — 스캔마다 근거 전체를 parse하지 않기 위해서다.
+        settings.put(JSON.stringify(snapshotHeaderOf(download.snapshot)), SNAPSHOT_SETTING_KEYS.header);
+        settings.put(JSON.stringify(snapshotMemberIds(download.snapshot)), SNAPSHOT_SETTING_KEYS.members);
+      } else {
+        settings.delete(SNAPSHOT_SETTING_KEYS.header);
+        settings.delete(SNAPSHOT_SETTING_KEYS.members);
+      }
+    } catch (error) {
+      // 여기서 나가면 이미 넣은 clear/put이 커밋되어 명부가 반쪽이 된다.
+      tx.abort();
+      reject(error);
+    }
   });
 }
 
@@ -288,7 +311,12 @@ function uploadSummary(counts: UploadCounts, finalized: number): string {
   return text;
 }
 
-export async function performKioskSync(): Promise<KioskSyncOutcome> {
+export interface KioskSyncOptions {
+  /** 얼굴 임베딩까지 받을지. QR만 쓰는 `/check` 태블릿에는 내려보내지 않는다. */
+  faces?: boolean;
+}
+
+export async function performKioskSync(options: KioskSyncOptions = {}): Promise<KioskSyncOutcome> {
   const base = { acceptedCount: 0, duplicateCount: 0, reviewCount: 0, rejectedCount: 0, uploaded: false };
   if (!navigator.onLine) return { ok: false, message: "오프라인 상태입니다.", ...base };
 
@@ -326,7 +354,7 @@ export async function performKioskSync(): Promise<KioskSyncOutcome> {
   // 내려받기가 실패해도 업로드 결과는 숨기지 않는다.
   const uploadNote = uploaded ? `${uploadSummary(counts, finalized)} | ` : "";
 
-  const downRes = await fetch("/api/sync/download?faces=1");
+  const downRes = await fetch(options.faces ? "/api/sync/download?faces=1" : "/api/sync/download");
   if (downRes.status === 401 || downRes.status === 403) {
     return { ok: false, message: `${uploadNote}다운로드 실패: ${LOGIN_REQUIRED}`, ...uploadResult };
   }
@@ -337,6 +365,8 @@ export async function performKioskSync(): Promise<KioskSyncOutcome> {
   const download = readKioskDownload(await downRes.json());
   const db = await openDB();
   await applyKioskSnapshot(db, download);
+  // 보관 정책: 얼굴을 받지 않는 호출에서도 온라인 모드면 기기에 남은 임베딩을 지운다.
+  if (!options.faces && download.operationMode === "online") await clearFaceProfiles();
 
   const faceCount = download.operationMode === "local" ? download.faceProfiles.length : 0;
   const drift =

@@ -12,6 +12,7 @@ import {
   addCheckIn,
   getDeviceId,
   getLocalSnapshotState,
+  getSnapshotHeader,
   getUnsyncedCount,
   getPendingCheckInCounts,
   clearSyncedCheckIns,
@@ -28,6 +29,7 @@ import { playDenied, playDuplicate, playError, playLockClick, playSuccess } from
 import { RESULT_BORDER_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
 import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
 import { fetchKioskSettings, loadSavedKioskSettings, performKioskSync } from "@/lib/kiosk-sync";
+import { isSnapshotStale } from "@/lib/academic-year/local-snapshot";
 
 const localQrRepo = {
   getSetting, getUser, isEligible, getCheckIn, addCheckIn,
@@ -52,13 +54,23 @@ export default function CheckPage() {
 
   // Service Worker registration is handled globally in <SwUpdater /> (layout).
 
+  // 저장된 근거의 freshUntil로 판단한다 — 새로고침 직후에도 바로 보이게.
+  const refreshStaleRoster = useCallback(async () => {
+    try {
+      setStaleRoster(isSnapshotStale(await getSnapshotHeader(), new Date()));
+    } catch {
+      // 표시용이다. 실패해도 체크인은 계속된다.
+    }
+  }, []);
+
   // Sync logic (defined before useEffect that references it)
   const performSync = useCallback(async () => {
     if (!navigator.onLine) return;
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const outcome = await performKioskSync();
+      // QR만 쓰는 태블릿에 얼굴 임베딩을 내려보내지 않는다.
+      const outcome = await performKioskSync({ faces: false });
       setSyncMessage(outcome.message);
       setSyncRejectedCount(outcome.rejectedCount + outcome.reviewCount);
       if (outcome.ok) {
@@ -66,7 +78,7 @@ export default function CheckPage() {
         setOperationMode(saved.operationMode);
         setMealWindows(saved.mealWindows);
         setLastSyncAt((await getSetting("lastSyncAt")) ?? null);
-        setStaleRoster(false);
+        await refreshStaleRoster();
       }
     } catch (err) {
       console.error("Sync error:", err);
@@ -74,7 +86,7 @@ export default function CheckPage() {
     }
     await getUnsyncedCount().then(setUnsyncedCount);
     setSyncing(false);
-  }, []);
+  }, [refreshStaleRoster]);
 
   // Fetch mode from server (fetchKioskSettings also persists it to IndexedDB), return mode or null
   const fetchMode = useCallback(async (): Promise<"online" | "local" | null> => {
@@ -141,14 +153,17 @@ export default function CheckPage() {
 
     getSetting("lastSyncAt").then((ts) => setLastSyncAt(ts || null));
     getUnsyncedCount().then(setUnsyncedCount);
+    refreshStaleRoster();
+    const staleInterval = setInterval(refreshStaleRoster, 60_000);
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
       document.removeEventListener("visibilitychange", handleVisibility);
       clearInterval(pollInterval);
+      clearInterval(staleInterval);
     };
-  }, [fetchMode, performSync]);
+  }, [fetchMode, performSync, refreshStaleRoster]);
 
   // --- Online mode: existing server-based check-in ---
   const handleOnlineScan = useCallback(async (data: string) => {
@@ -191,6 +206,7 @@ export default function CheckPage() {
       const json = await runLocalQrCheckIn({ data, now: new Date(), mealWindows }, localQrRepo);
       setResult(json);
       if (json.stale) setStaleRoster(true);
+      else refreshStaleRoster();
       const category = resultCategory(json);
       if (category === "success") playSuccess();
       else if (category === "duplicate") playDuplicate();
@@ -208,7 +224,7 @@ export default function CheckPage() {
         setResult(null);
       }, 2000);
     }
-  }, [mealWindows]);
+  }, [mealWindows, refreshStaleRoster]);
 
   const handleScan = useCallback(
     (data: string) => {
@@ -395,7 +411,7 @@ export default function CheckPage() {
               </span>
             )}
             {staleRoster && (
-              <span className="rounded bg-amber-500 px-2 font-semibold whitespace-nowrap text-slate-900">재동기화 필요</span>
+              <span className="rounded border border-amber-400 bg-transparent px-2 font-semibold whitespace-nowrap text-amber-300">재동기화 필요</span>
             )}
             {syncMessage && <span className="text-amber-300 whitespace-nowrap" title={syncMessage}>{syncMessage}</span>}
           </div>

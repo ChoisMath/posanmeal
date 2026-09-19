@@ -1,6 +1,13 @@
 import { signOut } from "next-auth/react";
+import {
+  DB_NAME,
+  clearRosterKeepCheckIns,
+  decideClientStateReset,
+  getPendingCheckInCounts,
+  type PendingCheckInCounts,
+} from "@/lib/local-db";
 
-const KNOWN_IDB_NAMES = ["posanmeal-local"];
+const KNOWN_IDB_NAMES = [DB_NAME];
 
 async function clearCaches() {
   if (typeof window === "undefined" || !("caches" in window)) return;
@@ -22,7 +29,7 @@ async function unregisterServiceWorkers() {
   }
 }
 
-async function clearIndexedDB() {
+async function clearIndexedDB(keep: ReadonlySet<string>) {
   if (typeof indexedDB === "undefined") return;
   const names = new Set<string>(KNOWN_IDB_NAMES);
   // Chrome/Firefox expose databases(); Safari does not.
@@ -38,24 +45,59 @@ async function clearIndexedDB() {
     }
   }
   await Promise.all(
-    Array.from(names).map(
-      (name) =>
-        new Promise<void>((resolve) => {
-          const req = indexedDB.deleteDatabase(name);
-          req.onsuccess = () => resolve();
-          req.onerror = () => resolve();
-          req.onblocked = () => resolve();
-        })
-    )
+    Array.from(names)
+      .filter((name) => !keep.has(name))
+      .map(
+        (name) =>
+          new Promise<void>((resolve) => {
+            const req = indexedDB.deleteDatabase(name);
+            req.onsuccess = () => resolve();
+            req.onerror = () => resolve();
+            req.onblocked = () => resolve();
+          })
+      )
   );
 }
 
-export async function clearClientBrowserState(): Promise<void> {
-  await Promise.all([clearCaches(), unregisterServiceWorkers(), clearIndexedDB()]);
+export interface ClearClientStateResult {
+  /** 지우지 않고 남긴 체크인 수(미전송 + 검토 대기). 0이면 전부 지웠다. */
+  keptCheckIns: number;
+}
+
+/**
+ * 관리자는 동기화하려고 바로 그 키오스크 태블릿에서 로그인한다. 로그아웃이 아직
+ * 서버에 없는 기록을 지워 버리면 되돌릴 방법이 없으므로, 그때는 키오스크 DB만 남긴다.
+ * 로그아웃 자체는 어떤 경우에도 막지 않는다.
+ */
+export async function clearClientBrowserState(): Promise<ClearClientStateResult> {
+  let counts: PendingCheckInCounts = { unsynced: 0, review: 0 };
+  try {
+    counts = await getPendingCheckInCounts();
+  } catch {
+    // 셀 수 없으면 보수적으로 남긴다.
+    counts = { unsynced: 1, review: 0 };
+  }
+
+  const keepKioskDb = decideClientStateReset(counts) === "KEEP_KIOSK_DB";
+  if (keepKioskDb) {
+    try {
+      await clearRosterKeepCheckIns();
+    } catch {
+      // best-effort — 기록만 지키면 된다.
+    }
+  }
+
+  await Promise.all([
+    clearCaches(),
+    unregisterServiceWorkers(),
+    clearIndexedDB(keepKioskDb ? new Set([DB_NAME]) : new Set()),
+  ]);
+
+  return { keptCheckIns: keepKioskDb ? counts.unsynced + counts.review : 0 };
 }
 
 export async function clearClientStateAndSignOut(callbackUrl = "/"): Promise<void> {
-  await clearClientBrowserState();
+  const { keptCheckIns } = await clearClientBrowserState();
   try {
     await signOut({ redirect: false });
   } catch {
@@ -63,6 +105,7 @@ export async function clearClientStateAndSignOut(callbackUrl = "/"): Promise<voi
   }
   if (typeof window !== "undefined") {
     const sep = callbackUrl.includes("?") ? "&" : "?";
-    window.location.replace(`${callbackUrl}${sep}reset=1`);
+    const kept = keptCheckIns > 0 ? `&kept=${keptCheckIns}` : "";
+    window.location.replace(`${callbackUrl}${sep}reset=1${kept}`);
   }
 }

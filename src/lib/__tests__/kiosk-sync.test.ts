@@ -10,10 +10,15 @@ import {
 import {
   FORCE_RESET_PHRASE,
   LEGACY_REVIEW_REASON,
+  TERMINAL_RETENTION_DAYS,
+  decideClientStateReset,
   decideResetGuard,
+  newDeviceId,
+  shouldClearSyncedCheckIn,
   upgradeLocalCheckIn,
   type StoredLocalCheckIn,
 } from "@/lib/local-db";
+import { buildLocalCheckInsCsv } from "@/lib/local-checkins-export";
 
 const record = (over: Partial<StoredLocalCheckIn> = {}): StoredLocalCheckIn => ({
   id: 1,
@@ -79,6 +84,7 @@ describe("readUploadResponse", () => {
     expect(outcome.ack.finalIds.sort()).toEqual([1, 2, 5]);
     expect(outcome.ack.review).toEqual([{ clientId: 3, reviewId: "rev-3", reason: "당시 명부 근거가 없습니다." }]);
     expect(outcome.ack.rejected).toEqual([{ clientId: 4, reason: "SERVER_ERROR" }]);
+    expect(outcome.ack.rejectedFinal).toEqual([{ clientId: 5, reason: "USER_NOT_FOUND" }]);
     expect(outcome.counts).toEqual({ accepted: 1, duplicate: 1, review: 1, rejected: 1 });
   });
 
@@ -101,6 +107,10 @@ describe("readUploadResponse", () => {
 });
 
 describe("readKioskDownload", () => {
+  it("반쪽짜리 근거는 근거로 쓰지 않는다", () => {
+    expect(readKioskDownload({ snapshot: { id: "snap-1" } }).snapshot).toBeNull();
+  });
+
   it("snapshot이 없는 응답(PREPARING)은 근거 없음으로 읽는다", () => {
     const download = readKioskDownload({ operationMode: "local", users: [{ id: 1 }], qrGeneration: 3 });
     expect(download.snapshot).toBeNull();
@@ -109,7 +119,10 @@ describe("readKioskDownload", () => {
   });
 
   it("snapshot이 있으면 그대로 싣는다", () => {
-    const snapshot = { id: "snap-1", activeYear: 2026, freshUntil: "2026-09-06T00:00:00Z" };
+    const snapshot = {
+      id: "snap-1", activeYear: 2026, freshUntil: "2026-09-06T00:00:00Z",
+      coversUntil: "2026-09-18", users: [{ userId: 1 }],
+    };
     expect(readKioskDownload({ snapshot }).snapshot).toMatchObject({ id: "snap-1" });
   });
 });
@@ -259,7 +272,11 @@ describe("performKioskSync", () => {
           users: [{ id: 1 }],
           eligibleEntries: [],
           faceProfiles: [],
-          snapshot: { id: "snap-1", activeYear: 2026, freshUntil: "2026-09-06T00:00:00Z" },
+          snapshot: {
+            id: "snap-1", activeYear: 2026, freshUntil: "2026-09-06T00:00:00Z",
+            coversUntil: "2026-09-18", version: 1, lastEligibilityEventId: 1,
+            issuedAt: "2026-09-05T00:00:00Z", users: [{ userId: 1 }], eligible: [], profiles: [],
+          },
         },
       },
     });
@@ -268,6 +285,15 @@ describe("performKioskSync", () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.freshUntil).toBe("2026-09-06T00:00:00Z");
     expect(dbState.stores.settings).toContainEqual({ op: "put", value: "1", key: "snapshotMode" });
+    expect(dbState.stores.settings).toContainEqual({ op: "put", value: JSON.stringify([1]), key: "snapshotMembers" });
+    // 스캔 경로가 통째로 parse하지 않도록 머리말만 따로 저장한다.
+    const header = dbState.stores.settings.find((entry) => entry.key === "snapshotHeader");
+    expect(JSON.parse(String(header?.value))).toEqual({
+      id: "snap-1", version: 1, lastEligibilityEventId: 1, activeYear: 2026,
+      issuedAt: "2026-09-05T00:00:00Z", freshUntil: "2026-09-06T00:00:00Z", coversUntil: "2026-09-18",
+    });
+    // 학년도는 설정 조회만 쓴다 — 근거 자신의 연도로 덮으면 검사가 항상 통과한다.
+    expect(dbState.stores.settings.some((entry) => entry.key === "serverActiveYear")).toBe(false);
     expect(dbState.stores.checkins).toBeUndefined();
   });
 
@@ -277,7 +303,8 @@ describe("performKioskSync", () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.freshUntil).toBeUndefined();
     expect(dbState.stores.settings).toContainEqual({ op: "put", value: "0", key: "snapshotMode" });
-    expect(dbState.stores.settings).toContainEqual({ op: "delete", key: "snapshot" });
+    expect(dbState.stores.settings).toContainEqual({ op: "delete", key: "snapshotHeader" });
+    expect(dbState.stores.settings).toContainEqual({ op: "delete", key: "snapshotMembers" });
   });
 
   it("기기 번호는 재동기화로 바뀌지 않는다", async () => {
@@ -324,5 +351,74 @@ describe("performKioskSync — 시계 차이", () => {
     });
     const outcome = await performKioskSync();
     expect(outcome.message).toContain("태블릿 시계를 확인하세요");
+  });
+});
+
+describe("로그아웃 보호 (RA)", () => {
+  it("남은 기록이 없으면 예전처럼 전부 지운다", () => {
+    expect(decideClientStateReset({ unsynced: 0, review: 0 })).toBe("FULL");
+  });
+
+  it("미전송·검토 대기가 있으면 키오스크 DB는 남긴다", () => {
+    expect(decideClientStateReset({ unsynced: 1, review: 0 })).toBe("KEEP_KIOSK_DB");
+    expect(decideClientStateReset({ unsynced: 0, review: 2 })).toBe("KEEP_KIOSK_DB");
+  });
+});
+
+describe("종결 거절 보존 (RB)", () => {
+  const terminal = (checkedAt: string): StoredLocalCheckIn =>
+    record({ synced: 1, terminal: "REJECTED", reviewReason: "USER_NOT_FOUND", checkedAt });
+
+  it("보존 기간 안의 종결 거절은 정리하지 않는다", () => {
+    const now = new Date("2026-10-01T00:00:00Z");
+    expect(shouldClearSyncedCheckIn(terminal("2026-09-25T00:00:00Z"), now)).toBe(false);
+  });
+
+  it("보존 기간이 지나면 정리한다", () => {
+    const now = new Date("2026-10-01T00:00:00Z");
+    const old = new Date(now.getTime() - (TERMINAL_RETENTION_DAYS + 1) * 86400_000).toISOString();
+    expect(shouldClearSyncedCheckIn(terminal(old), now)).toBe(true);
+  });
+
+  it("보통의 전송 완료 기록은 예전처럼 바로 정리한다", () => {
+    expect(shouldClearSyncedCheckIn(record({ synced: 1 }), new Date("2026-09-05T10:00:00Z"))).toBe(true);
+  });
+});
+
+describe("기기 번호 생성 (구형 브라우저)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("randomUUID가 없어도 만들어 낸다", () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: (array: Uint8Array) => {
+        array.fill(7);
+        return array;
+      },
+    });
+    expect(newDeviceId()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
+  it("crypto가 아예 없어도 던지지 않는다", () => {
+    vi.stubGlobal("crypto", undefined);
+    expect(newDeviceId().length).toBeGreaterThan(8);
+  });
+});
+
+describe("오프라인 내보내기 (RC)", () => {
+  it("추가 import 없이 CSV를 만들고 사유·근거·기기를 싣는다", async () => {
+    const blob = buildLocalCheckInsCsv([
+      {
+        id: 1, userId: 7, userLabel: "2-3-7", name: "김학생", date: "2026-09-05",
+        mealKind: "DINNER", type: "STUDENT", checkedAt: "2026-09-05T09:00:00.000Z",
+        status: "거절 확정", reason: "USER_NOT_FOUND", snapshotId: "snap-1", deviceId: "device-1",
+      },
+    ]);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]);
+    const text = await blob.text();
+    expect(text).toContain("거절 확정");
+    expect(text).toContain("USER_NOT_FOUND");
+    expect(text).toContain("snap-1");
+    expect(text).toContain("device-1");
   });
 });

@@ -3,7 +3,7 @@
   제품 IndexedDB 이전(v4·v5 → v6)을 실브라우저에서 확인한다. 앱 origin에서 열지 않는다.
 
     DIR=$(mktemp -d)
-    npx esbuild src/lib/local-db.ts --bundle --format=esm \
+    npx esbuild src/lib/browser-migration-entry.ts --bundle --format=esm \
       --outfile=$DIR/local-db.js --alias:@=$PWD/src
     cp tests/browser/academic-local-migration.html $DIR/index.html
     python3 -m http.server 53461 --bind 127.0.0.1 --directory "$DIR"
@@ -14,7 +14,7 @@
 <html lang="ko"><head><meta charset="utf-8"><title>academic local migration</title></head>
 <body><pre id="out">running…</pre>
 <script type="module">
-import { openDB, DB_NAME } from "./local-db.js";
+import { openDB, DB_NAME, applyKioskSnapshot } from "./local-db.js";
 
 const log = [];
 const say = (m) => { log.push(m); document.getElementById("out").textContent = log.join("\n"); };
@@ -69,15 +69,25 @@ async function run(name, version, withMealKind) {
   const users = await readAll(db, "users");
   say(`${name}: users=${JSON.stringify(users)}`);
 
-  // 명부 교체 도중 abort — 이전 users/settings와 모든 checkins가 남아야 한다
-  await new Promise((resolve) => {
-    const tx = db.transaction(["users", "eligibleEntries", "faceProfiles", "settings"], "readwrite");
-    tx.objectStore("users").clear();
-    tx.objectStore("users").put({ id: 99, name: "새명부", role: "STUDENT" });
-    tx.objectStore("settings").put("replaced", "operationMode");
-    tx.abort();
-    tx.onabort = () => resolve();
-  });
+  // 제품 applyKioskSnapshot에 저장할 수 없는 값을 섞어 실패시킨다.
+  // 이전 users/settings와 모든 checkins가 남아야 한다.
+  let applyError = null;
+  try {
+    await applyKioskSnapshot(db, {
+      operationMode: "local",
+      qrGeneration: 9,
+      users: [{ id: 99, name: "새명부", role: "STUDENT" }],
+      eligibleEntries: [],
+      mealWindows: { breakfast: { start: "04:00", end: "10:00" }, lunch: { start: "10:30", end: "14:00" }, dinner: { start: "15:00", end: "21:00" } },
+      faceMatch: { threshold: 0.55, margin: 0.05 },
+      // 구조화 복제가 불가능한 값 — put에서 던진다
+      faceProfiles: [{ userId: 1, embeddings: () => 1 }],
+      snapshot: null,
+    });
+  } catch (err) {
+    applyError = err && err.name ? err.name : String(err);
+  }
+  say(`${name}: applyKioskSnapshot 실패=${applyError}`);
   const usersAfter = await readAll(db, "users");
   const rowsAfter = await readAll(db, "checkins");
   const settingsAfter = await new Promise((resolve) => {
@@ -86,7 +96,7 @@ async function run(name, version, withMealKind) {
   });
   say(`${name}: afterAbort users=${JSON.stringify(usersAfter)} setting=${settingsAfter} checkins=${rowsAfter.length}`);
   db.close();
-  return { rows, usersAfter, settingsAfter, rowsAfter };
+  return { rows, usersAfter, settingsAfter, rowsAfter, applyError };
 }
 
 try {
@@ -102,8 +112,9 @@ try {
     checks.push([`${label} 전송 기록은 rawLegacy 없음`, res.rows.find((r) => r.id === 13).rawLegacy === undefined]);
     checks.push([`${label} 미전송 기록에 rawLegacy/사유`, res.rows.filter((r) => r.synced === 0).every((r) => r.rawLegacy && r.reviewReason === "이전 버전 기록 확인 필요")]);
     checks.push([`${label} checkedAt 보존`, res.rows.find((r) => r.id === 11).checkedAt === "2026-09-01T09:00:00.000Z"]);
-    checks.push([`${label} abort 후 옛 명부 유지`, res.usersAfter.length === 1 && res.usersAfter[0].id === 1 && res.settingsAfter === "keep-me"]);
-    checks.push([`${label} abort 후 기록 3건`, res.rowsAfter.length === 3]);
+    checks.push([`${label} applyKioskSnapshot이 실패를 알림`, res.applyError !== null]);
+    checks.push([`${label} 실패 후 옛 명부 유지`, res.usersAfter.length === 1 && res.usersAfter[0].id === 1 && res.settingsAfter === "keep-me"]);
+    checks.push([`${label} 실패 후 기록 3건`, res.rowsAfter.length === 3]);
   }
   say(checks.map(([n, ok]) => `${ok ? "PASS" : "FAIL"} ${n}`).join("\n"));
   say(checks.every(([, ok]) => ok) ? "ALL PASS" : "SOME FAILED");

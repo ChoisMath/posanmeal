@@ -1,4 +1,8 @@
-import type { LocalSnapshotState, SnapshotEvidence } from "@/lib/academic-year/local-snapshot";
+import {
+  createSnapshotStateCache,
+  type LocalSnapshotState,
+  type SnapshotHeader,
+} from "@/lib/academic-year/local-snapshot";
 
 export const DB_NAME = "posanmeal-local";
 const DB_VERSION = 6; // v6: 기록 무삭제 이전 + 근거(snapshot)·기기·검토 필드
@@ -30,6 +34,8 @@ export interface LocalCheckIn {
   rawLegacy?: unknown;
   /** 유효기간이 지난 명부로 저장된 기록. 저장은 되었고 재동기화가 필요하다. */
   stale?: boolean;
+  /** 서버가 종결한 거절. 다시 보내지 않지만 사유와 함께 화면·내보내기에 남는다. */
+  terminal?: "REJECTED";
 }
 
 /** v6 이전 기록은 mealKind가 없을 수 있다. 읽을 때만 쓰는 타입이며 새 insert에는 쓰지 않는다. */
@@ -169,10 +175,24 @@ const DEVICE_ID_KEY = "deviceId";
  * 기기 번호는 한 번만 만든다. 재시도·재동기화로 바뀌면 서버가 같은 기록을 다른
  * 기기의 새 기록으로 보게 되어 검토가 늘어난다. 전체 초기화로만 사라진다.
  */
+/** 구형 브라우저(비보안 컨텍스트 포함)에서도 체크인이 실패하면 안 된다. */
+export function newDeviceId(): string {
+  const cryptoApi = typeof crypto === "undefined" ? undefined : crypto;
+  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
+  if (cryptoApi?.getRandomValues) {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export async function getDeviceId(): Promise<string> {
   const existing = await getSetting(DEVICE_ID_KEY);
   if (existing) return existing;
-  const created = crypto.randomUUID();
+  const created = newDeviceId();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("settings", "readwrite");
@@ -319,7 +339,18 @@ export async function getUnsyncedCount(): Promise<number> {
   });
 }
 
-export async function clearSyncedCheckIns(): Promise<number> {
+/** 종결 거절은 사람이 확인할 시간을 준다. 이보다 오래된 것만 정리한다. */
+export const TERMINAL_RETENTION_DAYS = 30;
+
+/** 정리 대상인가. 종결 거절은 보존 기간이 지난 뒤에만 지운다. */
+export function shouldClearSyncedCheckIn(record: StoredLocalCheckIn, now: Date): boolean {
+  if (record.terminal !== "REJECTED") return true;
+  const checkedAt = Date.parse(record.checkedAt);
+  if (!Number.isFinite(checkedAt)) return false;
+  return now.getTime() - checkedAt > TERMINAL_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+}
+
+export async function clearSyncedCheckIns(now: Date = new Date()): Promise<number> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("checkins", "readwrite");
@@ -330,8 +361,10 @@ export async function clearSyncedCheckIns(): Promise<number> {
     req.onsuccess = () => {
       const cursor = req.result;
       if (cursor) {
-        store.delete(cursor.primaryKey);
-        count++;
+        if (shouldClearSyncedCheckIn(cursor.value as StoredLocalCheckIn, now)) {
+          store.delete(cursor.primaryKey);
+          count++;
+        }
         cursor.continue();
       }
     };
@@ -381,40 +414,68 @@ export async function clearFaceProfiles(): Promise<void> {
 
 // --- 명부 근거 (snapshot) ---
 
-const SNAPSHOT_KEY = "snapshot";
+const SNAPSHOT_HEADER_KEY = "snapshotHeader";
+const SNAPSHOT_MEMBERS_KEY = "snapshotMembers";
 const SNAPSHOT_MODE_KEY = "snapshotMode";
 const SERVER_ACTIVE_YEAR_KEY = "serverActiveYear";
 
-export async function getLocalSnapshotState(): Promise<LocalSnapshotState> {
+export const SNAPSHOT_SETTING_KEYS = {
+  header: SNAPSHOT_HEADER_KEY,
+  members: SNAPSHOT_MEMBERS_KEY,
+  mode: SNAPSHOT_MODE_KEY,
+  serverActiveYear: SERVER_ACTIVE_YEAR_KEY,
+} as const;
+
+function parseJson<T>(raw: unknown): T | null {
+  if (typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function readLocalSnapshotState(): Promise<LocalSnapshotState> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("settings", "readonly");
     const store = tx.objectStore("settings");
     const modeReq = store.get(SNAPSHOT_MODE_KEY);
-    const snapshotReq = store.get(SNAPSHOT_KEY);
+    const headerReq = store.get(SNAPSHOT_HEADER_KEY);
+    const membersReq = store.get(SNAPSHOT_MEMBERS_KEY);
     const yearReq = store.get(SERVER_ACTIVE_YEAR_KEY);
     tx.oncomplete = () => {
-      let snapshot: SnapshotEvidence | null = null;
-      if (typeof snapshotReq.result === "string") {
-        try {
-          snapshot = JSON.parse(snapshotReq.result) as SnapshotEvidence;
-        } catch {
-          snapshot = null;
-        }
-      }
+      const header = parseJson<SnapshotHeader>(headerReq.result);
+      const members = parseJson<number[]>(membersReq.result) ?? [];
       const year = Number(yearReq.result);
       resolve({
         snapshotMode: modeReq.result === "1",
-        snapshot,
-        serverActiveYear: Number.isFinite(year) && yearReq.result ? year : null,
+        snapshot: header ? { header, members: new Set(members) } : null,
+        serverActiveYear: yearReq.result && Number.isFinite(year) ? year : null,
       });
     };
     tx.onerror = () => reject(tx.error);
   });
 }
 
+const snapshotStateCache = createSnapshotStateCache(readLocalSnapshotState);
+
+/** 스캔 경로가 부른다. 같은 근거가 유지되는 동안에는 저장소를 다시 읽지 않는다. */
+export function getLocalSnapshotState(): Promise<LocalSnapshotState> {
+  return snapshotStateCache.get();
+}
+
+export function invalidateLocalSnapshotCache(): void {
+  snapshotStateCache.invalidate();
+}
+
+export async function getSnapshotHeader(): Promise<SnapshotHeader | null> {
+  return (await getLocalSnapshotState()).snapshot?.header ?? null;
+}
+
 export async function setServerActiveYear(year: number | null): Promise<void> {
   await setSetting(SERVER_ACTIVE_YEAR_KEY, year === null ? "" : String(year));
+  invalidateLocalSnapshotCache();
 }
 
 // --- 업로드 결과 반영 ---
@@ -426,6 +487,8 @@ export interface CheckInAcknowledgement {
   review: Array<{ clientId: number; reviewId?: string; reason?: string }>;
   /** 서버가 받지 못한 기록 — 사유와 함께 미전송으로 둔다. */
   rejected: Array<{ clientId: number; reason: string }>;
+  /** 서버가 종결 거절한 기록 — 다시 보내지 않지만 사유를 달고 화면에 남는다. */
+  rejectedFinal: Array<{ clientId: number; reason: string }>;
 }
 
 export async function applyCheckInAcknowledgement(ack: CheckInAcknowledgement): Promise<void> {
@@ -440,7 +503,15 @@ export async function applyCheckInAcknowledgement(ack: CheckInAcknowledgement): 
         if (record) store.put(apply(record));
       };
     };
-    for (const id of ack.finalIds) patch(id, (record) => ({ ...record, synced: 1 }));
+    const terminalReasons = new Map(ack.rejectedFinal.map((item) => [item.clientId, item.reason]));
+    for (const id of ack.finalIds) {
+      const reason = terminalReasons.get(id);
+      patch(id, (record) =>
+        reason === undefined
+          ? { ...record, synced: 1 }
+          : { ...record, synced: 1, terminal: "REJECTED", reviewReason: reason },
+      );
+    }
     for (const item of ack.review) {
       patch(item.clientId, (record) => ({
         ...record,
@@ -460,23 +531,62 @@ export async function applyCheckInAcknowledgement(ack: CheckInAcknowledgement): 
 // --- 초기화 보호 ---
 
 export interface PendingCheckInCounts {
+  /** 아직 서버에 닿지 않은, 검토 대기가 아닌 기록 수. */
   unsynced: number;
+  /** 서버가 검토로 세워 둔 기록 수. `unsynced`와 겹치지 않는다. */
   review: number;
 }
 
 export async function getPendingCheckInCounts(): Promise<PendingCheckInCounts> {
   const records = await getUnsyncedCheckIns();
-  return {
-    unsynced: records.length,
-    review: records.filter((record) => record.reviewId !== undefined).length,
-  };
+  const review = records.filter((record) => record.reviewId !== undefined).length;
+  return { unsynced: records.length - review, review };
+}
+
+/** 종결 거절(다시 보내지 않지만 사람이 확인해야 하는 기록). */
+export async function getTerminalRejectedCheckIns(): Promise<StoredLocalCheckIn[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("checkins", "readonly");
+    const req = tx.objectStore("checkins").index("bySynced").getAll(1);
+    req.onsuccess = () =>
+      resolve((req.result as StoredLocalCheckIn[]).filter((record) => record.terminal === "REJECTED"));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** 화면·내보내기가 함께 보는 목록: 미전송 + 종결 거절. */
+export async function getReviewableCheckIns(): Promise<StoredLocalCheckIn[]> {
+  const [unsynced, rejected] = await Promise.all([getUnsyncedCheckIns(), getTerminalRejectedCheckIns()]);
+  return [...unsynced, ...rejected];
 }
 
 export type ResetDecision = "ALLOWED" | "NEEDS_FORCED";
 
-/** 미전송·검토 대기가 하나라도 있으면 바로 지우지 않는다. */
+/** 미전송·검토 대기가 하나라도 있으면 바로 지우지 않는다. 종결된 기록은 가드 대상이 아니다. */
 export function decideResetGuard(counts: PendingCheckInCounts): ResetDecision {
   return counts.unsynced > 0 || counts.review > 0 ? "NEEDS_FORCED" : "ALLOWED";
+}
+
+/**
+ * 로그아웃은 절대 막지 않되, 서버에 없는 기록이 있으면 키오스크 DB는 지우지 않는다.
+ * 관리자는 동기화하려고 바로 그 태블릿에서 로그인하므로, 로그아웃 한 번에 기록이 사라지면 안 된다.
+ */
+export function decideClientStateReset(counts: PendingCheckInCounts): "FULL" | "KEEP_KIOSK_DB" {
+  return decideResetGuard(counts) === "NEEDS_FORCED" ? "KEEP_KIOSK_DB" : "FULL";
+}
+
+/** 로그아웃 시 남겨야 할 때 쓰는 부분 정리: 명부·자격·얼굴만 비우고 기록과 기기 번호는 둔다. */
+export async function clearRosterKeepCheckIns(): Promise<void> {
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(["users", "eligibleEntries", "faceProfiles"], "readwrite");
+    tx.objectStore("users").clear();
+    tx.objectStore("eligibleEntries").clear();
+    tx.objectStore("faceProfiles").clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 export const FORCE_RESET_PHRASE = "초기화";
@@ -489,6 +599,7 @@ export async function forceClearLocalData(confirm: { exported: boolean; typed: s
 }
 
 export async function clearAllData(): Promise<void> {
+  invalidateLocalSnapshotCache();
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const storeNames = ["settings", "users", "eligibleEntries", "checkins", "faceProfiles"] as const;

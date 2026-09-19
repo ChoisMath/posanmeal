@@ -23,6 +23,7 @@ import {
   type FaceCheckResult,
   type FaceCheckUser,
 } from "@/lib/facecheck-local";
+import { isSnapshotStale } from "@/lib/academic-year/local-snapshot";
 import {
   fetchKioskSettings,
   loadSavedKioskSettings,
@@ -36,6 +37,7 @@ import {
   getDeviceId,
   getLocalSnapshotState,
   getSetting,
+  getSnapshotHeader,
   getUnsyncedCount,
   getUser,
   isEligible,
@@ -260,10 +262,10 @@ export default function FaceCheckPage() {
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const outcome = await performKioskSync();
+      const outcome = await performKioskSync({ faces: true });
       setSyncMessage(outcome.message);
       if (outcome.ok) {
-        setStaleRoster(false);
+        setStaleRoster(isSnapshotStale(await getSnapshotHeader(), new Date()));
         applySettings(await loadSavedKioskSettings());
         await loadCandidates();
         setLastSyncAt((await getSetting("lastSyncAt")) ?? null);
@@ -293,8 +295,12 @@ export default function FaceCheckPage() {
       await loadCandidates();
       setUnsyncedCount(await getUnsyncedCount());
       setLastSyncAt((await getSetting("lastSyncAt")) ?? null);
+      setStaleRoster(isSnapshotStale(await getSnapshotHeader(), new Date()));
       if (s.operationMode === "local" && navigator.onLine) runSyncRef.current();
     })();
+    const staleInterval = setInterval(async () => {
+      setStaleRoster(isSnapshotStale(await getSnapshotHeader(), new Date()));
+    }, 60_000);
     const handleOnline = () => {
       setIsOnline(true);
       if (settingsRef.current?.operationMode === "local") runSyncRef.current();
@@ -304,6 +310,7 @@ export default function FaceCheckPage() {
     window.addEventListener("offline", handleOffline);
     return () => {
       cancelled = true;
+      clearInterval(staleInterval);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
@@ -949,7 +956,7 @@ export default function FaceCheckPage() {
           <div className="kiosk-sync-details flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-5">
             <span className="whitespace-nowrap text-white/80">마지막 동기화: {formatSyncTime(lastSyncAt)}</span>
             {staleRoster && (
-              <span className="rounded bg-amber-500 px-2 font-semibold whitespace-nowrap text-slate-900">재동기화 필요</span>
+              <span className="rounded border border-amber-400 bg-transparent px-2 font-semibold whitespace-nowrap text-amber-300">재동기화 필요</span>
             )}
             {syncMessage && <span className="whitespace-nowrap text-amber-300" title={syncMessage}>{syncMessage}</span>}
           </div>

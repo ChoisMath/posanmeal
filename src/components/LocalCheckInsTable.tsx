@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { LocalUser } from "@/lib/local-db";
+import type { LocalUser, StoredLocalCheckIn } from "@/lib/local-db";
 import { formatDateTimeSecondsKST } from "@/lib/timezone";
 import { Info } from "lucide-react";
 
@@ -15,6 +15,37 @@ export interface LocalCheckInRow {
   mealKind?: "BREAKFAST" | "LUNCH" | "DINNER";
   type: "STUDENT" | "WORK" | "PERSONAL";
   checkedAt: string;
+  status: LocalCheckInStatus;
+  reason?: string;
+  snapshotId?: string;
+  deviceId?: string;
+}
+
+export type LocalCheckInStatus = "미전송" | "검토 대기" | "거절 확정";
+
+export function localCheckInStatus(record: StoredLocalCheckIn): LocalCheckInStatus {
+  if (record.terminal === "REJECTED") return "거절 확정";
+  return record.reviewId === undefined ? "미전송" : "검토 대기";
+}
+
+export function toLocalCheckInRow(
+  record: StoredLocalCheckIn,
+  user: LocalUser | undefined,
+): LocalCheckInRow {
+  return {
+    id: record.id!,
+    userId: record.userId,
+    userLabel: buildUserLabel(user, record.userId),
+    name: user?.name ?? "-",
+    date: record.date,
+    mealKind: record.mealKind,
+    type: record.type,
+    checkedAt: record.checkedAt,
+    status: localCheckInStatus(record),
+    reason: record.reviewReason,
+    snapshotId: record.snapshotId,
+    deviceId: record.deviceId,
+  };
 }
 
 export function buildUserLabel(u: LocalUser | undefined, userId: number): string {
@@ -51,7 +82,8 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
   return (
     <>
       <p className="text-sm text-muted-foreground mb-2 break-keep">
-        {rows.length}건의 체크인이 아직 서버로 전송되지 않았습니다.
+        {rows.filter((r) => r.status !== "거절 확정").length}건이 아직 서버에 반영되지 않았고,
+        {" "}{rows.filter((r) => r.status === "거절 확정").length}건은 거절로 종결되었습니다.
       </p>
       {missingUserCount > 0 && (
         <p className="text-sm text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1 break-keep">
@@ -69,6 +101,8 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
               <th className="px-3 py-2 text-left font-medium">식사</th>
               <th className="px-3 py-2 text-left font-medium">종류</th>
               <th className="px-3 py-2 text-left font-medium">체크시각</th>
+              <th className="px-3 py-2 text-left font-medium">상태</th>
+              <th className="px-3 py-2 text-left font-medium">사유</th>
               <th className="px-3 py-2 text-left font-medium">ID</th>
             </tr>
           </thead>
@@ -81,6 +115,8 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
                 <td className="px-3 py-2">{r.mealKind === undefined ? "-" : r.mealKind === "BREAKFAST" ? "조" : "석"}</td>
                 <td className="px-3 py-2">{r.type}</td>
                 <td className="px-3 py-2">{formatDateTimeSecondsKST(new Date(r.checkedAt)).slice(11)}</td>
+                <td className={`px-3 py-2 ${r.status === "거절 확정" ? "text-red-600 dark:text-red-400" : ""}`}>{r.status}</td>
+                <td className="px-3 py-2 text-muted-foreground" title={r.reason}>{r.reason ?? "-"}</td>
                 <td className="px-3 py-2 text-muted-foreground">{r.id}</td>
               </tr>
             ))}

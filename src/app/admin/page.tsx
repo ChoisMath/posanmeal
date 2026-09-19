@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel, type CheckInSourceLabel } from "@/lib/checkin-source";
-import { LocalCheckInsTable, buildUserLabel, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
+import { LocalCheckInsTable, toLocalCheckInRow, type LocalCheckInRow } from "@/components/LocalCheckInsTable";
 import { EditableTextCell, EditableSelectCell, type SaveResult } from "@/components/EditableCell";
 import { MEAL_LABEL, METHOD_LABEL } from "@/lib/meal-plan";
 import { MEAL_THEME } from "@/components/meal/meal-ui";
@@ -321,8 +321,8 @@ export default function AdminPage() {
     setLocalError(null);
     setLocalRows([]);
     try {
-      const { getUnsyncedCheckIns, getUser } = await import("@/lib/local-db");
-      const checkins = await getUnsyncedCheckIns();
+      const { getReviewableCheckIns, getUser } = await import("@/lib/local-db");
+      const checkins = await getReviewableCheckIns();
       const userIds = Array.from(new Set(checkins.map((c) => c.userId)));
       const userMap = new Map<number, Awaited<ReturnType<typeof getUser>>>();
       await Promise.all(
@@ -331,16 +331,7 @@ export default function AdminPage() {
           if (u) userMap.set(id, u);
         }),
       );
-      const rows: LocalCheckInRow[] = checkins.map((c) => ({
-        id: c.id!,
-        userId: c.userId,
-        userLabel: buildUserLabel(userMap.get(c.userId), c.userId),
-        name: userMap.get(c.userId)?.name ?? "-",
-        date: c.date,
-        mealKind: c.mealKind,
-        type: c.type,
-        checkedAt: c.checkedAt,
-      }));
+      const rows: LocalCheckInRow[] = checkins.map((c) => toLocalCheckInRow(c, userMap.get(c.userId)));
       setLocalRows(rows);
     } catch (err) {
       setLocalError("로컬 데이터를 불러오지 못했습니다");

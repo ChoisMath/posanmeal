@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { localDateKey, runLocalFaceCheckIn, toFaceCandidates, type LocalFaceRepo } from "@/lib/facecheck-local";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
-import { LEGACY_SNAPSHOT_STATE, type LocalSnapshotState } from "@/lib/academic-year/local-snapshot";
+import { LEGACY_SNAPSHOT_STATE, toLocalSnapshot, type LocalSnapshotState } from "@/lib/academic-year/local-snapshot";
 
 const WINDOWS = {
   breakfast: { start: "00:00", end: "00:00" },
@@ -201,7 +201,7 @@ describe("runLocalFaceCheckIn — 명부 근거", () => {
     eligible: [],
     profiles: [],
   };
-  const state = { snapshotMode: true, snapshot, serverActiveYear: 2026 };
+  const state = { snapshotMode: true, snapshot: toLocalSnapshot(snapshot), serverActiveYear: 2026 };
   const base = { embedding: axis(0), candidates: CANDIDATES, faceMatch: FACE_MATCH, now: NOW, mealWindows: WINDOWS };
 
   it("최초 인식은 FRESH, 확인 처리 때 STALE이어도 저장하고 stale을 알린다", async () => {
@@ -234,6 +234,23 @@ describe("runLocalFaceCheckIn — 명부 근거", () => {
     expect(blocked).toMatchObject({ success: false, error: "학년도 전환 후 동기화가 필요합니다" });
     expect(rolled.checkins).toHaveLength(0);
     expect(ctx.checkins).toHaveLength(0);
+  });
+
+  it("중복은 근거보다 먼저 답한다 (명단에 없어도 중복 안내)", async () => {
+    const outsider = { snapshotMode: true, snapshot: toLocalSnapshot({ ...snapshot, users: [] }), serverActiveYear: 2026 };
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), outsider);
+    ctx.checkins.push({ id: 1, userId: 1, date: "2026-09-05", mealKind: "DINNER", checkedAt: NOW.toISOString(), type: "STUDENT", synced: 0 });
+    const r = await runLocalFaceCheckIn({ ...base, confirmation }, ctx.repo, () => new Date("2026-09-05T10:00:00Z"));
+    expect(r).toMatchObject({ duplicate: true });
+    expect(ctx.checkins).toHaveLength(1);
+  });
+
+  it("확인 창을 띄우기 전에도 막힌다 (명단에 없는 사용자)", async () => {
+    const outsider = { snapshotMode: true, snapshot: toLocalSnapshot({ ...snapshot, users: [] }), serverActiveYear: 2026 };
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), outsider);
+    const r = await runLocalFaceCheckIn(base, ctx.repo, () => new Date("2026-09-05T10:00:00Z"));
+    expect(r).toMatchObject({ success: false, error: "명단에 없는 사용자입니다. 동기화가 필요합니다" });
+    expect(r.needConfirmation).toBeUndefined();
   });
 
   it("근거 모드가 아니면 판정 없이 기존과 같이 저장한다", async () => {

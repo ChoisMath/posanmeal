@@ -123,7 +123,7 @@ export async function runLocalQrCheckIn(
     type,
     synced: 0,
     deviceId: await repo.getDeviceId(),
-    ...(state.snapshot ? { snapshotId: state.snapshot.id } : {}),
+    ...(state.snapshot ? { snapshotId: state.snapshot.header.id } : {}),
     ...(stale ? { stale: true } : {}),
   });
   return { success: true, user: resultUser, type, mealKind, checkedAt, ...(stale ? { stale: true } : {}) };
