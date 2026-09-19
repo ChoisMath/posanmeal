@@ -8,11 +8,13 @@ import { academicYearOfDate } from "@/lib/academic-year/calendar";
 import { errorResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import {
-  compareByProfile,
   currentClassLabelOf,
+  displayNameOf,
   getReportProfiles,
-  listYearMemberIds,
+  listPeriodCategory,
   MISSING_PROFILE_WARNING,
+  UNKNOWN_CATEGORY_LABEL,
+  type ReportCategory,
   type ReportProfile,
 } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
@@ -60,18 +62,19 @@ async function exportMonthly(
   const { startDate, endDate, daysInMonth } = buildMonthDateRange(year, month);
   const academicYear = academicYearOfDate(formatMonthDateKey(year, month, 1));
 
-  async function loadCategory(
-    filter: { role: "STUDENT" | "TEACHER"; grade?: number },
-  ): Promise<ExportUser[]> {
-    const ids = await listYearMemberIds(prisma, academicYear, filter);
-    const [profiles, checkIns] = await Promise.all([
-      getReportProfiles(prisma, ids, academicYear, includeCurrent),
-      prisma.checkIn.findMany({
-        where: { userId: { in: ids }, date: { gte: startDate, lte: endDate } },
-        select: { userId: true, date: true, type: true, mealKind: true },
-        orderBy: [{ date: "asc" }, { mealKind: "asc" }],
-      }),
-    ]);
+  async function loadCategory(category: ReportCategory): Promise<ExportUser[]> {
+    const { ids, profiles } = await listPeriodCategory(
+      prisma,
+      academicYear,
+      { startDate, endDate },
+      category,
+      includeCurrent,
+    );
+    const checkIns = await prisma.checkIn.findMany({
+      where: { userId: { in: ids }, date: { gte: startDate, lte: endDate } },
+      select: { userId: true, date: true, type: true, mealKind: true },
+      orderBy: [{ date: "asc" }, { mealKind: "asc" }],
+    });
 
     const byUser = new Map<number, ExportCheckIn[]>();
     for (const { userId, ...rest } of checkIns) {
@@ -80,45 +83,49 @@ async function exportMonthly(
       else byUser.set(userId, [rest]);
     }
 
-    const mode = filter.role === "TEACHER" ? "TEACHER" : "STUDENT";
-    return ids
-      .slice()
-      .sort((a, b) => compareByProfile(profiles.get(a), profiles.get(b), mode))
-      .map((id) => {
-        const report: ReportProfile | undefined = profiles.get(id);
-        const profile = report?.historical;
-        return {
-          name: profile?.name ?? MISSING_PROFILE_WARNING,
-          subject: profile?.subject ?? null,
-          classNum: profile?.classNum ?? null,
-          number: profile?.number ?? null,
-          currentClass: includeCurrent ? currentClassLabelOf(report) : null,
-          checkIns: byUser.get(id) ?? [],
-        };
-      });
+    return ids.map((id) => {
+      const report: ReportProfile | undefined = profiles.get(id);
+      const profile = report?.historical;
+      return {
+        name: displayNameOf(report) || MISSING_PROFILE_WARNING,
+        subject: profile?.subject ?? null,
+        classNum: profile?.classNum ?? null,
+        number: profile?.number ?? null,
+        currentClass: includeCurrent ? currentClassLabelOf(report) : null,
+        checkIns: byUser.get(id) ?? [],
+      };
+    });
   }
 
-  const [teachers, grade1, grade2, grade3] = await Promise.all([
-    loadCategory({ role: "TEACHER" }),
-    ...([1, 2, 3] as const).map((grade) => loadCategory({ role: "STUDENT", grade })),
-  ]);
+  const [teachers, grade1, grade2, grade3, unknown] = await Promise.all(
+    (["teacher", "1", "2", "3", "unknown"] as const).map((category) => loadCategory(category)),
+  );
 
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.default.Workbook();
   workbook.title = `${academicYear}학년도 ${year}년 ${month}월 급식 현황`;
 
   const categories = [
-    { title: `포산고등학교 ${month}월 교사`, label: "이름", users: teachers, isTeacher: true },
-    { title: `포산고등학교 ${month}월 1학년`, label: "반-번호 이름", users: grade1, isTeacher: false },
-    { title: `포산고등학교 ${month}월 2학년`, label: "반-번호 이름", users: grade2, isTeacher: false },
-    { title: `포산고등학교 ${month}월 3학년`, label: "반-번호 이름", users: grade3, isTeacher: false },
+    { sheetName: "교사", title: `포산고등학교 ${month}월 교사`, label: "이름", users: teachers, isTeacher: true, nameOnly: true },
+    { sheetName: "1학년", title: `포산고등학교 ${month}월 1학년`, label: "반-번호 이름", users: grade1, isTeacher: false, nameOnly: false },
+    { sheetName: "2학년", title: `포산고등학교 ${month}월 2학년`, label: "반-번호 이름", users: grade2, isTeacher: false, nameOnly: false },
+    { sheetName: "3학년", title: `포산고등학교 ${month}월 3학년`, label: "반-번호 이름", users: grade3, isTeacher: false, nameOnly: false },
+    // 그 해 명부 기록이 없는 사람. 학년을 추측하지 않고 마지막에 따로 모아 고칠 수 있게 한다.
+    ...(unknown.length === 0
+      ? []
+      : [{
+          sheetName: UNKNOWN_CATEGORY_LABEL,
+          title: `포산고등학교 ${month}월 ${UNKNOWN_CATEGORY_LABEL} (${academicYear}학년도 명부 기록 없음)`,
+          label: "이름",
+          users: unknown,
+          isTeacher: false,
+          nameOnly: true,
+        }]),
   ];
 
-  const sheetNames = ["교사", "1학년", "2학년", "3학년"];
-
   for (let si = 0; si < categories.length; si++) {
-    const { title, label, users, isTeacher } = categories[si];
-    const sheet = workbook.addWorksheet(sheetNames[si]);
+    const { sheetName, title, label, users, isTeacher, nameOnly } = categories[si];
+    const sheet = workbook.addWorksheet(sheetName);
 
     // 열 구성: A(이름) + daysInMonth + 개인/근무(교사만) + 합계
     const summaryCols = isTeacher ? 3 : 1; // 개인,근무,합계 | 합계
@@ -187,7 +194,7 @@ async function exportMonthly(
         slotMap.set(day, slot);
       }
 
-      row.getCell(1).value = isTeacher
+      row.getCell(1).value = nameOnly
         ? user.name
         : `${user.classNum ?? ""}-${user.number ?? ""} ${user.name}`;
       if (includeCurrent) {
@@ -332,7 +339,7 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   );
 
   type Row = {
-    category: "1학년" | "2학년" | "3학년" | "교사 근무" | "교사 개인";
+    category: "1학년" | "2학년" | "3학년" | "교사 근무" | "교사 개인" | "확인 필요";
     grade: number | null;
     classNum: number | null;
     number: number | null;
@@ -345,14 +352,17 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   };
 
   const categoryOrder: Record<Row["category"], number> = {
-    "1학년": 0, "2학년": 1, "3학년": 2, "교사 근무": 3, "교사 개인": 4,
+    "1학년": 0, "2학년": 1, "3학년": 2, "교사 근무": 3, "교사 개인": 4, "확인 필요": 5,
   };
 
   const rows: Row[] = checkIns.map((c) => {
     const report = profiles.get(c.userId);
     const profile = report?.historical;
+    // 기록이 없는 사람을 교사로 세지 않는다. 학년도 추측하지 않고 따로 모은다.
     let category: Row["category"];
-    if (profile?.role === "STUDENT") {
+    if (!profile) {
+      category = "확인 필요";
+    } else if (profile.role === "STUDENT") {
       category = profile.grade === 1 ? "1학년" : profile.grade === 2 ? "2학년" : "3학년";
     } else {
       category = c.type === "WORK" ? "교사 근무" : "교사 개인";
@@ -362,7 +372,7 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
       grade: profile?.grade ?? null,
       classNum: profile?.classNum ?? null,
       number: profile?.number ?? null,
-      name: profile?.name ?? MISSING_PROFILE_WARNING,
+      name: displayNameOf(report) || MISSING_PROFILE_WARNING,
       subject: profile?.subject ?? null,
       currentClass: includeCurrent ? currentClassLabelOf(report) : null,
       mealKind: c.mealKind ?? "DINNER",
@@ -384,7 +394,7 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   });
 
   const counts: Record<Row["category"], number> = {
-    "1학년": 0, "2학년": 0, "3학년": 0, "교사 근무": 0, "교사 개인": 0,
+    "1학년": 0, "2학년": 0, "3학년": 0, "교사 근무": 0, "교사 개인": 0, "확인 필요": 0,
   };
   for (const r of rows) counts[r.category]++;
   const total = rows.length;
@@ -410,7 +420,9 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   const summaryCell = sheet.getCell(2, 1);
   summaryCell.value =
     `합계: 1학년 ${counts["1학년"]} · 2학년 ${counts["2학년"]} · 3학년 ${counts["3학년"]}` +
-    ` · 교사 근무 ${counts["교사 근무"]} · 교사 개인 ${counts["교사 개인"]} · 총 ${total}`;
+    ` · 교사 근무 ${counts["교사 근무"]} · 교사 개인 ${counts["교사 개인"]}` +
+    (counts["확인 필요"] > 0 ? ` · ${UNKNOWN_CATEGORY_LABEL} ${counts["확인 필요"]}` : "") +
+    ` · 총 ${total}`;
   summaryCell.alignment = { horizontal: "center" };
   summaryCell.font = { italic: true };
 
@@ -423,7 +435,7 @@ async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<
   widths.forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
 
   for (const r of rows) {
-    const isStudent = r.category.endsWith("학년");
+    const isStudent = r.category.endsWith("학년") && r.category !== "확인 필요";
     const row = sheet.addRow([
       r.category,
       isStudent ? r.grade : "",

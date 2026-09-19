@@ -322,6 +322,13 @@ describe("academic year reports", () => {
   // -------------------------------------------------------------------------
 
   it("담임 문자열이 형식에 맞지 않으면 담당 범위가 없다", async () => {
+    // 같은 교사 actor가 정상 표기에서는 범위를 갖는다는 것부터 확인한다.
+    expect(await getTeacherScope(db, actorOf(admin))).toEqual({
+      year: SOURCE_YEAR,
+      grade: 1,
+      classNum: 1,
+    });
+
     await db.userAcademicRecord.update({
       where: { year_userId: { year: SOURCE_YEAR, userId: fx.teacherId } },
       data: { homeroom: "부담임" },
@@ -486,6 +493,132 @@ describe("academic year reports", () => {
     });
     const secondRow = rows.find((r) => r.email === "student2-test@example.posan.kr");
     expect(secondRow).toMatchObject({ grade: 2, classNum: 5 });
+  });
+
+  it("그 해 기록이 없어도 자료가 있으면 월별 보기·엑셀의 확인 필요 묶음에 남는다", async () => {
+    await db.userAcademicRecord.deleteMany({
+      where: { year: SOURCE_YEAR, userId: fx.studentId },
+    });
+
+    const unknown = await (
+      await routes.adminCheckins.GET(getRequest("?year=2026&month=9&category=unknown"))
+    ).json();
+    const row = unknown.users.find((u: { id: number }) => u.id === fx.studentId);
+    expect(row).toMatchObject({
+      name: "학생테스트",
+      grade: null,
+      classNum: null,
+      number: null,
+      profileWarning: "학년도 정보 확인 필요",
+    });
+    expect(row.checkIns.length).toBeGreaterThan(0);
+
+    const grade1 = await (
+      await routes.adminCheckins.GET(getRequest("?year=2026&month=9&category=1"))
+    ).json();
+    expect(grade1.users.map((u: { id: number }) => u.id)).not.toContain(fx.studentId);
+
+    // 네 분류 + 확인 필요 묶음의 체크인 수가 그 달 전체와 같아야 한다.
+    const categories = ["teacher", "1", "2", "3", "unknown"];
+    let counted = 0;
+    for (const category of categories) {
+      const body = await (
+        await routes.adminCheckins.GET(getRequest(`?year=2026&month=9&category=${category}`))
+      ).json();
+      for (const user of body.users) counted += user.checkIns.length;
+    }
+    expect(counted).toBe(
+      await db.checkIn.count({
+        where: {
+          date: {
+            gte: new Date("2026-09-01T00:00:00.000Z"),
+            lte: new Date("2026-09-30T00:00:00.000Z"),
+          },
+        },
+      }),
+    );
+
+    const monthly = await routes.adminExport.GET(getRequest("?year=2026&month=9"));
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(await monthly.arrayBuffer());
+    const sheet = book.getWorksheet("확인 필요")!;
+    expect(sheet).toBeTruthy();
+    const names: unknown[] = [];
+    sheet.eachRow((r) => names.push(r.getCell(1).value));
+    expect(names).toContain("학생테스트");
+
+    const daily = await routes.adminExport.GET(getRequest("?date=2026-09-18"));
+    const dailyBook = new ExcelJS.Workbook();
+    await dailyBook.xlsx.load(await daily.arrayBuffer());
+    const dailySheet = dailyBook.getWorksheet("2026-09-18")!;
+    const summary = String(dailySheet.getCell("A2").value);
+    expect(summary).toContain("확인 필요 1");
+    expect(summary).toContain("교사 근무 1");
+    const categoriesInSheet: unknown[] = [];
+    dailySheet.eachRow((r, i) => { if (i >= 5) categoriesInSheet.push(r.getCell(1).value); });
+    expect(categoriesInSheet).toContain("확인 필요");
+  });
+
+  it("기록이 없어도 그 줄을 정정할 수 있다", async () => {
+    await db.userAcademicRecord.deleteMany({
+      where: { year: SOURCE_YEAR, userId: fx.studentId },
+    });
+
+    // 기존 체크인의 유형으로 학생 갈래를 정한다.
+    const removed = await routes.adminToggle.POST(
+      jsonRequest("POST", {
+        userId: fx.studentId,
+        date: "2026-09-18",
+        mealKind: "DINNER",
+        action: "toggle",
+      }),
+    );
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({ state: "empty" });
+
+    // 기록도 체크인도 없으면 계정 역할로 정한다.
+    const added = await routes.adminToggle.POST(
+      jsonRequest("POST", {
+        userId: fx.studentId,
+        date: "2026-09-18",
+        mealKind: "DINNER",
+        action: "toggle",
+      }),
+    );
+    expect(added.status).toBe(200);
+    expect(await added.json()).toMatchObject({ state: "STUDENT" });
+  });
+
+  it("담임은 지난 학년도 공고를 목록에서도 상세에서도 볼 수 없다", async () => {
+    const second = await seedSecondStudent();
+    await runRollover(second);
+    // 전환 뒤 담임 기록을 2027로 옮겨 재직 상태를 유지한다.
+    await db.userAcademicRecord.update({
+      where: { year_userId: { year: TARGET_YEAR, userId: fx.teacherId } },
+      data: { homeroom: "3-2" },
+    });
+    const refreshed = await db.user.findUniqueOrThrow({ where: { id: fx.teacherId } });
+    asUser(refreshed);
+
+    const list = await (await routes.teacherApplications.GET()).json();
+    expect(list.applications.map((a: { id: number }) => a.id)).not.toContain(fx.applicationId);
+
+    const detail = await routes.teacherRegistrations.GET(getRequest(""), appParams());
+    expect(detail.status).toBe(403);
+    const body = await detail.json();
+    expect(JSON.stringify(body)).not.toContain("서명");
+
+    // 없는 공고도 같은 답이라 존재 여부가 드러나지 않는다.
+    const missing = await routes.teacherRegistrations.GET(getRequest(""), {
+      params: Promise.resolve({ id: "999999" }),
+    });
+    expect(missing.status).toBe(403);
+    expect(await missing.json()).toEqual(body);
+
+    // 관리자는 계속 볼 수 있다.
+    asAdmin();
+    const adminView = await routes.adminRegistrations.GET(getRequest(""), appParams());
+    expect(adminView.status).toBe(200);
   });
 
   it("담임 신청 명단은 담당 학급 학생만 담는다", async () => {

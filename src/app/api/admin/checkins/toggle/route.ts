@@ -48,20 +48,26 @@ export async function POST(request: Request) {
       // 그 날짜가 속한 학년도의 소속으로 판정한다. 지금 졸업했다는 이유로 과거
       // 기록을 고치지 못하게 하지 않는다.
       const profile = (await getReportProfiles(tx, [userId], year, false)).get(userId)?.historical;
-      if (!profile) {
-        throw new DomainError("MISSING_PROFILE", "해당 학년도의 학적 정보가 없습니다.");
-      }
-      if (action === "cycle" && profile.role !== "TEACHER") {
-        throw new DomainError("INVALID_INPUT", "교사에게만 적용합니다.");
-      }
-      if (action === "toggle" && profile.role !== "STUDENT") {
-        throw new DomainError("INVALID_INPUT", "학생에게만 적용합니다.");
-      }
 
       const existing = await tx.checkIn.findUnique({
         where: { userId_date_mealKind: { userId, date: targetDate, mealKind } },
         select: { id: true, type: true },
       });
+
+      // 기록이 없다고 정정을 막으면 "확인 필요"로 남은 줄을 영영 고칠 수 없다. 표기는
+      // 그대로 경고로 두고, 학생/교사 갈래만 기존 기록이나 계정 역할로 정한다.
+      const role = profile?.role
+        ?? (existing ? (existing.type === "STUDENT" ? "STUDENT" : "TEACHER") : null)
+        ?? (await tx.user.findUnique({ where: { id: userId }, select: { role: true } }))?.role;
+      if (!role) {
+        throw new DomainError("MISSING_PROFILE", "사용자를 찾을 수 없습니다.");
+      }
+      if (action === "cycle" && role !== "TEACHER") {
+        throw new DomainError("INVALID_INPUT", "교사에게만 적용합니다.");
+      }
+      if (action === "toggle" && role !== "STUDENT") {
+        throw new DomainError("INVALID_INPUT", "학생에게만 적용합니다.");
+      }
 
       if (action === "cycle") {
         if (!existing) {

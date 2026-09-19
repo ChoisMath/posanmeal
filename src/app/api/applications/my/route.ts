@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { calcMealFee } from "@/lib/meal-plan";
 import type { MealKind } from "@/lib/meal-plan";
 import { routeResponse } from "@/lib/academic-year/api";
-import { resolveApplicationYear, rosterMode } from "@/lib/academic-year/registration-context";
+import { applicationYearOrNull, rosterMode } from "@/lib/academic-year/registration-context";
+import { activeYear } from "@/lib/academic-year/roster-service";
 import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 
 // 본인 이력은 졸업·전출 여부와 무관하게 계속 보여 준다.
@@ -34,14 +35,7 @@ async function readMyRegistrations(): Promise<NextResponse> {
   });
 
   const mode = await rosterMode(prisma);
-  const yearByApplication = new Map<number, number>();
-  for (const reg of registrations) {
-    if (yearByApplication.has(reg.application.id)) continue;
-    yearByApplication.set(
-      reg.application.id,
-      await resolveApplicationYear(prisma, mode, reg.application.academicYear),
-    );
-  }
+  const current = await activeYear(prisma);
 
   const result = registrations.map((reg) => {
     const mealDateCountByKind = new Map<MealKind, number>();
@@ -72,7 +66,7 @@ async function readMyRegistrations(): Promise<NextResponse> {
       id: reg.id,
       status: reg.status,
       createdAt: reg.createdAt,
-      academicYear: yearByApplication.get(reg.application.id) ?? null,
+      academicYear: applicationYearOrNull(reg.application.academicYear, mode, current),
       application: {
         id: reg.application.id,
         title: reg.application.title,

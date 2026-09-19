@@ -92,9 +92,13 @@ describe("CheckIn mealKind split", () => {
 
   it("returns meal columns for admin monthly check-in rows", async () => {
     const { GET } = await import("@/app/api/admin/checkins/route");
-    mocks.mealRegistrationMealDateFindMany.mockResolvedValue([
-      { date: new Date("2026-05-30T00:00:00.000Z"), mealKind: "BREAKFAST" },
-    ]);
+    // 같은 모델을 두 번 조회한다: 그 기간의 신청자 id, 그리고 개설된 조·중식 날짜.
+    mocks.mealRegistrationMealDateFindMany.mockImplementation(
+      async (args: { select?: { registration?: unknown } }) =>
+        args?.select?.registration
+          ? []
+          : [{ date: new Date("2026-05-30T00:00:00.000Z"), mealKind: "BREAKFAST" }],
+    );
 
     const response = await GET(new Request("http://localhost/api/admin/checkins?year=2026&month=5&category=teacher"));
     const body = await response.json();

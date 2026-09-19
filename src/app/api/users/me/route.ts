@@ -18,7 +18,8 @@ export async function GET() {
     const [user, todayRows] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, email: true, role: true, photoUrl: true },
+        // 이름은 학년도에 매이지 않는다. 기록이 비어도 본인 화면에 이름은 보여야 한다.
+        select: { id: true, email: true, name: true, role: true, photoUrl: true },
       }),
       prisma.mealRegistrationMealDate.findMany({
         where: {
@@ -47,7 +48,7 @@ export async function GET() {
         id: user.id,
         email: user.email,
         role: profile?.role ?? user.role,
-        name: profile?.name ?? "",
+        name: profile?.name ?? user.name,
         grade: profile?.grade ?? null,
         classNum: profile?.classNum ?? null,
         number: profile?.number ?? null,

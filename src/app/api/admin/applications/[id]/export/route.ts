@@ -8,6 +8,7 @@ import {
 import {
   compareByProfile,
   currentClassLabelOf,
+  displayNameOf,
   getReportProfiles,
   listYearMemberIds,
   MISSING_PROFILE_WARNING,
@@ -188,7 +189,7 @@ export async function GET(
         r.getCell(2).value = profile?.grade ?? null;
         r.getCell(3).value = profile?.classNum ?? null;
         r.getCell(4).value = profile?.number ?? null;
-        r.getCell(5).value = profile?.name ?? MISSING_PROFILE_WARNING;
+        r.getCell(5).value = displayNameOf(studentProfiles.get(studentId)) || MISSING_PROFILE_WARNING;
         const p = prefillByUser.get(studentId);
         columns.forEach((col, i) => {
           const cell = r.getCell(firstMealCol + i);
@@ -302,7 +303,7 @@ export async function GET(
         createdAt,
         loginId,
         studentNo,
-        name: profile?.name ?? MISSING_PROFILE_WARNING,
+        name: displayNameOf(report) || MISSING_PROFILE_WARNING,
         grade: profile?.grade ?? undefined,
         classNum: profile?.classNum ?? undefined,
         number: profile?.number ?? undefined,

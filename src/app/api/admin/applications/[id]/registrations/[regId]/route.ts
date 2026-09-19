@@ -10,7 +10,7 @@ import {
   resolveApplicationYear,
   rosterMode,
 } from "@/lib/academic-year/registration-context";
-import { getReportProfiles } from "@/lib/academic-year/report-profile";
+import { displayNameOf, getReportProfiles } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { z } from "zod";
 
@@ -66,7 +66,7 @@ async function readRegistration(
       updatedAt: reg.updatedAt,
       user: {
         id: reg.userId,
-        name: profile?.name ?? "",
+        name: displayNameOf(report),
         grade: profile?.grade ?? null,
         classNum: profile?.classNum ?? null,
         number: profile?.number ?? null,

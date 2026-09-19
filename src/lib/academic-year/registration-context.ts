@@ -64,6 +64,19 @@ export async function resolveApplicationYear(
 }
 
 /**
+ * 목록을 거를 때처럼 "어느 해 것인지"만 물을 때 쓴다. 판정 규칙은
+ * `resolveApplicationYear`와 같고, READY의 결측은 예외 대신 null이다.
+ */
+export function applicationYearOrNull(
+  applicationYear: number | null,
+  mode: RosterMode,
+  activeYear: number,
+): number | null {
+  if (applicationYear !== null) return applicationYear;
+  return mode === "READY" ? null : activeYear;
+}
+
+/**
  * 그 학년도의 학년. READY에는 대체가 없다 — 현재 `User.grade`로 메우면 진급한
  * 학생의 지난 공고가 올해 학년으로 재계산된다. PREPARING에서만 연도 기록이
  * 없을 때 기존과 같이 `User.grade`를 본다.

@@ -11,6 +11,10 @@ const HOMEROOM_PATTERN = /^[1-3]-[1-9][0-9]*$/;
 /**
  * 담임 권한의 유일한 근거. 요청이 보낸 연도·학년·반은 보지 않고 운영 연도의
  * 재직 교사 기록에서만 담당 학급을 읽는다. 여기서 `null`이면 어떤 학급도 볼 수 없다.
+ *
+ * READY에서는 `User.homeroom`을 절대 보지 않는다 — 명부가 소유한 값이 유일한 근거다.
+ * PREPARING에서는 `getReportProfiles`의 단일 `User` 대체 규칙을 그대로 물려받아
+ * 초기 이전 전에도 기존 담임 화면이 끊기지 않는다(Release A 연속성).
  */
 export async function getTeacherScope(db: Db, actor: Actor): Promise<TeacherScope | null> {
   if (actor.kind !== "USER") return null;

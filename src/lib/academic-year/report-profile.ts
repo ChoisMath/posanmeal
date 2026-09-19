@@ -14,6 +14,11 @@ export type ReportProfile = {
   current: AcademicProfile | null;
   currentState: string;
   warning: string | null;
+  /**
+   * 그 해 기록이 없을 때만 채운다. 이름은 학년·반과 달리 학년도에 매이는 값이 아니고,
+   * 관리자가 "확인 필요"로 남은 사람을 찾아 고치려면 부를 이름이 있어야 한다.
+   */
+  fallbackName: string | null;
 };
 
 const MEMBER_STATE_LABEL: Record<MemberState, string> = {
@@ -100,6 +105,11 @@ export function classLabelOf(profile: AcademicProfile | null): string {
   return `${profile.grade}-${profile.classNum}`;
 }
 
+/** 기록이 없어도 관리자가 사람을 찾을 수 있도록 계정 이름까지 본다. */
+export function displayNameOf(report: ReportProfile | undefined): string {
+  return report?.historical?.name ?? report?.fallbackName ?? "";
+}
+
 /** 졸업·전출자의 "현재 학급" 칸. 과거 학급을 그대로 복사해 넣지 않는다. */
 export function currentClassLabelOf(report: ReportProfile | undefined): string {
   if (!report) return UNKNOWN_STATE_LABEL;
@@ -155,12 +165,24 @@ export async function getReportProfilesByYear(
     : storedByYear.get(currentYear) ?? new Map<number, AcademicProfile>();
 
   const users = new Map<number, UserProfileRow>();
+  const fallbackNames = new Map<number, string>();
   if (mode === "PREPARING") {
     const rows = await db.user.findMany({
       where: { id: { in: allIds } },
       select: USER_PROFILE_SELECT,
     });
     for (const row of rows) users.set(row.id, row as UserProfileRow);
+  } else {
+    const missing = allIds.filter((id) =>
+      [...normalized].some(([year, ids]) => ids.includes(id) && !storedByYear.get(year)?.has(id)),
+    );
+    if (missing.length > 0) {
+      const rows = await db.user.findMany({
+        where: { id: { in: missing } },
+        select: { id: true, name: true },
+      });
+      for (const row of rows) fallbackNames.set(row.id, row.name);
+    }
   }
 
   const result = new Map<number, Map<number, ReportProfile>>();
@@ -189,6 +211,7 @@ export async function getReportProfilesByYear(
               ? MEMBER_STATE_LABEL[profile.memberState]
               : UNKNOWN_STATE_LABEL,
         warning,
+        fallbackName: profile ? null : fallbackNames.get(userId) ?? user?.name ?? null,
       });
     }
     result.set(year, perYear);
@@ -251,6 +274,94 @@ export async function listYearMemberIds(
   return users.map((user) => user.id);
 }
 
+/**
+ * 그 기간에 실제로 자료가 있는 사람. 명부 기록이 지워졌더라도 체크인이나 확정된
+ * 신청이 있으면 보고서에서 빠지면 안 된다 — 빠지면 합계가 맞지 않고 고칠 대상도
+ * 보이지 않는다.
+ */
+export async function collectPeriodUserIds(
+  db: Db,
+  range: { startDate: Date; endDate: Date },
+): Promise<number[]> {
+  const [checkIns, confirmed] = await Promise.all([
+    db.checkIn.findMany({
+      where: { date: { gte: range.startDate, lte: range.endDate } },
+      select: { userId: true },
+      distinct: ["userId"],
+    }),
+    db.mealRegistrationMealDate.findMany({
+      where: {
+        date: { gte: range.startDate, lte: range.endDate },
+        registration: { status: "APPROVED" },
+      },
+      select: { registration: { select: { userId: true } } },
+    }),
+  ]);
+
+  return [
+    ...new Set([
+      ...checkIns.map((row) => row.userId),
+      ...confirmed.map((row) => row.registration.userId),
+    ]),
+  ];
+}
+
+/** 과거 기간 보고서의 분류. "unknown"은 그 해 기록이 없는 사람만 모으는 마지막 묶음이다. */
+export type ReportCategory = "teacher" | "1" | "2" | "3" | "unknown";
+
+export const REPORT_CATEGORIES: readonly ReportCategory[] = ["teacher", "1", "2", "3", "unknown"];
+
+export const UNKNOWN_CATEGORY_LABEL = "확인 필요";
+
+export function isReportCategory(value: string): value is ReportCategory {
+  return (REPORT_CATEGORIES as readonly string[]).includes(value);
+}
+
+function matchesCategory(report: ReportProfile | undefined, category: ReportCategory): boolean {
+  const profile = report?.historical;
+  if (category === "unknown") return !profile;
+  if (!profile) return false;
+  if (category === "teacher") return profile.role === "TEACHER";
+  return profile.role === "STUDENT" && profile.grade === Number.parseInt(category, 10);
+}
+
+/**
+ * 한 달/기간 보고서의 명단. 그 해 기록과 그 기간 자료를 합친 뒤 **그 해 Profile로**
+ * 분류한다. 기록이 없는 사람은 학년을 추측하지 않고 "확인 필요"로만 묶이므로,
+ * 네 분류와 확인 필요 묶음을 더하면 그 기간 전체와 정확히 같아진다.
+ */
+export async function listPeriodCategory(
+  db: Db,
+  year: number,
+  range: { startDate: Date; endDate: Date },
+  category: ReportCategory,
+  includeCurrent: boolean,
+): Promise<{ ids: number[]; profiles: Map<number, ReportProfile> }> {
+  const [rosterIds, dataIds] = await Promise.all([
+    category === "unknown"
+      ? Promise.resolve<number[]>([])
+      : listYearMemberIds(db, year, {
+          role: category === "teacher" ? "TEACHER" : "STUDENT",
+          ...(category === "teacher" ? {} : { grade: Number.parseInt(category, 10) }),
+        }),
+    collectPeriodUserIds(db, range),
+  ]);
+
+  const candidates = [...new Set([...rosterIds, ...dataIds])];
+  const profiles = await getReportProfiles(db, candidates, year, includeCurrent);
+  const dataSet = new Set(dataIds);
+
+  const ids = candidates
+    .filter((id) => matchesCategory(profiles.get(id), category))
+    // 기록 없는 사람은 그 기간에 실제 자료가 있을 때만 올린다.
+    .filter((id) => (category === "unknown" ? dataSet.has(id) : true))
+    .sort((a, b) =>
+      compareByProfile(profiles.get(a), profiles.get(b), category === "teacher" ? "TEACHER" : "STUDENT"),
+    );
+
+  return { ids, profiles };
+}
+
 /** 이름 → 학급 → 번호. 기록이 없는 사람은 뒤로 민다. */
 export function compareByProfile(
   a: ReportProfile | undefined,
@@ -259,7 +370,11 @@ export function compareByProfile(
 ): number {
   const left = a?.historical;
   const right = b?.historical;
-  if (!left || !right) return left ? -1 : right ? 1 : 0;
+  if (!left || !right) {
+    if (left) return -1;
+    if (right) return 1;
+    return displayNameOf(a).localeCompare(displayNameOf(b), "ko");
+  }
   if (mode === "TEACHER") return left.name.localeCompare(right.name, "ko");
   const classDiff = (left.classNum ?? 0) - (right.classNum ?? 0);
   if (classDiff !== 0) return classDiff;

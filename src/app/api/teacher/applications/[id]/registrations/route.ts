@@ -3,10 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import {
-  resolveApplicationYear,
+  applicationYearOrNull,
   rosterMode,
 } from "@/lib/academic-year/registration-context";
-import { compareByProfile, getReportProfiles } from "@/lib/academic-year/report-profile";
+import {
+  compareByProfile,
+  displayNameOf,
+  getReportProfiles,
+} from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { getTeacherScope, listScopeStudentIds } from "@/lib/academic-year/teacher-scope";
 
@@ -31,12 +35,17 @@ export async function GET(
         meals: { select: { mealKind: true, method: true, exemptionSelectable: true } },
       },
     });
-    if (!application) {
-      throw new DomainError("INVALID_INPUT", "공고를 찾을 수 없습니다.");
-    }
 
     const mode = await rosterMode(prisma);
-    const academicYear = await resolveApplicationYear(prisma, mode, application.academicYear);
+    const academicYear = application
+      ? applicationYearOrNull(application.academicYear, mode, scope.year)
+      : null;
+    // 없는 공고와 지난 학년도 공고에 같은 답을 준다. 담임에게 "그 공고가 있긴 하다"는
+    // 사실조차 알리지 않는다 — 지난 해 학급 자료는 관리자 조회로만 연다.
+    if (!application || academicYear !== scope.year) {
+      throw new DomainError("FORBIDDEN", "담당 학급의 공고가 아닙니다.");
+    }
+
     const studentIds = await listScopeStudentIds(prisma, scope);
 
     const registrationRows = studentIds.length === 0 ? [] : await prisma.mealRegistration.findMany({
@@ -83,7 +92,7 @@ export async function GET(
           signature: r.signature,
           user: {
             number: report?.historical?.number ?? null,
-            name: report?.historical?.name ?? "",
+            name: displayNameOf(report),
           },
           ...(report?.warning ? { profileWarning: report.warning } : {}),
           meals: r.meals.map((m) => ({

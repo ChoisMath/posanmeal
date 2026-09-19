@@ -6,7 +6,11 @@ import { getCachedSettings } from "@/lib/settings-cache";
 import { buildCardQrString } from "@/lib/qr-card";
 import { routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
-import { compareByProfile, getReportProfiles } from "@/lib/academic-year/report-profile";
+import {
+  compareByProfile,
+  displayNameOf,
+  getReportProfiles,
+} from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { getTeacherScope, listScopeStudentIds } from "@/lib/academic-year/teacher-scope";
 
@@ -85,7 +89,7 @@ async function listStudents(request: Request): Promise<NextResponse> {
       const report = profiles.get(id);
       return {
         id,
-        name: report?.historical?.name ?? "",
+        name: displayNameOf(report),
         number: report?.historical?.number ?? null,
         photoUrl: photoByUser.get(id) ?? null,
         checkIns: checkInsByUser.get(id) ?? [],

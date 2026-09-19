@@ -12,6 +12,7 @@ import {
 import {
   compareByProfile,
   currentClassLabelOf,
+  displayNameOf,
   getReportProfiles,
 } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
@@ -123,7 +124,7 @@ async function listRegistrations(
         user: {
           id: r.user.id,
           email: r.user.email,
-          name: profile?.name ?? "",
+          name: displayNameOf(report),
           grade: profile?.grade ?? null,
           classNum: profile?.classNum ?? null,
           number: profile?.number ?? null,

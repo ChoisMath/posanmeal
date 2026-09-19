@@ -8,13 +8,12 @@ import { DomainError } from "@/lib/academic-year/errors";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { assertActor } from "@/lib/academic-year/access";
 import {
-  compareByProfile,
   currentClassLabelOf,
+  displayNameOf,
   getReportProfiles,
-  listYearMemberIds,
+  isReportCategory,
+  listPeriodCategory,
 } from "@/lib/academic-year/report-profile";
-
-const CATEGORIES = new Set(["teacher", "1", "2", "3"]);
 
 function parseMonthParams(searchParams: URLSearchParams): { year: number; month: number } {
   const now = new Date();
@@ -34,7 +33,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const { year, month } = parseMonthParams(searchParams);
     const category = searchParams.get("category") ?? "teacher";
-    if (!CATEGORIES.has(category)) {
+    if (!isReportCategory(category)) {
       throw new DomainError("INVALID_INPUT", "조회 구분을 확인하세요.");
     }
     const includeCurrent = searchParams.get("includeCurrent") === "1";
@@ -43,15 +42,15 @@ export async function GET(request: Request) {
     // 한 달은 하나의 학년도에만 속한다(학년도 경계는 2월과 3월 사이다).
     const academicYear = academicYearOfDate(formatMonthDateKey(year, month, 1));
 
-    const isTeacher = category === "teacher";
-    const memberIds = await listYearMemberIds(
+    const { ids: memberIds, profiles } = await listPeriodCategory(
       prisma,
       academicYear,
-      isTeacher ? { role: "TEACHER" } : { role: "STUDENT", grade: Number.parseInt(category, 10) },
+      { startDate, endDate },
+      category,
+      includeCurrent,
     );
 
-    const [profiles, checkIns, activeRows] = await Promise.all([
-      getReportProfiles(prisma, memberIds, academicYear, includeCurrent),
+    const [checkIns, activeRows] = await Promise.all([
       prisma.checkIn.findMany({
         where: { userId: { in: memberIds }, date: { gte: startDate, lte: endDate } },
         select: { id: true, userId: true, date: true, checkedAt: true, type: true, mealKind: true },
@@ -82,7 +81,7 @@ export async function GET(request: Request) {
         const profile = report?.historical;
         return {
           id: userId,
-          name: profile?.name ?? "",
+          name: displayNameOf(report),
           number: profile?.number ?? null,
           grade: profile?.grade ?? null,
           classNum: profile?.classNum ?? null,
@@ -92,10 +91,7 @@ export async function GET(request: Request) {
           ...(report?.warning ? { profileWarning: report.warning } : {}),
           ...(includeCurrent ? { currentClass: currentClassLabelOf(report) } : {}),
         };
-      })
-      .sort((a, b) =>
-        compareByProfile(profiles.get(a.id), profiles.get(b.id), isTeacher ? "TEACHER" : "STUDENT"),
-      );
+      });
 
     const mealColumns = buildMonthlyMealColumns(year, month, {
       BREAKFAST: activeRows.filter((r) => r.mealKind === "BREAKFAST").map((r) => r.date),
@@ -123,7 +119,7 @@ export async function PATCH(request: Request) {
 
       const checkIn = await tx.checkIn.findUnique({
         where: { id },
-        select: { id: true, date: true, userId: true },
+        select: { id: true, date: true, userId: true, type: true },
       });
       if (!checkIn) {
         throw new DomainError("MISSING_PROFILE", "체크인 기록을 찾을 수 없습니다.");
@@ -131,7 +127,11 @@ export async function PATCH(request: Request) {
 
       const year = academicYearOfDate(checkIn.date.toISOString().slice(0, 10));
       const target = (await getReportProfiles(tx, [checkIn.userId], year, false)).get(checkIn.userId);
-      if (target?.historical?.role !== "TEACHER") {
+      // 기록이 비어 정정이 막히면 "확인 필요"로 남은 바로 그 줄을 고칠 수 없다.
+      // 역할 판정에만 기존 기록의 유형을 대신 쓴다.
+      const role = target?.historical?.role
+        ?? (checkIn.type === "STUDENT" ? "STUDENT" : "TEACHER");
+      if (role !== "TEACHER") {
         throw new DomainError("INVALID_INPUT", "교사의 체크인만 수정할 수 있습니다.");
       }
 

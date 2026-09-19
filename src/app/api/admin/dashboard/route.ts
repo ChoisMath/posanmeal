@@ -7,6 +7,7 @@ import { routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import {
   currentClassLabelOf,
+  displayNameOf,
   getReportProfiles,
 } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
@@ -99,7 +100,7 @@ async function readDashboard(request: Request): Promise<NextResponse> {
       const profile = report?.historical;
       return {
         id: c.id,
-        userName: profile?.name ?? "",
+        userName: displayNameOf(report),
         role: profile?.role ?? null,
         type: c.type,
         mealKind: c.mealKind,
