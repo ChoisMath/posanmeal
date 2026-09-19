@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
@@ -21,43 +19,10 @@ import { PageLoadingSkeleton } from "@/components/PageSkeleton";
 import { useUser } from "@/hooks/useUser";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 
-interface TeacherProfile {
-  id: number;
-  name: string;
-  email: string;
-  subject: string | null;
-  homeroom: string | null;
-  position: string | null;
-  photoUrl: string | null;
-}
-
 export default function TeacherPage() {
   const { user, mutate: mutateUser } = useUser();
   const { canRead, isTeacher } = useAdminPermission();
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: "", subject: "", homeroom: "", position: "" });
   const [qrType, setQrType] = useState<"PERSONAL" | "WORK">("PERSONAL");
-
-  useEffect(() => {
-    if (user) {
-      setForm({
-        name: user.name || "",
-        subject: user.subject || "",
-        homeroom: user.homeroom || "",
-        position: user.position || "",
-      });
-    }
-  }, [user]);
-
-  async function handleSave() {
-    const res = await fetch("/api/users/me", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    if (res.ok) { mutateUser(); setEditing(false); }
-  }
 
   if (!user) return <PageLoadingSkeleton />;
 
@@ -172,34 +137,23 @@ export default function TeacherPage() {
               <CardContent className="pt-6 space-y-4">
                 <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={() => mutateUser()} />
                 <FaceEnroll />
-                {editing ? (
-                  <div className="space-y-3">
-                    <div><Label>이름</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-xl" /></div>
-                    <div><Label>교과명</Label><Input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} className="rounded-xl" /></div>
-                    <div><Label>담임 (예: 2-6)</Label><Input value={form.homeroom} onChange={(e) => setForm({ ...form, homeroom: e.target.value })} className="rounded-xl" /></div>
-                    <div><Label>직책</Label><Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} className="rounded-xl" /></div>
-                    <div className="flex gap-2">
-                      <Button onClick={handleSave} className="flex-1 rounded-xl">저장</Button>
-                      <Button variant="outline" onClick={() => setEditing(false)} className="flex-1 rounded-xl">취소</Button>
+                <div className="space-y-1">
+                  {[
+                    ["이메일", user.email],
+                    ["이름", user.name],
+                    ["교과명", user.subject || "-"],
+                    ["담임", user.homeroom || "해당없음"],
+                    ["직책", user.position || "-"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between gap-3 py-2.5 border-b border-border/50 text-sm">
+                      <span className="text-muted-foreground whitespace-nowrap">{label}</span>
+                      <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis" title={value}>{value}</span>
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    {[
-                      ["이메일", user.email],
-                      ["이름", user.name],
-                      ["교과명", user.subject || "-"],
-                      ["담임", user.homeroom || "해당없음"],
-                      ["직책", user.position || "-"],
-                    ].map(([label, value]) => (
-                      <div key={label} className="flex justify-between py-2.5 border-b border-border/50 text-sm">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span className="font-medium">{value}</span>
-                      </div>
-                    ))}
-                    <Button variant="outline" className="w-full mt-4 rounded-xl" onClick={() => setEditing(true)}>정보 수정</Button>
-                  </div>
-                )}
+                  ))}
+                  <p className="pt-3 text-xs text-muted-foreground">
+                    담임·담당교과·직위는 관리자가 학년도 명부에서 관리합니다.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

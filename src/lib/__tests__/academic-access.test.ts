@@ -209,7 +209,7 @@ describe("public path allowlist", () => {
   });
 });
 
-describe("PUT /api/users/me", () => {
+describe("/api/users/me", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.auth.mockResolvedValue({
@@ -218,33 +218,30 @@ describe("PUT /api/users/me", () => {
     mocks.userFindUnique.mockResolvedValue(ACTIVE_TEACHER);
   });
 
-  function putRequest(body: unknown) {
-    return new Request("http://localhost/api/users/me", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+  it("exports no PUT — every field it used to accept is roster-owned, so PUT answers 405", async () => {
+    const route = await import("@/app/api/users/me/route");
+    expect(route).not.toHaveProperty("PUT");
+    expect(Object.keys(route)).toEqual(["GET"]);
+  });
+
+  it("GET returns the profile with today's meals", async () => {
+    mocks.userFindUnique.mockResolvedValueOnce(ACTIVE_TEACHER).mockResolvedValueOnce({
+      id: 7,
+      email: "teacher@example.posan.kr",
+      name: "교사",
+      role: "TEACHER",
+      homeroom: "1-1",
+      photoUrl: null,
     });
-  }
-
-  it("refuses a roster-owned field with 403 without touching the database", async () => {
-    const { PUT } = await import("@/app/api/users/me/route");
-    const res = await PUT(putRequest({ homeroom: "3-4", subject: "수학" }));
-    expect(res.status).toBe(403);
-    expect(mocks.userUpdate).not.toHaveBeenCalled();
+    const { GET } = await import("@/app/api/users/me/route");
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ user: { id: 7, todayMeals: [] } });
   });
 
-  it("refuses a name change too", async () => {
-    const { PUT } = await import("@/app/api/users/me/route");
-    const res = await PUT(putRequest({ name: "새이름" }));
-    expect(res.status).toBe(403);
-    expect(mocks.userUpdate).not.toHaveBeenCalled();
-  });
-
-  it("refuses an unauthenticated request before parsing the body", async () => {
+  it("GET refuses an unauthenticated request", async () => {
     mocks.auth.mockResolvedValue(null);
-    const { PUT } = await import("@/app/api/users/me/route");
-    const res = await PUT(putRequest({ homeroom: "3-4" }));
-    expect(res.status).toBe(401);
-    expect(mocks.userUpdate).not.toHaveBeenCalled();
+    const { GET } = await import("@/app/api/users/me/route");
+    expect((await GET()).status).toBe(401);
   });
 });

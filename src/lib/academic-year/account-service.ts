@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { invalidateFaceCache } from "@/lib/face-embedding-cache";
 import { assertActor } from "./access";
-import type { MutationReceipt, RowMutationInput } from "./contracts";
+import type { Actor, MutationReceipt, RowMutationInput } from "./contracts";
 import type { Tx } from "./db";
 import { DomainError } from "./errors";
 import { normalizeEmail } from "./profile-schema";
@@ -28,6 +28,7 @@ export async function deactivateUsers(
   userIds: number[],
   reason: string,
   at: Date,
+  requestId?: string,
 ): Promise<void> {
   if (userIds.length === 0) return;
 
@@ -37,11 +38,17 @@ export async function deactivateUsers(
   });
 
   await tx.userAccessEvent.createMany({
-    data: userIds.map((userId) => ({ userId, state: "INACTIVE", reason, effectiveAt: at })),
+    data: userIds.map((userId) => ({
+      userId,
+      state: "INACTIVE",
+      reason,
+      effectiveAt: at,
+      requestId,
+    })),
   });
 
   await tx.eligibilityEvent.createMany({
-    data: userIds.map((userId) => ({ scope: ACCOUNT_SCOPE, userId, occurredAt: at })),
+    data: userIds.map((userId) => ({ scope: ACCOUNT_SCOPE, userId, occurredAt: at, requestId })),
   });
 
   await tx.faceProfile.deleteMany({ where: { userId: { in: userIds } } });
@@ -100,6 +107,17 @@ export async function changeEmail(
   return receipt;
 }
 
+/**
+ * 자기 자신의 이용 상태·권한을 스스로 바꾸지 못하게 막는다. 관리자가 실수로
+ * 자기 계정을 잠그거나 스스로 등급을 올리는 경로를 남기지 않는다. 별도 관리자
+ * 로그인(MAIN)에는 대상이 될 행이 없으므로 해당 없다.
+ */
+function assertNotSelf(actor: Actor, userId: number): void {
+  if (actor.kind === "USER" && actor.userId === userId) {
+    throw new DomainError("FORBIDDEN", "본인 계정의 이용 상태와 권한은 직접 바꿀 수 없습니다.");
+  }
+}
+
 /** 이용 중단·재개. 재개는 남아 있던 관리자 권한이 함께 살아나므로 메인 확인을 요구한다. */
 export async function changeAccess(
   db: PrismaClient,
@@ -111,6 +129,7 @@ export async function changeAccess(
     db,
     input,
     async (tx) => {
+      assertNotSelf(input.actor, input.userId);
       if (input.state === "INACTIVE") {
         await assertActor(tx, input.actor, "WRITE_ADMIN");
         return;
@@ -125,7 +144,7 @@ export async function changeAccess(
     },
     async (tx) => {
       if (input.state === "INACTIVE") {
-        await deactivateUsers(tx, [input.userId], input.reason, at);
+        await deactivateUsers(tx, [input.userId], input.reason, at, input.requestId);
         return { changed: 1, ids: [input.userId] };
       }
 
@@ -168,7 +187,10 @@ export async function changePermissions(
   const { receipt } = await withUserMutation(
     db,
     input,
-    (tx) => assertActor(tx, input.actor, "MAIN"),
+    async (tx) => {
+      assertNotSelf(input.actor, input.userId);
+      await assertActor(tx, input.actor, "MAIN");
+    },
     async (tx) => {
       const target = await tx.user.findUniqueOrThrow({
         where: { id: input.userId },

@@ -7,22 +7,8 @@ import { routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 
-/** 명부(학년도 기준 정보)가 소유하는 필드. 본인이 직접 고칠 수 없다. */
-const ROSTER_OWNED_FIELDS = [
-  "name",
-  "role",
-  "grade",
-  "classNum",
-  "number",
-  "gender",
-  "subject",
-  "homeroom",
-  "position",
-  "email",
-  "adminLevel",
-  "accessState",
-] as const;
-
+// 이름·학년·반·번호·교과·담임·직위는 학년도 명부가 소유한다. 본인이 고칠 수 있는
+// 항목이 하나도 남지 않아 PUT을 내보내지 않는다(Next.js가 405로 답한다).
 export async function GET() {
   return routeResponse(async () => {
     const userId = selfUserId(await requireActor("SIGNED_IN"));
@@ -54,26 +40,5 @@ export async function GET() {
     const todayMeals = MEAL_KINDS.filter((kind) => todayRows.some((r) => r.mealKind === kind));
 
     return NextResponse.json({ user: { ...user, todayMeals } });
-  });
-}
-
-export async function PUT(request: Request) {
-  return routeResponse(async () => {
-    selfUserId(await requireActor("SIGNED_IN"));
-
-    const body: unknown = await request.json().catch(() => null);
-    const keys = typeof body === "object" && body !== null ? Object.keys(body) : [];
-    const rosterKeys = keys.filter((key) =>
-      (ROSTER_OWNED_FIELDS as readonly string[]).includes(key),
-    );
-
-    if (rosterKeys.length > 0) {
-      throw new DomainError(
-        "FORBIDDEN",
-        "이름·소속·담당 정보는 학년도 명부에서만 바꿀 수 있습니다. 관리자에게 요청하세요.",
-      );
-    }
-
-    throw new DomainError("MISSING_PROFILE", "이 화면에서 바꿀 수 있는 항목이 없습니다.");
   });
 }

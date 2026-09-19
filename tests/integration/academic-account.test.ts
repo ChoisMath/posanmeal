@@ -196,6 +196,63 @@ describe("account access and mutations", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("never lets an admin user withdraw their own access or raise their own level", async () => {
+    const teacher = await db.user.findUniqueOrThrow({ where: { id: fx.teacherId } });
+    const self: Actor = { kind: "USER", userId: teacher.id, sessionVersion: teacher.sessionVersion };
+
+    await expect(
+      changeAccess(db, {
+        actor: self,
+        requestId: "self-retire",
+        expectedRowVersion: teacher.profileVersion,
+        kind: "ACCESS",
+        payloadHash: "retire-hash",
+        userId: teacher.id,
+        state: "INACTIVE",
+        reason: "RETIRED",
+        confirmPrivileges: false,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    await expect(
+      changePermissions(db, {
+        actor: self,
+        requestId: "self-grant",
+        expectedRowVersion: teacher.profileVersion,
+        kind: "PERMISSIONS",
+        payloadHash: "grant-hash",
+        userId: teacher.id,
+        level: "ADMIN",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const unchanged = await db.user.findUniqueOrThrow({ where: { id: fx.teacherId } });
+    expect(unchanged.accessState).toBe("ACTIVE");
+    expect(unchanged.profileVersion).toBe(teacher.profileVersion);
+    expect(await db.rosterMutation.count({ where: { requestId: { in: ["self-retire", "self-grant"] } } })).toBe(0);
+  });
+
+  it("stamps the requestId on the events a withdrawal writes", async () => {
+    await changeAccess(db, {
+      actor: fx.main,
+      requestId: "retire-stamped",
+      expectedRowVersion: await rowVersion(fx.teacherId),
+      kind: "ACCESS",
+      payloadHash: "retire-hash",
+      userId: fx.teacherId,
+      state: "INACTIVE",
+      reason: "RETIRED",
+      confirmPrivileges: false,
+    });
+
+    expect(
+      await db.userAccessEvent.count({ where: { userId: fx.teacherId, requestId: "retire-stamped" } }),
+    ).toBe(1);
+    expect(
+      await db.eligibilityEvent.count({ where: { userId: fx.teacherId, requestId: "retire-stamped" } }),
+    ).toBe(1);
+  });
+
   it("never gives a student admin rights", async () => {
     await expect(
       changePermissions(db, {
