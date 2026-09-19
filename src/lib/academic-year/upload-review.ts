@@ -20,6 +20,10 @@ const MEAL_KINDS = new Set(["BREAKFAST", "LUNCH", "DINNER"]);
 /** 자격 변경이 근거 발급과 겹칠 수 있는 폭. `proveCheckIn`과 같은 값을 쓴다. */
 const EVENT_OVERLAP_MS = 60_000;
 
+const MAX_RAW_LEGACY_BYTES = 8 * 1024;
+
+export const CLIENT_KEY_REUSED_REASON = "같은 기기 번호로 다른 기록이 이미 접수됨";
+
 export type UploadedCheckIn = {
   clientId: number;
   deviceId?: string;
@@ -137,16 +141,38 @@ export async function processUploadedCheckIn(
   await assertActor(db, actor, "WRITE_ADMIN");
 
   const hash = payloadFingerprint(item);
-  const clientKey = item.deviceId ? `${item.deviceId}:${item.clientId}` : `legacy:${hash}`;
+  const deviceKey = item.deviceId ? `${item.deviceId}:${item.clientId}` : `legacy:${hash}`;
 
-  const existing = await db.localCheckInReview.findUnique({ where: { clientKey } });
-  if (existing) {
-    if (existing.payloadHash !== hash) {
-      throw new DomainError("REQUEST_REUSED", "같은 기록 번호로 다른 내용이 다시 전송되었습니다.");
-    }
-    return storedDecision(existing.id, existing.state, existing.decision, item.clientId);
+  const claimed = await db.localCheckInReview.findUnique({ where: { clientKey: deviceKey } });
+  if (claimed && claimed.payloadHash === hash) {
+    return storedDecision(claimed.id, claimed.state, claimed.decision, item.clientId);
   }
 
+  // 같은 기기 번호에 다른 내용이 왔다. 기기가 번호를 다시 쓴 것인지 진짜 다른
+  // 사건인지 서버는 알 수 없으므로, 이 내용만의 키로 따로 보관해 관리자가
+  // 끝을 낼 수 있게 한다. 거절해 버리면 장치가 영원히 다시 보낸다.
+  if (claimed) {
+    const conflictKey = `${deviceKey}#${hash}`;
+    const parked = await db.localCheckInReview.findUnique({ where: { clientKey: conflictKey } });
+    if (parked) {
+      return storedDecision(parked.id, parked.state, parked.decision, item.clientId);
+    }
+    const review = await recordReview(
+      db,
+      { clientKey: conflictKey, hash, item, snapshotId: null },
+      "PENDING",
+      CLIENT_KEY_REUSED_REASON,
+    );
+    return {
+      status: "REVIEW",
+      clientId: item.clientId,
+      reviewId: review.id,
+      reason: CLIENT_KEY_REUSED_REASON,
+      final: false,
+    };
+  }
+
+  const clientKey = deviceKey;
   const normalized = normalizeItem(item);
   if (!normalized) {
     await recordReview(db, { clientKey, hash, item, snapshotId: null }, "REJECTED", "INVALID_PAYLOAD");
@@ -259,19 +285,32 @@ async function recordReview(
   state: "ACCEPTED" | "DUPLICATE" | "PENDING" | "REJECTED",
   reason: string,
 ): Promise<{ id: string }> {
-  const resolvedAt = state === "PENDING" ? null : new Date();
-  return db.localCheckInReview.upsert({
+  const settled = await db.localCheckInReview.findUnique({
     where: { clientKey: evidence.clientKey },
-    create: {
+    select: { id: true, state: true },
+  });
+
+  // 같은 요청이 나란히 들어와 한쪽이 먼저 반영했다면, 진 쪽의 응답(중복)이 먼저
+  // 쓴 사실을 덮어쓰면 안 된다. 이미 결론이 난 행은 그대로 둔다.
+  if (settled) {
+    if (settled.state !== "PENDING") return settled;
+    await db.localCheckInReview.update({
+      where: { clientKey: evidence.clientKey },
+      data: { reason, state, resolvedAt: state === "PENDING" ? null : new Date() },
+    });
+    return settled;
+  }
+
+  return db.localCheckInReview.create({
+    data: {
       clientKey: evidence.clientKey,
       payloadHash: evidence.hash,
       payload: evidence.item as unknown as Prisma.InputJsonObject,
       snapshotId: evidence.snapshotId,
       reason,
       state,
-      resolvedAt,
+      resolvedAt: state === "PENDING" ? null : new Date(),
     },
-    update: { reason, state, resolvedAt },
     select: { id: true },
   });
 }
@@ -305,6 +344,11 @@ function readString(source: Prisma.JsonValue, key: string): string | undefined {
 }
 
 function normalizeItem(item: UploadedCheckIn): NormalizedItem | null {
+  // 옛 장치가 보내는 원본은 검토 화면에 그대로 보여 주려고 보관만 한다. 판정에는
+  // 쓰지 않으며, 검토 테이블이 임의 크기 문서 저장소가 되지 않도록 상한을 둔다.
+  if (item.rawLegacy !== undefined && JSON.stringify(item.rawLegacy).length > MAX_RAW_LEGACY_BYTES) {
+    return null;
+  }
   if (!Number.isInteger(item.userId) || typeof item.date !== "string") return null;
   if (!CHECK_IN_TYPES.has(item.type)) return null;
   if (typeof item.checkedAt !== "string") return null;
@@ -382,7 +426,7 @@ export async function resolveCheckInReview(
       SELECT "id" FROM "LocalCheckInReview" WHERE "id" = ${input.reviewId} FOR UPDATE
     `;
     if (rows.length === 0) {
-      throw new DomainError("MISSING_PROFILE", "검토 기록을 찾을 수 없습니다.");
+      throw new DomainError("NOT_FOUND", "검토 기록을 찾을 수 없습니다.");
     }
 
     const review = await tx.localCheckInReview.findUniqueOrThrow({ where: { id: input.reviewId } });

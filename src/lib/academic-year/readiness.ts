@@ -5,6 +5,7 @@ import type { Actor } from "./contracts";
 import type { Db, Tx } from "./db";
 import { DomainError } from "./errors";
 import { withAcademicMutation } from "./mutation";
+import { invalidateRosterModeCache } from "./roster-mode-cache";
 
 const ENABLE_REQUEST_ID = `enable-academic-${ACADEMIC_BACKFILL_KEY}`;
 
@@ -53,4 +54,7 @@ export async function enableAcademicMode(db: PrismaClient, actor: Actor): Promis
       return { changed: 1, ids: [1] };
     },
   );
+
+  // 체크인 경로가 보는 캐시를 즉시 버린다. 전환은 운영 중 한 번뿐이라 여기 한 줄로 충분하다.
+  invalidateRosterModeCache();
 }

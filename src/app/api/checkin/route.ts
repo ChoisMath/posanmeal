@@ -5,12 +5,13 @@ import { todayKST, nowKST } from "@/lib/timezone";
 import { getCachedSettings } from "@/lib/settings-cache";
 import { resolveMealKind, type MealKind } from "@/lib/meal-kind";
 import { MEAL_LABEL } from "@/lib/meal-plan";
+import { getCachedRosterMode } from "@/lib/academic-year/roster-mode-cache";
 import {
   ACCOUNT_INACTIVE_MESSAGE,
   displayUserOf,
   isStudentEligibleIn,
   readCheckInUser,
-  readDisplayProfile,
+  readDisplayRecord,
 } from "@/lib/checkin-account";
 
 export async function POST(request: Request) {
@@ -46,7 +47,16 @@ export async function POST(request: Request) {
     const today = todayKST();
     const todayDate = new Date(today);
 
-    const account = await readCheckInUser(prisma, payload.userId);
+    // 서로 기다릴 이유가 없는 세 조회는 함께 보낸다. 식당 줄이 왕복마다 선다.
+    const mode = await getCachedRosterMode(prisma);
+    const [account, existing, record] = await Promise.all([
+      readCheckInUser(prisma, payload.userId),
+      prisma.checkIn.findFirst({
+        where: { userId: payload.userId, date: todayDate, mealKind: mealKind as MealKind },
+      }),
+      readDisplayRecord(prisma, mode, payload.userId, today),
+    ]);
+
     if (!account) {
       return NextResponse.json(
         { success: false, error: "사용자를 찾을 수 없습니다." },
@@ -71,11 +81,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const user = displayUserOf(account, await readDisplayProfile(prisma, account.id, today));
-
-    const existing = await prisma.checkIn.findFirst({
-      where: { userId: account.id, date: todayDate, mealKind: mealKind as MealKind },
-    });
+    const user = displayUserOf(account, mode, record);
 
     if (existing) {
       return NextResponse.json({

@@ -8,12 +8,13 @@ import { MEAL_LABEL } from "@/lib/meal-plan";
 import { getFaceCandidates } from "@/lib/face-embedding-cache";
 import { decideMatch, rankCandidates, scoreSummary } from "@/lib/face-match";
 import { faceCheckSchema } from "@/lib/schemas/face";
+import { getCachedRosterMode } from "@/lib/academic-year/roster-mode-cache";
 import {
   ACCOUNT_INACTIVE_MESSAGE,
   displayUserOf,
   isStudentEligibleIn,
   readCheckInUser,
-  readDisplayProfile,
+  readDisplayRecord,
 } from "@/lib/checkin-account";
 
 const RATE_WINDOW_MS = 60_000;
@@ -94,7 +95,13 @@ export async function POST(request: Request) {
 
     const date = todayKST();
     const todayDate = new Date(date);
-    const account = await readCheckInUser(prisma, match.userId);
+    // 매칭 단계는 얼굴이 보이는 매 프레임 지나간다. 저장 없이, 서로 기다리지
+    // 않는 두 조회만으로 끝낸다.
+    const mode = await getCachedRosterMode(prisma);
+    const [account, record] = await Promise.all([
+      readCheckInUser(prisma, match.userId),
+      readDisplayRecord(prisma, mode, match.userId, date),
+    ]);
 
     if (!account) {
       return NextResponse.json({ success: false, error: "사용자를 찾을 수 없습니다." }, { status: 404 });
@@ -111,7 +118,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const user = displayUserOf(account, await readDisplayProfile(prisma, account.id, date));
+    const user = displayUserOf(account, mode, record);
 
     if (confirmation && (confirmation.userId !== user.id || confirmation.mealKind !== mealKind || confirmation.date !== date)) {
       return NextResponse.json({

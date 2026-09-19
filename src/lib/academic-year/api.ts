@@ -16,6 +16,7 @@ const STATUS: Record<DomainErrorCode, number> = {
   REVIEW_REQUIRED: 422,
   MISSING_PROFILE: 422,
   INVALID_INPUT: 422,
+  NOT_FOUND: 404,
   NOT_READY: 503,
 };
 

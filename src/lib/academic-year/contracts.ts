@@ -99,4 +99,6 @@ export type DomainErrorCode =
   | "YEAR_MISMATCH"
   | "MISSING_PROFILE"
   /** 요청 본문·입력값 자체가 규칙에 맞지 않는다. 대상이 없다는 뜻의 MISSING_PROFILE과 구분한다. */
-  | "INVALID_INPUT";
+  | "INVALID_INPUT"
+  /** 지정한 대상 자체가 없다. 값을 더 채우면 되는 MISSING_PROFILE과 달리 보완할 수 없다. */
+  | "NOT_FOUND";

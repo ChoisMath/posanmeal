@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FACE_EMBEDDING_DIM } from "@/lib/face-constants";
+import { invalidateRosterModeCache } from "@/lib/academic-year/roster-mode-cache";
 
 const mocks = vi.hoisted(() => ({
   userFindUnique: vi.fn(),
-  userFindMany: vi.fn(),
-  recordFindMany: vi.fn(),
+  recordFindFirst: vi.fn(),
   checkInFindFirst: vi.fn(),
   checkInCreate: vi.fn(),
   mealDateFindFirst: vi.fn(),
@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/prisma", () => {
   const prisma = {
-    user: { findUnique: mocks.userFindUnique, findMany: mocks.userFindMany },
-    userAcademicRecord: { findMany: mocks.recordFindMany },
+    user: { findUnique: mocks.userFindUnique },
+    userAcademicRecord: { findFirst: mocks.recordFindFirst },
     checkIn: { findFirst: mocks.checkInFindFirst, create: mocks.checkInCreate },
     mealRegistrationMealDate: { findFirst: mocks.mealDateFindFirst },
     $queryRaw: () => Promise.resolve([{ mode: "PREPARING" }]),
@@ -42,11 +42,6 @@ const TEACHER = {
   photoUrl: null, accessState: "ACTIVE",
 };
 
-/** PREPARING의 표기 대체 경로가 읽는 행. 학년도 기록이 없으면 계정 값을 쓴다. */
-function profileRow(user: typeof STUDENT | typeof TEACHER) {
-  return { ...user, gender: null, subject: null, homeroom: null, position: null };
-}
-
 function request(body: unknown, headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/facecheck", {
     method: "POST",
@@ -68,6 +63,7 @@ const OPEN_SETTINGS = {
 describe("/api/facecheck", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    invalidateRosterModeCache();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-02T09:00:00Z"));
     process.env.FACECHECK_KIOSK_KEY = "test-key";
@@ -76,8 +72,7 @@ describe("/api/facecheck", () => {
       { userId: 1, embeddings: [Float32Array.from(emb)] },
     ]);
     mocks.checkInFindFirst.mockResolvedValue(null);
-    mocks.recordFindMany.mockResolvedValue([]);
-    mocks.userFindMany.mockResolvedValue([profileRow(STUDENT), profileRow(TEACHER)]);
+    mocks.recordFindFirst.mockResolvedValue(null);
     mocks.mealDateFindFirst.mockResolvedValue({ registrationId: 1 });
     mocks.checkInCreate.mockResolvedValue({ checkedAt: new Date("2026-09-02T09:00:00Z") });
   });

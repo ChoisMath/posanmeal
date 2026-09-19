@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { dateKeyToUtcDate } from "@/lib/date-range";
 import { assertActor } from "./access";
 import { academicYearOfDate, addDaysToDateKey, kstDateKey, nextKstMidnight } from "./calendar";
-import type { AcademicProfile, Actor } from "./contracts";
+import type { Actor, MemberState } from "./contracts";
 import type { Db } from "./db";
 import { getReportProfilesByYear } from "./report-profile";
 import { activeYear } from "./roster-service";
@@ -24,6 +24,21 @@ export type SnapshotUser = {
   accessEventId: number;
 };
 
+/**
+ * 키오스크가 화면에 쓰는 값만 담는다. 성별·담당 과목·담임·직위는 표시에도
+ * 증명에도 쓰이지 않으므로 근거에 남기지 않는다.
+ */
+export type SnapshotProfile = {
+  userId: number;
+  year: number;
+  role: "STUDENT" | "TEACHER";
+  name: string;
+  grade: number | null;
+  classNum: number | null;
+  number: number | null;
+  memberState: MemberState;
+};
+
 export type SnapshotEligible = {
   userId: number;
   applicationId: number;
@@ -42,7 +57,7 @@ export type SnapshotEvidence = {
   coversUntil: string;
   users: SnapshotUser[];
   eligible: SnapshotEligible[];
-  profiles: AcademicProfile[];
+  profiles: SnapshotProfile[];
 };
 
 type SnapshotPayload = Omit<SnapshotEvidence, "id">;
@@ -168,7 +183,7 @@ async function readCoverageProfiles(
   userIds: number[],
   fromDateKey: string,
   toDateKey: string,
-): Promise<AcademicProfile[]> {
+): Promise<SnapshotProfile[]> {
   const years = new Set([academicYearOfDate(fromDateKey), academicYearOfDate(toDateKey)]);
   const byYear = await getReportProfilesByYear(
     db,
@@ -176,10 +191,21 @@ async function readCoverageProfiles(
     false,
   );
 
-  const profiles: AcademicProfile[] = [];
+  const profiles: SnapshotProfile[] = [];
   for (const perYear of byYear.values()) {
     for (const report of perYear.values()) {
-      if (report.historical) profiles.push(report.historical);
+      const profile = report.historical;
+      if (!profile) continue;
+      profiles.push({
+        userId: profile.userId,
+        year: profile.year,
+        role: profile.role,
+        name: profile.name,
+        grade: profile.grade,
+        classNum: profile.classNum,
+        number: profile.number,
+        memberState: profile.memberState,
+      });
     }
   }
   return profiles;

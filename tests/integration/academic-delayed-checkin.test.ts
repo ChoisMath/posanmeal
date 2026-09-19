@@ -286,14 +286,75 @@ describe("지연 업로드의 보수적 증명", () => {
     expect(decision).toMatchObject({ status: "REVIEW", final: false });
   });
 
-  it("같은 clientKey로 다른 내용을 보내면 그 항목만 REQUEST_REUSED로 충돌한다", async () => {
+  it("같은 기기 번호에 다른 내용이 오면 따로 보관해 관리자가 끝낼 수 있게 한다", async () => {
     const snapshot = await issueKioskSnapshot(db, fx.main, ISSUED_AT);
     const item = baseItem(fx, snapshot.id);
     await processUploadedCheckIn(db, fx.main, item);
 
+    const conflicting = { ...item, checkedAt: "2026-09-19T10:00:00.000Z" };
+    const parked = await processUploadedCheckIn(db, fx.main, conflicting);
+    expect(parked).toMatchObject({ status: "REVIEW", final: false });
+    expect(parked.reviewId).toBeDefined();
+
+    // 같은 충돌 내용을 다시 보내면 새 검토가 생기지 않고 같은 행을 가리킨다.
+    expect(await processUploadedCheckIn(db, fx.main, conflicting)).toMatchObject({
+      status: "REVIEW",
+      reviewId: parked.reviewId,
+    });
+    expect(await db.localCheckInReview.count()).toBe(2);
+
+    const listed = await db.localCheckInReview.findUniqueOrThrow({ where: { id: parked.reviewId! } });
+    expect(listed.state).toBe("PENDING");
+
+    await resolveCheckInReview(db, {
+      actor: fx.writer,
+      requestId: "review-conflict",
+      expectedVersion: 0,
+      kind: "REVIEW",
+      payloadHash: "review-conflict",
+      reviewId: parked.reviewId!,
+      decision: "REJECT",
+      reason: "기기 번호 재사용",
+    });
+
+    expect(await processUploadedCheckIn(db, fx.main, conflicting)).toMatchObject({
+      status: "REJECTED",
+      final: true,
+    });
+  });
+
+  it("8KB를 넘는 원본은 형식 오류로 거절하고, 작은 원본은 검토 payload에 그대로 보관한다", async () => {
+    const legacy = omit(baseItem(fx, "none"), "snapshotId");
+
+    const tooBig = await processUploadedCheckIn(db, fx.main, {
+      ...legacy,
+      clientId: 701,
+      rawLegacy: { note: "가".repeat(9000) },
+    });
+    expect(tooBig).toMatchObject({ status: "REJECTED", reason: "INVALID_PAYLOAD", final: true });
+
+    const kept = await processUploadedCheckIn(db, fx.main, {
+      ...legacy,
+      clientId: 702,
+      rawLegacy: { note: "옛 기록" },
+    });
+    const row = await db.localCheckInReview.findUniqueOrThrow({ where: { id: kept.reviewId! } });
+    expect(row.payload).toMatchObject({ rawLegacy: { note: "옛 기록" } });
+  });
+
+  it("없는 검토를 결정하면 NOT_FOUND", async () => {
     await expect(
-      processUploadedCheckIn(db, fx.main, { ...item, checkedAt: "2026-09-19T10:00:00.000Z" }),
-    ).rejects.toMatchObject({ code: "REQUEST_REUSED" });
+      resolveCheckInReview(db, {
+        actor: fx.writer,
+        requestId: "review-missing",
+        expectedVersion: 0,
+        kind: "REVIEW",
+        payloadHash: "review-missing",
+        reviewId: "does-not-exist",
+        decision: "REJECT",
+        reason: "없음",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("근거 발급 전·범위 밖·날짜 불일치 기록은 REVIEW다", async () => {
@@ -416,7 +477,10 @@ describe("지연 업로드의 보수적 증명", () => {
     expect(snapshot.eligible).toContainEqual(
       expect.objectContaining({ userId: fx.studentId, date: "2026-09-19", mealKind: "DINNER" }),
     );
-    expect(snapshot.profiles.some((p) => p.userId === fx.studentId)).toBe(true);
+    const profile = snapshot.profiles.find((p) => p.userId === fx.studentId);
+    expect(Object.keys(profile!).sort()).toEqual([
+      "classNum", "grade", "memberState", "name", "number", "role", "userId", "year",
+    ]);
     expect(JSON.stringify(snapshot)).not.toContain("embedding");
 
     const stored = await db.kioskSnapshot.findUniqueOrThrow({ where: { id: snapshot.id } });
@@ -549,6 +613,8 @@ describe("READY 모드 라우트", () => {
             { clientId: 2, deviceId: "kiosk-1", userId: fx.teacherId, date: "2026-09-19", mealKind: "DINNER", type: "WORK", checkedAt: "2026-09-19T09:05:00.000Z", snapshotId: snapshot.id },
             { clientId: 3, deviceId: "kiosk-1", userId: fx.studentId, date: "2026-09-20", mealKind: "DINNER", type: "STUDENT", checkedAt: "2026-09-20T09:00:00.000Z" },
             { clientId: 4, deviceId: "kiosk-1", userId: 999999, date: "2026-09-19", mealKind: "DINNER", type: "STUDENT", checkedAt: "2026-09-19T09:00:00.000Z", snapshotId: snapshot.id },
+            // 번호가 없는 기록은 응답으로 알려 줄 방법이 없어 처리하지 않는다.
+            { deviceId: "kiosk-1", userId: fx.studentId, date: "2026-09-19", mealKind: "DINNER", type: "STUDENT", checkedAt: "2026-09-19T09:00:00.000Z", snapshotId: snapshot.id },
           ],
         }),
       }),
@@ -556,18 +622,22 @@ describe("READY 모드 라우트", () => {
     const body = await res.json();
 
     expect(body.acceptedCount).toBe(1);
-    expect(body.reviewCount).toBe(1);
+    expect(body.reviewCount).toBe(2);
     expect(body.rejected).toEqual([
-      expect.objectContaining({ clientId: 1, reason: "REQUEST_REUSED" }),
+      expect.objectContaining({ clientId: null, reason: "NO_CLIENT_ID" }),
       expect.objectContaining({ clientId: 4, reason: "USER_NOT_FOUND" }),
     ]);
     expect(body.syncedClientIds).toEqual([2, 4]);
     expect(body.decisions).toEqual([
-      expect.objectContaining({ clientId: 1, status: "REJECTED", final: false }),
+      expect.objectContaining({ clientId: 1, status: "REVIEW", final: false }),
       expect.objectContaining({ clientId: 2, status: "ACCEPTED", final: true }),
       expect.objectContaining({ clientId: 3, status: "REVIEW", final: false }),
       expect.objectContaining({ clientId: 4, status: "REJECTED", final: true }),
     ]);
+    // 모든 결정은 REVIEW만 미종결이다.
+    for (const decision of body.decisions) {
+      expect(decision.final).toBe(decision.status !== "REVIEW");
+    }
   });
 
   it("검토 API는 목록과 결정을 제공한다", async () => {
