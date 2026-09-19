@@ -259,10 +259,14 @@ function buildManifest(
 export async function backfill2026(db: PrismaClient, source: LegacyFingerprint): Promise<BackfillResult> {
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR UPDATE`;
-    const year = await activeYear(tx);
 
     const existing = await tx.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } });
     const alreadyCopied = existing !== null && existing.state !== "PENDING";
+
+    // 이미 복사된 뒤에는 학년도 전환으로 활성 연도가 2026을 지났어도(Task 9의
+    // 명부 삭제 뒤 재실행 등) 그 사실만 재확인한다. 처음 복사할 때만 활성 연도가
+    // 정말 2026인지를 엄격히 확인한다.
+    const year = alreadyCopied ? INITIAL_ACADEMIC_YEAR : await activeYear(tx);
 
     const report = await runPreflight(tx, year);
     const inserted = alreadyCopied ? 0 : await copyAcademicRecords(tx, year);

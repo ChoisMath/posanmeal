@@ -240,7 +240,12 @@ export async function listRosterView(
     role ?? null,
     includeExcluded,
   );
-  return rows.map((row) => {
+  // ARCHIVED 학년도는 Task 9의 삭제로 RosterEntry가 없을 수 있다. Record만 남은
+  // 행을 명부에 다시 나타나게 하면 "지운 명부"가 사실상 되살아나므로 뺀다 — 그
+  // Record는 export-service의 exportableRows와 getAcademicProfiles만 본다.
+  return rows
+    .filter((row) => state !== "ARCHIVED" || row.entryId !== null)
+    .map((row) => {
     const profile: Profile = {
       role: row.role,
       name: row.name,

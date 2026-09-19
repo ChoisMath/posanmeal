@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { routeResponse } from "@/lib/academic-year/api";
+import { deleteArchivedRoster } from "@/lib/academic-year/archive-service";
+import { payloadHash, routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import { requireAcademicReady } from "@/lib/academic-year/readiness";
 import { requireActor } from "@/lib/academic-year/request-actor";
@@ -31,5 +33,37 @@ export async function GET(request: Request, { params }: { params: Promise<{ year
     ]);
 
     return NextResponse.json({ year, rows, missingProfileUserIds });
+  });
+}
+
+const deleteBodySchema = z.object({
+  requestId: z.string().min(1).max(128),
+  expectedVersion: z.number().int().nonnegative(),
+  entryIds: z.union([z.literal("ALL"), z.array(z.string().min(1).max(64)).max(10_000)]),
+});
+
+export async function DELETE(request: Request, { params }: { params: Promise<{ year: string }> }) {
+  return routeResponse(async () => {
+    const actor = await requireActor("MAIN");
+    await requireAcademicReady(prisma);
+
+    const year = parseYear((await params).year);
+
+    const parsed = deleteBodySchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      throw new DomainError("INVALID_INPUT", "요청 본문을 확인하세요.");
+    }
+
+    const receipt = await deleteArchivedRoster(prisma, {
+      actor,
+      requestId: parsed.data.requestId,
+      expectedVersion: parsed.data.expectedVersion,
+      kind: "ARCHIVE_DELETE",
+      payloadHash: payloadHash({ year, entryIds: parsed.data.entryIds }),
+      year,
+      entryIds: parsed.data.entryIds,
+    });
+
+    return NextResponse.json({ receipt });
   });
 }

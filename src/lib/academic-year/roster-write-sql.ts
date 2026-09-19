@@ -247,6 +247,31 @@ export const MISSING_RECORDS_SQL = `
  * 로그인 활성화도 하지 않는다. `needsReview`가 선 행도 그대로 가져온다 — 관리자가
  * 초안에서 보고 고쳐야 하는 행이 바로 그 행이다.
  */
+/** 선택 삭제 전 소속 확인. 넘긴 id 중 이 학년도 것이 아닌 항목이 있으면 빠진다. */
+export const OWNED_ROSTER_ENTRY_IDS_SQL = `
+  SELECT "id" FROM "RosterEntry" WHERE "year" = $1::int AND "id" = ANY($2::text[])
+`;
+
+/** ARCHIVED 학년도의 명부 항목만 지운다. Record·User·신청·체크인은 손대지 않는다. */
+export const DELETE_ARCHIVED_ROSTER_ALL_SQL = `
+  DELETE FROM "RosterEntry" WHERE "year" = $1::int
+  RETURNING "id", "userId"
+`;
+
+export const DELETE_ARCHIVED_ROSTER_SELECTED_SQL = `
+  DELETE FROM "RosterEntry" WHERE "year" = $1::int AND "id" = ANY($2::text[])
+  RETURNING "id", "userId"
+`;
+
+/** 전체 삭제(`"ALL"`)에서만 같은 트랜잭션으로 그 학년도의 사본을 함께 정리한다. */
+export const DELETE_YEAR_ROSTER_FILES_SQL = `
+  DELETE FROM "RosterFile" WHERE "year" = $1::int
+`;
+
+export const CLEAR_YEAR_ROSTER_IMPORTS_SQL = `
+  UPDATE "RosterImport" SET "payload" = NULL, "preview" = NULL WHERE "year" = $1::int
+`;
+
 export const COPY_DRAFT_SQL = `
   INSERT INTO "RosterEntry" (
     "id", "year", "userId", "emailKey", "draftEmail", "draftProfile",
