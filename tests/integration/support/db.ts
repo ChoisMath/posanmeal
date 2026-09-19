@@ -11,7 +11,23 @@ import {
 
 const GUARD_FAILURE_MESSAGE = "전용 테스트 DB 설정을 확인하세요";
 
+/** 마이그레이션이 ACTIVE로 심어 두는 학년도. reset 후에도 같은 값으로 복원한다. */
+export const ACADEMIC_TEST_SEED_YEAR = 2026;
+
 const APP_TABLES = [
+  "LocalCheckInReview",
+  "KioskSnapshot",
+  "AcademicBackfill",
+  "EligibilityEvent",
+  "UserAccessEvent",
+  "RosterMutation",
+  "RosterDecision",
+  "RosterImport",
+  "RosterFile",
+  "RosterEntry",
+  "UserAcademicRecord",
+  "RosterControl",
+  "AcademicYear",
   "FaceProfile",
   "CheckIn",
   "MealRegistrationMealDate",
@@ -95,4 +111,11 @@ export async function resetAcademicTestDb(db: PrismaClient): Promise<void> {
 
   const tableList = APP_TABLES.map((name) => `"${name}"`).join(", ");
   await db.$executeRawUnsafe(`TRUNCATE TABLE ${tableList} RESTART IDENTITY CASCADE`);
+
+  // 마이그레이션이 심은 두 행은 모든 후속 코드가 존재를 전제하므로 다시 만든다.
+  await db.$executeRaw`INSERT INTO "RosterControl" ("id", "mode", "version") VALUES (1, 'PREPARING', 0)`;
+  await db.$executeRaw`
+    INSERT INTO "AcademicYear" ("year", "state", "version", "createdAt", "updatedAt")
+    VALUES (${ACADEMIC_TEST_SEED_YEAR}, 'ACTIVE', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  `;
 }

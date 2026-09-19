@@ -1,0 +1,98 @@
+export type YearState = "DRAFT" | "ACTIVE" | "ARCHIVED";
+export type ImportScope = "PARTIAL" | "FULL";
+export type MemberState = "ENROLLED" | "EMPLOYED" | "GRADUATED" | "TRANSFERRED" | "RETIRED";
+
+export type Actor =
+  | { kind: "MAIN"; userId: null; sessionVersion: null }
+  | { kind: "USER"; userId: number; sessionVersion: number };
+
+export type Profile = {
+  role: "STUDENT" | "TEACHER";
+  name: string;
+  grade: number | null;
+  classNum: number | null;
+  number: number | null;
+  gender: "MALE" | "FEMALE" | null;
+  subject: string | null;
+  homeroom: string | null;
+  position: string | null;
+};
+
+export type AcademicProfile = Profile & {
+  year: number;
+  userId: number;
+  memberState: MemberState;
+  version: number;
+  needsReview: boolean;
+};
+
+export type RosterRow = {
+  entryId: string;
+  userId: number | null;
+  email: string;
+  emailKey: string;
+  profile: Profile;
+  baseUserVersion: number | null;
+  included: boolean;
+};
+
+export type RowIssue = { sheet: "학생" | "교사"; row: number; column: string; code: string; message: string };
+
+export type RowChange = {
+  kind: "NEW" | "SAME" | "CHANGED" | "REVIEW" | "CONFLICT";
+  token: string;
+  input: RosterRow;
+  before: Profile | null;
+  issues: RowIssue[];
+  // CONFLICT: 내보낸 뒤 서버 값이 바뀐 행. server는 현재 서버 값, resolution은 관리자가 고른 뒤 채워진다.
+  server?: Profile;
+  resolution?: "USE_FILE" | "KEEP_SERVER";
+};
+
+export type ImportPreview = {
+  id: string;
+  year: number;
+  controlVersion: number;
+  yearVersion: number;
+  scope: ImportScope;
+  rows: RowChange[];
+  missingUserIds: number[];
+  coveredRoles: Array<"STUDENT" | "TEACHER">;
+  canCommit: boolean;
+};
+
+export type MutationReceipt = { requestId: string; version: number; changed: number };
+
+/** 사용자 행 단위 변경(셀 편집·이메일·이용 상태·권한). expectedRowVersion은 대상 행의 버전이다. */
+export type RowMutationInput = {
+  actor: Actor;
+  requestId: string;
+  userId: number;
+  expectedRowVersion: number;
+  kind: string;
+  payloadHash: string;
+};
+
+export type MutationSummary = { changed: number; ids: Array<number | string> };
+
+export type MutationInput = {
+  actor: Actor;
+  requestId: string;
+  expectedVersion: number;
+  kind: string;
+  payloadHash: string;
+};
+
+export type DomainErrorCode =
+  | "UNAUTHENTICATED"
+  | "FORBIDDEN"
+  | "ACCOUNT_INACTIVE"
+  | "STALE_SESSION"
+  | "NOT_READY"
+  | "VERSION_CONFLICT"
+  | "REQUEST_REUSED"
+  | "INVALID_FILE"
+  | "IDENTITY_CONFLICT"
+  | "REVIEW_REQUIRED"
+  | "YEAR_MISMATCH"
+  | "MISSING_PROFILE";

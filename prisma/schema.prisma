@@ -66,9 +66,18 @@ model User {
   adminLevel AdminLevel @default(NONE)
   gender     Gender?
 
-  checkIns      CheckIn[]
-  registrations MealRegistration[]
-  faceProfile   FaceProfile?
+  emailKey       String? @unique
+  accessState    String  @default("ACTIVE") // "ACTIVE" | "SUSPENDED" | "LEFT"
+  sessionVersion Int     @default(0)
+  profileVersion Int     @default(0)
+
+  checkIns        CheckIn[]
+  registrations   MealRegistration[]
+  faceProfile     FaceProfile?
+  academicRecords UserAcademicRecord[]
+  rosterEntries   RosterEntry[]
+  rosterDecisions RosterDecision[]
+  accessEvents    UserAccessEvent[]
 
   @@index([role, grade, classNum, number])
   @@index([role, adminLevel])
@@ -88,6 +97,9 @@ model MealApplication {
   startYear    Int?
   startMonth   Int?
   monthCount   Int?
+  academicYear Int?
+
+  year AcademicYear? @relation(fields: [academicYear], references: [year], onDelete: Restrict)
 
   registrations MealRegistration[]
   meals         MealApplicationMeal[]
@@ -198,4 +210,188 @@ model FaceProfile {
   consentVersion String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// 학년도 명부 (academic year roster)
+// ---------------------------------------------------------------------------
+
+model AcademicYear {
+  year                  Int       @id
+  state                 String // "DRAFT" | "ACTIVE" | "ARCHIVED"
+  version               Int       @default(0)
+  reviewedVersion       Int?
+  reviewedSourceVersion Int?
+  activatedAt           DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  records      UserAcademicRecord[]
+  entries      RosterEntry[]
+  files        RosterFile[]
+  imports      RosterImport[]
+  decisions    RosterDecision[]
+  applications MealApplication[]
+  snapshots    KioskSnapshot[]
+}
+
+model RosterControl {
+  id      Int    @id
+  mode    String @default("PREPARING") // "PREPARING" | "OPEN" | "LOCKED"
+  version Int    @default(0)
+}
+
+model UserAcademicRecord {
+  id          Int      @id @default(autoincrement())
+  year        Int
+  userId      Int
+  role        Role
+  name        String
+  grade       Int?
+  classNum    Int?
+  number      Int?
+  gender      Gender?
+  subject     String?
+  homeroom    String?
+  position    String?
+  memberState String // MemberState
+  needsReview Boolean  @default(false)
+  version     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  academicYear AcademicYear @relation(fields: [year], references: [year])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([year, userId])
+}
+
+model RosterEntry {
+  id              String  @id @default(cuid())
+  year            Int
+  userId          Int?
+  emailKey        String
+  draftEmail      String?
+  draftProfile    Json?
+  included        Boolean @default(true)
+  baseUserVersion Int?
+  version         Int     @default(0)
+
+  academicYear AcademicYear @relation(fields: [year], references: [year])
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([year, emailKey])
+  @@unique([year, userId])
+}
+
+model RosterFile {
+  id            String   @id @default(cuid())
+  year          Int
+  version       Int
+  schemaVersion Int
+  manifest      Json
+  createdAt     DateTime @default(now())
+
+  academicYear AcademicYear @relation(fields: [year], references: [year])
+
+  @@index([createdAt])
+}
+
+model RosterImport {
+  id             String   @id @default(cuid())
+  year           Int
+  scope          String // ImportScope
+  controlVersion Int
+  yearVersion    Int
+  payload        Json?
+  preview        Json?
+  summary        Json?
+  state          String // "PREVIEW" | "COMMITTED" | "CANCELLED" | "EXPIRED"
+  createdAt      DateTime @default(now())
+
+  academicYear AcademicYear @relation(fields: [year], references: [year])
+}
+
+model RosterDecision {
+  year          Int
+  userId        Int
+  decision      String
+  sourceVersion Int
+
+  academicYear AcademicYear @relation(fields: [year], references: [year])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@id([year, userId])
+}
+
+model RosterMutation {
+  requestId   String   @id
+  actorUserId Int? // 메인 관리자는 null. 감사 기록이므로 FK를 두지 않는다.
+  kind        String
+  payloadHash String
+  result      Json // MutationSummary — 건수·ID만
+  version     Int
+  changed     Int
+  createdAt   DateTime @default(now())
+}
+
+model UserAccessEvent {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  state       String
+  reason      String
+  effectiveAt DateTime
+  requestId   String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, effectiveAt])
+}
+
+model EligibilityEvent {
+  id            Int      @id @default(autoincrement())
+  scope         String // "APPLICATION" | "REGISTRATION" | "ACCOUNT" | "ROLLOVER"
+  applicationId Int? // 논리 참조: 원본이 정리돼도 시점 증거를 남긴다
+  userId        Int? // 논리 참조
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+  requestId     String?
+
+  @@index([userId, occurredAt])
+  @@index([applicationId, occurredAt])
+}
+
+model AcademicBackfill {
+  key            String    @id
+  state          String
+  sourceManifest Json
+  completedAt    DateTime?
+  verifiedAt     DateTime?
+}
+
+model KioskSnapshot {
+  id                     String   @id @default(cuid())
+  version                Int
+  activeYear             Int
+  lastEligibilityEventId Int
+  payload                Json
+  issuedAt               DateTime
+  freshUntil             DateTime
+  coversUntil            String
+
+  academicYear AcademicYear @relation(fields: [activeYear], references: [year])
+
+  @@index([issuedAt])
+}
+
+model LocalCheckInReview {
+  id          String    @id @default(cuid())
+  clientKey   String    @unique
+  payloadHash String
+  payload     Json?
+  snapshotId  String? // 논리 참조: 스냅샷이 정리돼도 검토 증거를 남긴다
+  reason      String
+  state       String    @default("PENDING") // "PENDING" | "ACCEPTED" | "DUPLICATE" | "REJECTED"
+  decision    Json?
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
 }
