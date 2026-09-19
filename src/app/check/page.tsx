@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { QRScanner } from "@/components/QRScanner";
 import { BrandMark } from "@/components/BrandMark";
+import { KioskViewport } from "@/components/KioskViewport";
 import {
   getSetting,
   setSetting,
@@ -335,10 +336,9 @@ export default function CheckPage() {
   const borderClass = result ? RESULT_BORDER_CLASS[resultCategory(result)] : "border-slate-700";
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-gray-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white">
-
+    <KioskViewport>
       {/* Status Bar */}
-      <div className="flex shrink-0 items-center gap-2 px-2 py-1 text-xs sm:px-3">
+      <div className="flex shrink-0 items-center gap-2 px-2 text-xs sm:px-3">
         <BrandMark variant="overlay" href="/" label="홈으로" className="static min-h-11 shrink-0 whitespace-nowrap" />
 
         <div className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto">
@@ -356,7 +356,7 @@ export default function CheckPage() {
         )}
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-col gap-2 px-2 sm:px-3">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 px-2 sm:px-3">
         <section
           aria-label="카메라 화면"
           className={`relative min-h-0 flex-1 overflow-hidden rounded-2xl border-[10px] bg-black transition-colors duration-300 sm:border-[14px] ${borderClass}`}
@@ -374,30 +374,30 @@ export default function CheckPage() {
           role="status"
           aria-live="polite"
           aria-atomic="true"
-          className="flex h-16 shrink-0 items-center overflow-x-auto rounded-xl bg-white px-3 text-slate-900 sm:h-20 sm:px-4 dark:bg-slate-900 dark:text-white"
+          className="kiosk-status flex min-w-0 shrink-0 items-center overflow-x-auto overflow-y-hidden rounded-lg bg-white px-2 text-slate-900 sm:px-3"
         >
           {result ? (
-            <div className="mx-auto flex w-max items-center gap-3 whitespace-nowrap">
+            <div className="mx-auto flex w-max shrink-0 items-center gap-2 whitespace-nowrap">
               {result.user?.photoUrl ? (
                 <img
                   src={result.user.photoUrl}
                   alt=""
-                  className="h-10 w-10 shrink-0 rounded-lg object-cover sm:h-12 sm:w-12"
+                  className="kiosk-result-avatar shrink-0 rounded-md object-cover"
                 />
               ) : result.user ? (
-                <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-lg font-bold text-slate-700 sm:h-12 sm:w-12">
+                <span aria-hidden="true" className="kiosk-result-avatar flex shrink-0 items-center justify-center rounded-md bg-slate-200 text-base font-bold text-slate-700">
                   {result.user.name.charAt(0)}
                 </span>
               ) : null}
               {result.user && (
-                <span className="text-base font-bold sm:text-xl">
+                <span className="text-sm font-bold sm:text-base">
                   {result.user.role === "STUDENT"
                     ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ${result.user.name}`
                     : `${result.user.name} 선생님`}
                 </span>
               )}
               {result.user && <span aria-hidden="true" className="text-slate-400">·</span>}
-              <span className={`text-sm font-semibold sm:text-lg ${RESULT_TEXT_CLASS[resultCategory(result)]}`}>
+              <span className={`text-sm font-semibold sm:text-base ${RESULT_TEXT_CLASS[resultCategory(result)]}`}>
                 {result.success
                   ? result.user?.role === "TEACHER" && result.checkedAt
                     ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
@@ -406,7 +406,7 @@ export default function CheckPage() {
               </span>
             </div>
           ) : (
-            <p className="mx-auto flex w-max items-center gap-2 whitespace-nowrap text-base font-medium sm:text-xl">
+            <p className="mx-auto flex w-max shrink-0 items-center gap-2 whitespace-nowrap text-sm font-medium sm:text-base">
               <QrCode className="h-5 w-5 shrink-0" />
               QR 코드를 카메라에 보여주세요
             </p>
@@ -414,55 +414,56 @@ export default function CheckPage() {
         </div>
       </main>
 
-      {/* 하단 바: 로컬 동기화 + 얼굴 체크인 이동 (/facecheck 하단 바와 같은 위치·모양) */}
-      <div className="flex shrink-0 items-center justify-end gap-2 p-2 text-white text-xs sm:px-3">
+      <footer className="kiosk-footer shrink-0 px-2 text-white sm:px-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {(operationMode === "local" || unsyncedCount > 0 || syncRejectedCount > 0) && (
+            <div className="mr-auto flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => performSync()}
+                disabled={syncing || !isOnline}
+                className="kiosk-action flex items-center gap-1 rounded-full bg-blue-500/90 px-3 text-sm font-semibold whitespace-nowrap transition-colors hover:bg-blue-500 disabled:opacity-40"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "동기화 중..." : "동기화"}
+              </button>
+              <button
+                onClick={handleClearSynced}
+                className="kiosk-action flex items-center gap-1 rounded-full bg-white/10 px-2 text-xs whitespace-nowrap transition-colors hover:bg-white/20"
+                title="동기화된 체크인 정리"
+              >
+                <Trash2 className="h-3 w-3" /> 정리
+              </button>
+              <button
+                onClick={handleClearAll}
+                className="kiosk-action flex items-center gap-1 rounded-full bg-red-500/30 px-2 text-xs whitespace-nowrap transition-colors hover:bg-red-500/50"
+                title="전체 초기화"
+              >
+                <Trash2 className="h-3 w-3" /> 초기화
+              </button>
+            </div>
+          )}
+          {/* 오프라인 이동은 SW가 캐시한 /facecheck 문서를 사용한다. */}
+          <a
+            href="/facecheck"
+            className="kiosk-action flex items-center gap-2 rounded-full bg-white/90 px-3 text-sm font-semibold text-gray-900 whitespace-nowrap"
+          >
+            <ScanFace className="h-4 w-4" /> 얼굴로 체크인
+          </a>
+        </div>
         {(operationMode === "local" || unsyncedCount > 0 || syncRejectedCount > 0) && (
-          <div className="mr-auto flex items-center gap-2 min-w-0 overflow-x-auto">
-            <button
-              onClick={() => performSync()}
-              disabled={syncing || !isOnline}
-              className="min-h-11 flex items-center gap-1 px-4 rounded-full bg-blue-500/90 hover:bg-blue-500 disabled:opacity-40 transition-colors text-sm font-semibold whitespace-nowrap shrink-0"
-            >
-              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-              {syncing ? "동기화 중..." : "동기화"}
-            </button>
-            <button
-              onClick={handleClearSynced}
-              className="min-h-11 flex items-center gap-1 px-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors whitespace-nowrap shrink-0"
-              title="동기화된 체크인 정리"
-            >
-              <Trash2 className="h-3 w-3" /> 정리
-            </button>
-            <button
-              onClick={handleClearAll}
-              className="min-h-11 flex items-center gap-1 px-3 rounded-full bg-red-500/30 hover:bg-red-500/50 transition-colors whitespace-nowrap shrink-0"
-              title="전체 초기화"
-            >
-              <Trash2 className="h-3 w-3" /> 초기화
-            </button>
+          <div className="kiosk-sync-details flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-5">
             <span className="text-white/80 whitespace-nowrap">
               마지막 동기화: {lastSyncAt ? new Date(lastSyncAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "없음"}
             </span>
             {syncRejectedCount > 0 && (
-              <span className="px-2 py-0.5 rounded bg-red-500 text-white font-semibold whitespace-nowrap">
+              <span className="rounded bg-red-500 px-2 font-semibold whitespace-nowrap">
                 서버 미반영 {syncRejectedCount}건 — 재시도 대기
               </span>
             )}
-            {syncMessage && (
-              <span className="text-amber-300 whitespace-nowrap" title={syncMessage}>
-                {syncMessage}
-              </span>
-            )}
+            {syncMessage && <span className="text-amber-300 whitespace-nowrap" title={syncMessage}>{syncMessage}</span>}
           </div>
         )}
-        {/* 오프라인에서도 열리도록 <Link> 대신 전체 이동 — SW가 /facecheck 내비게이션을 캐시로 응답한다 */}
-        <a
-          href="/facecheck"
-          className="min-h-11 px-5 rounded-full bg-white/90 dark:bg-black/70 text-gray-900 dark:text-white font-semibold text-sm shadow-lg flex items-center gap-2 whitespace-nowrap shrink-0"
-        >
-          <ScanFace className="h-4 w-4" /> 얼굴로 체크인
-        </a>
-      </div>
-    </div>
+      </footer>
+    </KioskViewport>
   );
 }

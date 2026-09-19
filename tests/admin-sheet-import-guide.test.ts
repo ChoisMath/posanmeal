@@ -12,12 +12,12 @@ assert.match(
 
 assert.match(
   pageSource,
-  /학생.*email.*grade.*classNum.*number.*name/s,
+  /학생[\s\S]*email[\s\S]*grade[\s\S]*classNum[\s\S]*number[\s\S]*name/,
   "Student sheet guide should list required columns in import order.",
 );
 
 assert.match(
   pageSource,
-  /교사.*email.*subject.*homeroom.*position.*name/s,
+  /교사[\s\S]*email[\s\S]*subject[\s\S]*homeroom[\s\S]*position[\s\S]*name/,
   "Teacher sheet guide should list required columns in import order.",
 );

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Human } from "@vladmandic/human";
 import { QRScanner } from "@/components/QRScanner";
 import { BrandMark } from "@/components/BrandMark";
+import { KioskViewport } from "@/components/KioskViewport";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { MEAL_LABEL, studentNumberOf } from "@/lib/meal-plan";
 import { DEFAULT_MEAL_WINDOWS, type MealKind } from "@/lib/meal-kind-local";
@@ -59,14 +60,6 @@ const PHASE_LABEL: Record<ScanPhase, string> = {
   processing: "인식 중",
   waiting: "대기 중",
   blocked: "중단",
-};
-
-const PHASE_HEADLINE: Record<ScanPhase, string> = {
-  loading: "준비 중...",
-  scanning: "얼굴을 카메라에 보여주세요",
-  processing: "인식 중...",
-  waiting: "잠시 후 다시 인식합니다",
-  blocked: "인식이 중단되었습니다",
 };
 
 function PhaseIndicator({ phase, className = "" }: { phase: ScanPhase; className?: string }) {
@@ -751,10 +744,9 @@ export default function FaceCheckPage() {
     : "";
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-gray-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-white">
-
+    <KioskViewport>
       {/* Status Bar */}
-      <div className="flex shrink-0 items-center gap-2 px-2 py-1 text-xs sm:px-3">
+      <div className="flex shrink-0 items-center gap-2 px-2 text-xs sm:px-3">
         <BrandMark variant="overlay" href="/" label="홈으로" className="static min-h-11 shrink-0 whitespace-nowrap" />
 
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
@@ -797,7 +789,7 @@ export default function FaceCheckPage() {
         </span>
       </div>
 
-      <main className="flex min-h-0 flex-1 flex-col gap-2 px-2 sm:px-3">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 px-2 sm:px-3">
         <section
           aria-label="카메라 화면"
           className={`relative min-h-0 flex-1 overflow-hidden rounded-2xl border-[10px] bg-black transition-colors duration-300 sm:border-[14px] ${borderClass}`}
@@ -818,30 +810,30 @@ export default function FaceCheckPage() {
           role="status"
           aria-live="polite"
           aria-atomic="true"
-          className="flex h-16 shrink-0 items-center overflow-x-auto rounded-xl bg-white px-3 text-slate-900 sm:h-20 sm:px-4 dark:bg-slate-900 dark:text-white"
+          className="kiosk-status flex min-w-0 shrink-0 items-center overflow-x-auto overflow-y-hidden rounded-lg bg-white px-2 text-slate-900 sm:px-3"
         >
           {result ? (
-            <div className="mx-auto flex w-max items-center gap-3 whitespace-nowrap">
+            <div className="mx-auto flex w-max shrink-0 items-center gap-2 whitespace-nowrap">
               {result.user?.photoUrl ? (
                 <img
                   src={result.user.photoUrl}
                   alt=""
-                  className="h-10 w-10 shrink-0 rounded-lg object-cover sm:h-12 sm:w-12"
+                  className="kiosk-result-avatar shrink-0 rounded-md object-cover"
                 />
               ) : result.user ? (
-                <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-lg font-bold text-slate-700 sm:h-12 sm:w-12">
+                <span aria-hidden="true" className="kiosk-result-avatar flex shrink-0 items-center justify-center rounded-md bg-slate-200 text-base font-bold text-slate-700">
                   {result.user.name.charAt(0)}
                 </span>
               ) : null}
               {result.user && (
-                <span className="text-base font-bold sm:text-xl">
+                <span className="text-sm font-bold sm:text-base">
                   {result.user.role === "STUDENT"
                     ? `${result.user.grade}학년 ${result.user.classNum}반 ${result.user.number}번 ${result.user.name}`
                     : `${result.user.name} 선생님`}
                 </span>
               )}
               {result.user && <span aria-hidden="true" className="text-slate-400">·</span>}
-              <span className={`text-sm font-semibold sm:text-lg ${RESULT_TEXT_CLASS[resultCategory(result)]}`}>
+              <span className={`text-sm font-semibold sm:text-base ${RESULT_TEXT_CLASS[resultCategory(result)]}`}>
                 {result.success
                   ? result.user?.role === "TEACHER" && result.checkedAt
                     ? `${formatCheckedAt(result.checkedAt)} ${typeLabel(result.type)}로 ${result.mealKind ? MEAL_LABEL[result.mealKind] : "석식"} 체크인 되었습니다.`
@@ -854,12 +846,9 @@ export default function FaceCheckPage() {
 
             </div>
           ) : (
-            <div className="mx-auto flex w-max items-center gap-2 whitespace-nowrap">
+            <div className="mx-auto flex w-max shrink-0 items-center gap-2 whitespace-nowrap">
               {mode === "face" ? <PhaseIndicator phase={phase} /> : <QrCode className="h-5 w-5 shrink-0" />}
-              <span className="text-base font-semibold sm:text-xl">
-                {mode === "face" ? PHASE_HEADLINE[phase] : "QR 코드를 스캔해 주세요"}
-              </span>
-              <span className="text-sm text-slate-600 dark:text-slate-300">{status}</span>
+              <span className="text-sm font-medium sm:text-base">{status}</span>
             </div>
           )}
         </div>
@@ -922,42 +911,41 @@ export default function FaceCheckPage() {
         </Dialog>
       )}
 
-      {/* 하단 바: 로컬 동기화 + 모드 전환 */}
-      <div className="flex shrink-0 items-center justify-end gap-2 p-2 sm:px-3">
-        {isLocal && (
-          <div className="mr-auto flex items-center gap-2 min-w-0 overflow-x-auto">
+      <footer className="kiosk-footer shrink-0 px-2 sm:px-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {isLocal && (
             <button
               onClick={runSync}
               disabled={syncing || !isOnline}
-              className="min-h-11 px-4 rounded-full bg-blue-500/90 text-white text-sm font-semibold shadow-lg flex items-center gap-1 whitespace-nowrap shrink-0 disabled:opacity-40"
+              className="kiosk-action mr-auto flex items-center gap-1 whitespace-nowrap rounded-full bg-blue-500/90 px-3 text-sm font-semibold text-white disabled:opacity-40"
             >
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "동기화 중..." : "동기화"}
             </button>
-            <span className="text-white/80 text-xs whitespace-nowrap">마지막 동기화: {formatSyncTime(lastSyncAt)}</span>
-            {syncMessage && (
-              <span className="text-amber-300 text-xs whitespace-nowrap" title={syncMessage}>
-                {syncMessage}
-              </span>
+          )}
+          <button
+            ref={modeButtonRef}
+            onClick={switchMode}
+            className="kiosk-action flex items-center gap-2 whitespace-nowrap rounded-full bg-white/90 px-3 text-sm font-semibold text-gray-900"
+          >
+            {mode === "face" ? (
+              <>
+                <QrCode className="h-4 w-4" /> QR로 체크인
+              </>
+            ) : (
+              <>
+                <ScanFace className="h-4 w-4" /> 얼굴로 체크인
+              </>
             )}
+          </button>
+        </div>
+        {isLocal && (
+          <div className="kiosk-sync-details flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-5">
+            <span className="whitespace-nowrap text-white/80">마지막 동기화: {formatSyncTime(lastSyncAt)}</span>
+            {syncMessage && <span className="whitespace-nowrap text-amber-300" title={syncMessage}>{syncMessage}</span>}
           </div>
         )}
-        <button
-          ref={modeButtonRef}
-          onClick={switchMode}
-          className="min-h-11 px-5 rounded-full bg-white/90 dark:bg-black/70 text-gray-900 dark:text-white font-semibold text-sm shadow-lg flex items-center gap-2 whitespace-nowrap shrink-0"
-        >
-          {mode === "face" ? (
-            <>
-              <QrCode className="h-4 w-4" /> QR로 체크인
-            </>
-          ) : (
-            <>
-              <ScanFace className="h-4 w-4" /> 얼굴로 체크인
-            </>
-          )}
-        </button>
-      </div>
-    </div>
+      </footer>
+    </KioskViewport>
   );
 }
