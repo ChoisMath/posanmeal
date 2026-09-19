@@ -53,7 +53,7 @@ export function payloadHash(value: unknown): string {
 export function parseIdParam(raw: string): number {
   const id = Number.parseInt(raw, 10);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
+    throw new DomainError("INVALID_INPUT", "잘못된 요청입니다.");
   }
   return id;
 }

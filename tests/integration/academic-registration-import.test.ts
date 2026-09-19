@@ -118,6 +118,126 @@ describe("registration excel import", () => {
     expect(await confirmedDates()).toEqual(before);
   });
 
+  it("아무도 등록되지 않으면 EligibilityEvent를 남기지 않는다", async () => {
+    await db.eligibilityEvent.deleteMany({});
+    const file = await buildSheet(
+      [...TEMPLATE_FIXED_HEADERS, ...MEAL_HEADERS],
+      [["없는사람@example.posan.kr", 1, 1, 9, "없음", "O", ""]],
+    );
+
+    const response = await run(file);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      added: 0,
+      updated: 0,
+      skippedNotFound: 1,
+      total: 1,
+    });
+    expect(await db.eligibilityEvent.count()).toBe(0);
+  });
+
+  it("바뀐 사람마다 EligibilityEvent를 한 건씩 남긴다", async () => {
+    await db.eligibilityEvent.deleteMany({});
+    const file = await buildSheet(
+      [...TEMPLATE_FIXED_HEADERS, ...MEAL_HEADERS],
+      [["student-test@example.posan.kr", 1, 1, 1, "학생테스트", "O", ""]],
+    );
+
+    await run(file);
+    const events = await db.eligibilityEvent.findMany();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      scope: "REGISTRATION",
+      applicationId: fx.applicationId,
+      userId: fx.studentId,
+    });
+  });
+
+  it("total은 실제로 처리한 행과 찾지 못한 행만 센다", async () => {
+    // 3학년 개설일이 없는 학생: 표시는 있으나 유효 날짜가 없어 처리되지 않는다.
+    const noOpen = await db.user.create({
+      data: {
+        email: "no-open@example.posan.kr",
+        emailKey: "no-open@example.posan.kr",
+        name: "개설없음",
+        role: "STUDENT",
+        grade: 3,
+        classNum: 1,
+        number: 1,
+      },
+    });
+    await db.userAcademicRecord.create({
+      data: {
+        year: 2026,
+        userId: noOpen.id,
+        role: "STUDENT",
+        name: "개설없음",
+        grade: 3,
+        classNum: 1,
+        number: 1,
+        memberState: "ENROLLED",
+      },
+    });
+
+    const file = await buildSheet(
+      [...TEMPLATE_FIXED_HEADERS, ...MEAL_HEADERS],
+      [
+        ["student-test@example.posan.kr", 1, 1, 1, "학생테스트", "O", ""],
+        ["no-open@example.posan.kr", 3, 1, 1, "개설없음", "O", ""],
+        ["없는사람@example.posan.kr", 1, 1, 9, "없음", "O", ""],
+      ],
+    );
+
+    const body = (await (await run(file)).json()) as Record<string, number>;
+    expect(body).toMatchObject({ added: 0, updated: 1, skippedNotFound: 1, skippedInvalid: 1 });
+    expect(body.total).toBe(body.added + body.updated + body.skippedNotFound);
+  });
+
+  it("400명 일괄 등록이 트랜잭션 시간 안에 끝나고 왕복이 인원수에 비례하지 않는다", async () => {
+    const students = await Promise.all(
+      Array.from({ length: 400 }, (_, i) =>
+        db.user.create({
+          data: {
+            email: `bulk-${i}@example.posan.kr`,
+            emailKey: `bulk-${i}@example.posan.kr`,
+            name: `학생${i}`,
+            role: "STUDENT",
+            grade: 1,
+            classNum: Math.floor(i / 40) + 2,
+            number: (i % 40) + 1,
+          },
+        }),
+      ),
+    );
+    await db.userAcademicRecord.createMany({
+      data: students.map((user) => ({
+        year: 2026,
+        userId: user.id,
+        role: "STUDENT" as const,
+        name: user.name,
+        grade: 1,
+        classNum: user.classNum,
+        number: user.number,
+        memberState: "ENROLLED",
+      })),
+    });
+
+    const file = await buildSheet(
+      [...TEMPLATE_FIXED_HEADERS, ...MEAL_HEADERS],
+      students.map((user) => [user.email, 1, user.classNum ?? 0, user.number ?? 0, user.name, "O", ""]),
+    );
+
+    const startedAt = Date.now();
+    const response = await run(file);
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ added: 400, updated: 0, total: 400 });
+    expect(await db.eligibilityEvent.count({ where: { scope: "REGISTRATION" } })).toBe(400);
+    expect(elapsedMs).toBeLessThan(30_000);
+    console.info(`[import 400명] ${elapsedMs}ms`);
+  }, 120_000);
+
   it("초안 학년도 공고는 일괄 등록을 거절한다", async () => {
     const control = await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
     await createDraftYear(db, {

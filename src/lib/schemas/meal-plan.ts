@@ -26,6 +26,27 @@ function monthSpan(
   };
 }
 
+/**
+ * 대상 월과 모든 개설일이 한 학년도 안에 있는지. 학년도가 정해진 뒤에는 서버가
+ * 이 판정을 다시 한다 — 입력에 학년도가 없으면 zod는 검사할 수 없기 때문이다.
+ */
+export function isWithinAcademicYear(
+  academicYear: number,
+  v: {
+    startYear: number;
+    startMonth: number;
+    monthCount: number;
+    meals: { dates: { date: string }[] }[];
+  },
+): boolean {
+  const { startDate, endDate } = academicYearBounds(academicYear);
+  const span = monthSpan(v.startYear, v.startMonth, v.monthCount);
+  if (span.first < startDate || span.last > endDate) return false;
+  return v.meals.every((meal) =>
+    meal.dates.every((d) => d.date >= startDate && d.date <= endDate),
+  );
+}
+
 function withinAcademicYear(v: {
   academicYear?: number | null;
   startYear: number;
@@ -33,13 +54,7 @@ function withinAcademicYear(v: {
   monthCount: number;
   meals: { dates: { date: string }[] }[];
 }): boolean {
-  if (v.academicYear == null) return true;
-  const { startDate, endDate } = academicYearBounds(v.academicYear);
-  const span = monthSpan(v.startYear, v.startMonth, v.monthCount);
-  if (span.first < startDate || span.last > endDate) return false;
-  return v.meals.every((meal) =>
-    meal.dates.every((d) => d.date >= startDate && d.date <= endDate),
-  );
+  return v.academicYear == null || isWithinAcademicYear(v.academicYear, v);
 }
 
 export const adminApplicationSchema = z

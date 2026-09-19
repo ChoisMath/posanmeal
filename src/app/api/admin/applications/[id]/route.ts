@@ -100,7 +100,7 @@ export async function DELETE(
     await withEligibilityMutation(
       prisma,
       actor,
-      { scope: "APPLICATION", applicationId },
+      { scope: "APPLICATION", applicationId, require: "WRITE_ADMIN" },
       // 신청 행은 예전부터 공고 삭제에 딸려 지워진다. 그 동작은 그대로 두고 증거만 남긴다.
       (tx) => tx.mealApplication.delete({ where: { id: applicationId } }),
     );

@@ -15,7 +15,7 @@ export async function POST(
     const application = await withEligibilityMutation(
       prisma,
       actor,
-      { scope: "APPLICATION", applicationId },
+      { scope: "APPLICATION", applicationId, require: "WRITE_ADMIN" },
       (tx) => tx.mealApplication.update({ where: { id: applicationId }, data: { status: "CLOSED" } }),
     );
 

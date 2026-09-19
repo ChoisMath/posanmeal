@@ -19,8 +19,10 @@ export async function GET() {
         status: "OPEN",
         applyStartAt: { lte: now },
         applyEndAt: { gte: now },
-        // 초안 학년도 공고는 작성해 둘 수 있을 뿐 접수 대상이 아니다.
-        NOT: { academicYear: { in: draftYears.map((y) => y.year) } },
+        // 초안 학년도 공고는 작성해 둘 수 있을 뿐 접수 대상이 아니다. NULL은
+        // 아직 학년도가 채워지지 않은 공고이므로 SQL의 NOT IN에 맡기지 않고
+        // 명시적으로 남긴다 — NOT (NULL IN (...))은 참이 아니라 NULL이다.
+        OR: [{ academicYear: null }, { academicYear: { notIn: draftYears.map((y) => y.year) } }],
       },
       include: {
         meals: true,

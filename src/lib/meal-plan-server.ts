@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { dateKeyToUtcDate } from "@/lib/date-range";
-import type { AdminApplicationInput, StudentRegisterInput } from "@/lib/schemas/meal-plan";
+import {
+  isWithinAcademicYear,
+  YEAR_SPAN_MESSAGE,
+  type AdminApplicationInput,
+  type StudentRegisterInput,
+} from "@/lib/schemas/meal-plan";
 import { buildAppTitle, monthKeyOf, weekdayOf, MEAL_LABEL } from "@/lib/meal-plan";
 import type { MealKind } from "@/lib/meal-plan";
 import type { Actor } from "@/lib/academic-year/contracts";
@@ -261,6 +266,7 @@ export async function saveApplication(
     actor,
     {
       scope: "APPLICATION",
+      require: "WRITE_ADMIN",
       applicationId: id,
       applicationIdOf: (saved) => saved.id,
       recorded: (saved) => saved.eligibilityChanged,
@@ -293,6 +299,12 @@ async function writeApplication(
     if (registrations > 0) {
       throw new DomainError("YEAR_MISMATCH", "신청이 있는 공고의 학년도는 바꿀 수 없습니다.");
     }
+  }
+
+  // 학년도가 정해진 뒤에 다시 잰다. 입력이 학년도를 보내지 않는 경로(PREPARING과
+  // 아직 학년도 칸이 없는 관리자 화면)에서는 zod가 이 판정을 할 수 없다.
+  if (!isWithinAcademicYear(academicYear, input)) {
+    throw new DomainError("INVALID_INPUT", YEAR_SPAN_MESSAGE);
   }
 
   const before = id ? await signatureOfStored(tx, id) : null;

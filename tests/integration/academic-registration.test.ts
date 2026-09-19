@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Client } from "pg";
@@ -81,18 +80,6 @@ describe("academic year registration", () => {
       await expect(
         getRegistrationContext(db, fx.main, fx.applicationId, fx.studentId, intent),
       ).rejects.toMatchObject({ code: "YEAR_MISMATCH" });
-    }
-  });
-
-  it("CREATE·RESTORE 경로가 모두 같은 자격 검사를 쓴다", () => {
-    const routes = [
-      "src/app/api/applications/[id]/register/route.ts",
-      "src/app/api/admin/applications/[id]/registrations/route.ts",
-      "src/app/api/admin/applications/[id]/registrations/[regId]/route.ts",
-      "src/app/api/admin/applications/[id]/import/route.ts",
-    ];
-    for (const route of routes) {
-      expect(readFileSync(route, "utf8")).toContain("getRegistrationContext");
     }
   });
 

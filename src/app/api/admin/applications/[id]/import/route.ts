@@ -12,9 +12,10 @@ import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
 import {
-  getRegistrationContext,
+  getRegistrationBatchContext,
   resolveApplicationYear,
   rosterMode,
+  type RegistrationIntent,
 } from "@/lib/academic-year/registration-context";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { readYearState } from "@/lib/academic-year/roster-service";
@@ -137,7 +138,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     const rows: SheetRow[] = [];
-    let ignoredMarks = 0;
     let skippedInvalid = 0;
 
     sheet.eachRow((row, rowNumber) => {
@@ -206,10 +206,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ? await matchByEmail(rows.map((r) => r.key))
       : await matchByStudentNumber(rows.map((r) => r.key), year, mode === "READY");
 
-    let added = 0;
-    let updated = 0;
     let skippedNotFound = 0;
-
     const targets: { userId: number; marks: MealInput[] }[] = [];
     for (const row of rows) {
       const userId = resolvedUsers.get(row.key);
@@ -224,32 +221,56 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       targets.push({ userId, marks: row.marks });
     }
 
-    // 한 명이라도 자격 검사에 걸리면 이 트랜잭션 전체가 되돌아간다.
-    await withEligibilityMutation(
+    // 한 명이라도 자격 검사에 걸리면 이 트랜잭션 전체가 되돌아간다. 대상이 학년
+    // 전체일 수 있으므로 공고·명단·개설일은 배치 문맥으로 한 번만 읽고, 사람 수에
+    // 비례하는 왕복은 실제 쓰기만 남긴다.
+    type ImportOutcome = {
+      added: number;
+      updated: number;
+      emptyAfterOpenDates: number;
+      ignoredInsideTx: number;
+      writtenUserIds: number[];
+    };
+
+    const outcome = await withEligibilityMutation<ImportOutcome>(
       prisma,
       actor,
-      { scope: "REGISTRATION", applicationId },
+      {
+        scope: "REGISTRATION",
+        applicationId,
+        transaction: { maxWait: 10_000, timeout: 60_000 },
+        affectedUserIds: (result) => result.writtenUserIds,
+      },
       async (tx) => {
-        for (const target of targets) {
-          const existing = await tx.mealRegistration.findUnique({
-            where: { applicationId_userId: { applicationId, userId: target.userId } },
-            select: { status: true },
-          });
-          const intent = existing?.status === "APPROVED" ? "EDIT" : existing ? "RESTORE" : "CREATE";
-          const context = await getRegistrationContext(
-            tx,
-            actor,
-            applicationId,
-            target.userId,
-            intent,
-          );
+        const existing = await tx.mealRegistration.findMany({
+          where: { applicationId, userId: { in: targets.map((t) => t.userId) } },
+          select: { userId: true, status: true },
+        });
+        const statusByUser = new Map(existing.map((row) => [row.userId, row.status]));
 
-          const grade = context.profile.grade ?? 0;
+        const context = await getRegistrationBatchContext(
+          tx,
+          actor,
+          applicationId,
+          targets.map((target) => ({
+            userId: target.userId,
+            intent: intentFor(statusByUser.get(target.userId)),
+          })),
+        );
+
+        const writtenUserIds: number[] = [];
+        let added = 0;
+        let updated = 0;
+        let emptyAfterOpenDates = 0;
+        let ignoredInsideTx = 0;
+
+        for (const target of targets) {
+          const grade = context.profiles.get(target.userId)?.grade ?? 0;
           const meals = target.marks.flatMap<MealInput>((meal) => {
             const openDates = openByGradeKind.get(`${grade}:${meal.mealKind}`) ?? new Set<string>();
             if (meal.selectedDates) {
               const valid = meal.selectedDates.filter((d) => openDates.has(d));
-              ignoredMarks += meal.selectedDates.length - valid.length;
+              ignoredInsideTx += meal.selectedDates.length - valid.length;
               if (valid.length === 0) return [];
               return [{ ...meal, selectedDates: valid }];
             }
@@ -257,7 +278,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               const wds = monthKeys.flatMap((mk) => meal.weekdaysByMonth?.[mk] ?? []);
               const expanded = expandWeekdays([...openDates].sort(), [...new Set(wds)]);
               if (expanded.length === 0) {
-                ignoredMarks += new Set(wds).size;
+                ignoredInsideTx += new Set(wds).size;
                 return [];
               }
             }
@@ -265,7 +286,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           });
 
           if (meals.length === 0) {
-            skippedInvalid++;
+            emptyAfterOpenDates++;
             continue;
           }
 
@@ -273,7 +294,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             applicationId,
             grade,
             meals,
-            context.resolveContext,
+            context.resolveContextFor(grade),
           );
           if (!resolved.ok) {
             throw new DomainError("INVALID_INPUT", resolved.error);
@@ -287,22 +308,30 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             resolved.resolved,
             "ADMIN",
           );
+          writtenUserIds.push(target.userId);
           if (result.created) added++;
           else updated++;
         }
-        return { added, updated };
+
+        return { added, updated, emptyAfterOpenDates, ignoredInsideTx, writtenUserIds };
       },
     );
 
     return NextResponse.json({
-      added,
-      updated,
+      added: outcome.added,
+      updated: outcome.updated,
       skippedNotFound,
-      skippedInvalid,
-      ignoredMarks,
-      total: targets.length + skippedNotFound,
+      skippedInvalid: skippedInvalid + outcome.emptyAfterOpenDates,
+      ignoredMarks: outcome.ignoredInsideTx,
+      // 예전과 같은 뜻: 학생을 찾은 뒤 실제로 처리한 행 + 찾지 못한 행.
+      total: outcome.writtenUserIds.length + skippedNotFound,
     });
   });
+}
+
+function intentFor(status: string | undefined): RegistrationIntent {
+  if (status === "APPROVED") return "EDIT";
+  return status ? "RESTORE" : "CREATE";
 }
 
 async function matchByEmail(keys: string[]): Promise<Map<string, number>> {

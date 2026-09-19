@@ -182,6 +182,24 @@ describe("academic year resync", () => {
     expect(saved.academicYear).toBe(ACTIVE_YEAR);
   });
 
+  it("PREPARING에서 학년도를 보내지 않아도 2월→3월 경계 공고는 거절한다", async () => {
+    await db.rosterControl.update({ where: { id: 1 }, data: { mode: "PREPARING" } });
+    await expect(
+      saveApplication(fx.main, {
+        ...input,
+        academicYear: undefined,
+        subject: "경계 공고",
+        startYear: 2027,
+        startMonth: 2,
+        monthCount: 2,
+        meals: input.meals.map((meal) => ({
+          ...meal,
+          dates: [{ grade: 1, date: "2027-02-10" }],
+        })),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
   it("READY에서는 학년도 없는 새 공고를 거절한다", async () => {
     await expect(
       saveApplication(fx.main, { ...input, academicYear: undefined, subject: "새 공고" }),
