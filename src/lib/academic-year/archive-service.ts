@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { assertActor } from "./access";
-import type { MutationInput, MutationReceipt, MutationSummary, Profile, RosterRow } from "./contracts";
+import type {
+  MutationInput,
+  MutationReceipt,
+  MutationSummary,
+  Profile,
+  RosterRow,
+  RowMutationInput,
+} from "./contracts";
 import { DomainError } from "./errors";
-import { withAcademicMutation } from "./mutation";
+import { withAcademicMutation, withRosterRowMutation } from "./mutation";
 import { normalizeEmail, parseProfile } from "./profile-schema";
 import { requireAcademicReady } from "./readiness";
 import { readYearState, writeRosterProfiles } from "./roster-service";
@@ -91,9 +98,8 @@ export async function deleteArchivedRoster(
   return receipt;
 }
 
-export type CorrectAcademicRecordInput = MutationInput & {
+export type CorrectAcademicRecordInput = RowMutationInput & {
   year: number;
-  userId: number;
   profile: Profile;
 };
 
@@ -102,7 +108,10 @@ export type CorrectAcademicRecordInput = MutationInput & {
  * 연도는 손대지 않고, `RosterEntry`도 새로 만들지 않는다. Task 5의
  * `writeRosterProfiles`를 그대로 다시 쓴다 — 확정 연도 쓰기는 ACTIVE일 때만
  * `RosterEntry`를 upsert하므로(그 외에는 건드리지 않으므로) 보관 연도 호출은
- * 항목을 되살리지 않는다. 대상 기록이 없으면 그 안에서 새로 만들지 않고 거절한다.
+ * 항목을 되살리지 않는다. `withRosterRowMutation`으로 대상 `UserAcademicRecord`
+ * 행 자체를 잠그고 그 행의 `version`으로 충돌을 판정한다 — 행이 없으면
+ * `MISSING_PROFILE`로 거절되어 새로 만들지 않는다. 연도 상태는 여기서, 행 잠금과
+ * 같은 트랜잭션 안에서 다시 확인한다.
  */
 export async function correctAcademicRecord(
   db: PrismaClient,
@@ -110,9 +119,16 @@ export async function correctAcademicRecord(
 ): Promise<MutationReceipt> {
   const profile = parseProfile(input.profile);
 
-  const { receipt } = await withAcademicMutation(
+  const { receipt } = await withRosterRowMutation(
     db,
-    input,
+    {
+      actor: input.actor,
+      requestId: input.requestId,
+      expectedRowVersion: input.expectedRowVersion,
+      kind: input.kind,
+      payloadHash: input.payloadHash,
+      target: { table: "UserAcademicRecord", year: input.year, userId: input.userId },
+    },
     async (tx) => {
       await requireAcademicReady(tx);
       await assertActor(tx, input.actor, "WRITE_ADMIN");

@@ -54,14 +54,20 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ y
       throw new DomainError("INVALID_INPUT", "요청 본문을 확인하세요.");
     }
 
+    // 같은 선택을 순서만 다르게 보내도 같은 요청으로 재전송 판정되도록, 해시를
+    // 계산하기 전에 중복 제거·정렬로 정규화한다. 서비스에 넘기는 값도 이 정규화된
+    // 배열이다 — 해시가 보는 것과 실제로 쓰는 것이 갈라지면 안 된다.
+    const entryIds =
+      parsed.data.entryIds === "ALL" ? "ALL" : [...new Set(parsed.data.entryIds)].sort();
+
     const receipt = await deleteArchivedRoster(prisma, {
       actor,
       requestId: parsed.data.requestId,
       expectedVersion: parsed.data.expectedVersion,
       kind: "ARCHIVE_DELETE",
-      payloadHash: payloadHash({ year, entryIds: parsed.data.entryIds }),
+      payloadHash: payloadHash({ year, entryIds }),
       year,
-      entryIds: parsed.data.entryIds,
+      entryIds,
     });
 
     return NextResponse.json({ receipt });

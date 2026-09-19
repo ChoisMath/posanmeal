@@ -49,6 +49,23 @@ async function activeYear(db: Db): Promise<number> {
   return INITIAL_ACADEMIC_YEAR;
 }
 
+/**
+ * 이미 COPIED/VERIFIED 이후의 재확인 전용 경로가 쓰는 완화된 확인. 이 완화는
+ * 일회성이 아니라 영구적이다 — 학년도 전환 뒤(활성 연도가 2026을 지난 뒤)의
+ * 재실행도 계속 조회 전용 no-op이어야 하므로, "활성 연도가 정확히 2026"이
+ * 아니라 "활성 학년도가 정확히 하나 있다(2026 이후)"만 확인한다. 대상 연도
+ * 자체는 여전히 이 초기 이전이 다루는 2026으로 고정한다.
+ */
+async function requireSingleActiveYear(db: Db): Promise<number> {
+  const rows = await db.$queryRaw<{ year: number }[]>`
+    SELECT year FROM "AcademicYear" WHERE state = 'ACTIVE'
+  `;
+  if (rows.length !== 1 || (rows[0]?.year ?? 0) < INITIAL_ACADEMIC_YEAR) {
+    throw new DomainError("YEAR_MISMATCH", "활성 학년도가 하나가 아닙니다. 관리자 설정을 확인하세요.");
+  }
+  return INITIAL_ACADEMIC_YEAR;
+}
+
 const INSERT_RECORDS_SQL = `
   WITH ${CONFLICT_GROUPS_CTE}
   INSERT INTO "UserAcademicRecord" (
@@ -264,9 +281,9 @@ export async function backfill2026(db: PrismaClient, source: LegacyFingerprint):
     const alreadyCopied = existing !== null && existing.state !== "PENDING";
 
     // 이미 복사된 뒤에는 학년도 전환으로 활성 연도가 2026을 지났어도(Task 9의
-    // 명부 삭제 뒤 재실행 등) 그 사실만 재확인한다. 처음 복사할 때만 활성 연도가
-    // 정말 2026인지를 엄격히 확인한다.
-    const year = alreadyCopied ? INITIAL_ACADEMIC_YEAR : await activeYear(tx);
+    // 명부 삭제 뒤 재실행 등) 활성 학년도가 하나라는 것만 재확인한다. 처음
+    // 복사할 때만 활성 연도가 정말 2026인지를 엄격히 확인한다.
+    const year = alreadyCopied ? await requireSingleActiveYear(tx) : await activeYear(tx);
 
     const report = await runPreflight(tx, year);
     const inserted = alreadyCopied ? 0 : await copyAcademicRecords(tx, year);

@@ -60,6 +60,13 @@ export type RosterRowView = RosterRow & {
 export interface ListRosterOptions {
   /** 전환 검토만 켠다. 일반 명부는 `included = true`만 본다. */
   includeExcluded?: boolean;
+  /**
+   * ARCHIVED 학년도에서 `RosterEntry`가 지워진 뒤에도 보존된 `UserAcademicRecord`를
+   * 보여준다(entryId는 빈 문자열로 표시된다 — 그 행에 되살릴 명부 항목이 없다는 뜻).
+   * 기록 정정 화면 전용이며 기본은 false다: 일반 명부 목록·내보내기는 삭제된
+   * 명부가 다시 나타나면 안 된다.
+   */
+  includeEntryless?: boolean;
 }
 
 export interface WriteRosterOptions {
@@ -241,10 +248,11 @@ export async function listRosterView(
     includeExcluded,
   );
   // ARCHIVED 학년도는 Task 9의 삭제로 RosterEntry가 없을 수 있다. Record만 남은
-  // 행을 명부에 다시 나타나게 하면 "지운 명부"가 사실상 되살아나므로 뺀다 — 그
-  // Record는 export-service의 exportableRows와 getAcademicProfiles만 본다.
+  // 행을 명부에 다시 나타나게 하면 "지운 명부"가 사실상 되살아나므로 기본은
+  // 뺀다 — 기록 정정 화면만 includeEntryless로 그 Record를 명시적으로 본다.
+  const includeEntryless = options?.includeEntryless ?? false;
   return rows
-    .filter((row) => state !== "ARCHIVED" || row.entryId !== null)
+    .filter((row) => state !== "ARCHIVED" || includeEntryless || row.entryId !== null)
     .map((row) => {
     const profile: Profile = {
       role: row.role,
