@@ -6,6 +6,8 @@ import type { Tx } from "./db";
 import { DomainError } from "./errors";
 import { normalizeEmail } from "./profile-schema";
 import { withUserMutation } from "./mutation";
+import { SEAT_HELD_BY_OTHER_SQL } from "./rollover-sql";
+import { activeYear } from "./roster-service";
 
 const ACCOUNT_SCOPE = "ACCOUNT";
 
@@ -107,6 +109,80 @@ export async function changeEmail(
   return receipt;
 }
 
+/** 이용 중단 사유가 뜻하는 소속 상태. 학기 중 이탈도 그 해의 좌석을 놓아줘야 한다. */
+const LEAVING_STATE_BY_REASON: Record<string, Partial<Record<"STUDENT" | "TEACHER", string>>> = {
+  GRADUATED: { STUDENT: "GRADUATED" },
+  TRANSFERRED: { STUDENT: "TRANSFERRED", TEACHER: "TRANSFERRED" },
+  RETIRED: { TEACHER: "RETIRED" },
+};
+
+function leavingStateFor(role: "STUDENT" | "TEACHER", reason: string): string {
+  const state = LEAVING_STATE_BY_REASON[reason]?.[role];
+  if (!state) {
+    throw new DomainError(
+      "MISSING_PROFILE",
+      role === "STUDENT"
+        ? "학생의 이용 중단 사유는 GRADUATED 또는 TRANSFERRED여야 합니다."
+        : "교사의 이용 중단 사유는 TRANSFERRED 또는 RETIRED여야 합니다.",
+    );
+  }
+  return state;
+}
+
+/**
+ * 현재 학년도 기록의 소속 상태를 옮긴다. 학급값은 그 해의 사실이라 보존한다.
+ * 기록이 없으면(아직 그 해 명부에 없는 사람) 할 일이 없다.
+ */
+async function moveMemberState(
+  tx: Tx,
+  userId: number,
+  next: "LEAVING" | "CONTINUING",
+  reason: string,
+): Promise<void> {
+  const year = await activeYear(tx);
+  const record = await tx.userAcademicRecord.findUnique({
+    where: { year_userId: { year, userId } },
+    select: { role: true, grade: true, classNum: true, number: true, memberState: true },
+  });
+  if (!record) return;
+
+  const role = record.role as "STUDENT" | "TEACHER";
+  if (next === "LEAVING") {
+    const memberState = leavingStateFor(role, reason);
+    if (record.memberState === memberState) return;
+    await tx.userAcademicRecord.update({
+      where: { year_userId: { year, userId } },
+      data: { memberState, version: { increment: 1 } },
+    });
+    return;
+  }
+
+  const memberState = role === "STUDENT" ? "ENROLLED" : "EMPLOYED";
+  if (record.memberState === memberState) return;
+
+  if (role === "STUDENT" && record.grade !== null && record.classNum !== null && record.number !== null) {
+    const held = await tx.$queryRawUnsafe<{ userId: number }[]>(
+      SEAT_HELD_BY_OTHER_SQL,
+      year,
+      record.grade,
+      record.classNum,
+      record.number,
+      userId,
+    );
+    if (held.length > 0) {
+      throw new DomainError(
+        "IDENTITY_CONFLICT",
+        "그 학생의 자리는 이미 다른 학생이 쓰고 있습니다. 학급을 먼저 정하세요.",
+      );
+    }
+  }
+
+  await tx.userAcademicRecord.update({
+    where: { year_userId: { year, userId } },
+    data: { memberState, version: { increment: 1 } },
+  });
+}
+
 /**
  * 자기 자신의 이용 상태·권한을 스스로 바꾸지 못하게 막는다. 관리자가 실수로
  * 자기 계정을 잠그거나 스스로 등급을 올리는 경로를 남기지 않는다. 별도 관리자
@@ -144,10 +220,12 @@ export async function changeAccess(
     },
     async (tx) => {
       if (input.state === "INACTIVE") {
+        await moveMemberState(tx, input.userId, "LEAVING", input.reason);
         await deactivateUsers(tx, [input.userId], input.reason, at, input.requestId);
         return { changed: 1, ids: [input.userId] };
       }
 
+      await moveMemberState(tx, input.userId, "CONTINUING", input.reason);
       await tx.user.update({
         where: { id: input.userId },
         data: { accessState: "ACTIVE" },

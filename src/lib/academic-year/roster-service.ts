@@ -532,6 +532,14 @@ function rowArgs(year: number, columns: RowColumns): unknown[] {
 }
 
 /**
+ * 행 배열을 `roster-write-sql.ts`의 모든 문장이 받는 같은 인자 목록으로 편다.
+ * 전환이 `INSERT_USERS_SQL`을 이 일괄 쓰기보다 먼저 돌려야 해서 밖으로 연다.
+ */
+export function rosterRowArgs(year: number, rows: RosterRow[]): unknown[] {
+  return rowArgs(year, columnsOf(rows));
+}
+
+/**
  * 트랜잭션 전용 일괄 쓰기. 호출자가 Zod로 검증한 행만 받으며, 여기서는 식별 충돌을
  * 쓰기 전에 거절하고 남은 일을 전부 집합 연산으로 처리한다. Task 7·8의 Excel 확정과
  * 전환이 같은 함수를 다시 쓴다.

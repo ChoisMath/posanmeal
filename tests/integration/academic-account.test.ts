@@ -1,11 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Client } from "pg";
-import type { Actor } from "@/lib/academic-year/contracts";
+import type { Actor, MemberState } from "@/lib/academic-year/contracts";
 import { assertActor } from "@/lib/academic-year/access";
 import { changeAccess, changeEmail, changePermissions } from "@/lib/academic-year/account-service";
 import { captureLegacyFingerprint, compareLegacyFingerprints } from "../../scripts/academic-year/fingerprint";
-import { openAcademicTestDb, openAcademicTestPgClient, resetAcademicTestDb } from "./support/db";
+import {
+  ACADEMIC_TEST_SEED_YEAR,
+  openAcademicTestDb,
+  openAcademicTestPgClient,
+  resetAcademicTestDb,
+} from "./support/db";
 import { prepareAcademicFixture, type AcademicFixture } from "./support/academic-fixture";
 
 describe("account access and mutations", () => {
@@ -318,5 +323,129 @@ describe("account access and mutations", () => {
     expect(unchanged.email).toBe(student.email);
     expect(unchanged.sessionVersion).toBe(student.sessionVersion);
     expect(unchanged.profileVersion).toBe(student.profileVersion);
+  });
+
+  // -------------------------------------------------------------------------
+  // 학기 중 이탈이 그 해의 좌석을 놓아준다 (Task 8 개정)
+  // -------------------------------------------------------------------------
+
+  it("releases and re-takes the seat when a mid-year leaver's access changes", async () => {
+    const version = async () =>
+      (await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).profileVersion;
+
+    await changeAccess(db, {
+      actor: fx.main,
+      requestId: "leave-1",
+      expectedRowVersion: await version(),
+      kind: "ACCESS",
+      payloadHash: "leave-hash",
+      userId: fx.studentId,
+      state: "INACTIVE",
+      reason: "TRANSFERRED",
+      confirmPrivileges: false,
+    });
+
+    const left = await db.userAcademicRecord.findUniqueOrThrow({
+      where: { year_userId: { year: ACADEMIC_TEST_SEED_YEAR, userId: fx.studentId } },
+    });
+    expect(left.memberState as MemberState).toBe("TRANSFERRED");
+    expect(left.grade).toBe(1);
+    expect(left.classNum).toBe(1);
+    expect(left.number).toBe(1);
+
+    await changeAccess(db, {
+      actor: fx.main,
+      requestId: "leave-back",
+      expectedRowVersion: await version(),
+      kind: "ACCESS",
+      payloadHash: "leave-back-hash",
+      userId: fx.studentId,
+      state: "ACTIVE",
+      reason: "RETURNED",
+      confirmPrivileges: true,
+    });
+
+    const back = await db.userAcademicRecord.findUniqueOrThrow({
+      where: { year_userId: { year: ACADEMIC_TEST_SEED_YEAR, userId: fx.studentId } },
+    });
+    expect(back.memberState as MemberState).toBe("ENROLLED");
+  });
+
+  it("refuses a withdrawal reason that does not say what happened to the person", async () => {
+    const student = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+
+    await expect(
+      changeAccess(db, {
+        actor: fx.main,
+        requestId: "leave-bad",
+        expectedRowVersion: student.profileVersion,
+        kind: "ACCESS",
+        payloadHash: "leave-bad-hash",
+        userId: fx.studentId,
+        state: "INACTIVE",
+        reason: "RETIRED",
+        confirmPrivileges: false,
+      }),
+    ).rejects.toMatchObject({ code: "MISSING_PROFILE" });
+
+    expect((await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).accessState).toBe(
+      "ACTIVE",
+    );
+  });
+
+  it("refuses to re-take a seat that somebody else took while the account was inactive", async () => {
+    await changeAccess(db, {
+      actor: fx.main,
+      requestId: "leave-seat",
+      expectedRowVersion: (await db.user.findUniqueOrThrow({ where: { id: fx.studentId } }))
+        .profileVersion,
+      kind: "ACCESS",
+      payloadHash: "leave-seat-hash",
+      userId: fx.studentId,
+      state: "INACTIVE",
+      reason: "TRANSFERRED",
+      confirmPrivileges: false,
+    });
+
+    const replacement = await db.user.create({
+      data: {
+        email: "replacement@example.posan.kr",
+        emailKey: "replacement@example.posan.kr",
+        name: "대체학생",
+        role: "STUDENT",
+        grade: 1,
+        classNum: 1,
+        number: 1,
+        gender: "FEMALE",
+      },
+    });
+    await db.userAcademicRecord.create({
+      data: {
+        year: ACADEMIC_TEST_SEED_YEAR,
+        userId: replacement.id,
+        role: "STUDENT",
+        name: "대체학생",
+        grade: 1,
+        classNum: 1,
+        number: 1,
+        gender: "FEMALE",
+        memberState: "ENROLLED",
+      },
+    });
+
+    await expect(
+      changeAccess(db, {
+        actor: fx.main,
+        requestId: "seat-back",
+        expectedRowVersion: (await db.user.findUniqueOrThrow({ where: { id: fx.studentId } }))
+          .profileVersion,
+        kind: "ACCESS",
+        payloadHash: "seat-back-hash",
+        userId: fx.studentId,
+        state: "ACTIVE",
+        reason: "RETURNED",
+        confirmPrivileges: true,
+      }),
+    ).rejects.toMatchObject({ code: "IDENTITY_CONFLICT" });
   });
 });
