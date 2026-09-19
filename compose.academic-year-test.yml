@@ -1,0 +1,15 @@
+services:
+  academic-db:
+    image: postgres:16-alpine
+    labels:
+      posanmeal.academic-year-test: "true"
+    environment:
+      POSTGRES_USER: academic_year_test
+      POSTGRES_PASSWORD: local-only
+      POSTGRES_DB: posanmeal_academic_year_test
+    ports:
+      - "127.0.0.1:55439:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./tests/integration/sql/identity.sql:/docker-entrypoint-initdb.d/identity.sql:ro

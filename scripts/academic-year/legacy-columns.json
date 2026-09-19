@@ -1,0 +1,132 @@
+{
+  "Admin": {
+    "pk": ["id"],
+    "columns": [
+      { "name": "id", "type": "text" },
+      { "name": "username", "type": "text" },
+      { "name": "passwordHash", "type": "text" },
+      { "name": "createdAt", "type": "timestamp" }
+    ]
+  },
+  "User": {
+    "pk": ["id"],
+    "columns": [
+      { "name": "id", "type": "text" },
+      { "name": "email", "type": "text" },
+      { "name": "name", "type": "text" },
+      { "name": "role", "type": "text" },
+      { "name": "grade", "type": "text" },
+      { "name": "classNum", "type": "text" },
+      { "name": "number", "type": "text" },
+      { "name": "subject", "type": "text" },
+      { "name": "homeroom", "type": "text" },
+      { "name": "position", "type": "text" },
+      { "name": "photoUrl", "type": "text" },
+      { "name": "createdAt", "type": "timestamp" },
+      { "name": "updatedAt", "type": "timestamp" },
+      { "name": "adminLevel", "type": "text" },
+      { "name": "gender", "type": "text" }
+    ]
+  },
+  "MealApplication": {
+    "pk": ["id"],
+    "columns": [
+      { "name": "id", "type": "text" },
+      { "name": "title", "type": "text" },
+      { "name": "description", "type": "text" },
+      { "name": "status", "type": "text" },
+      { "name": "createdAt", "type": "timestamp" },
+      { "name": "updatedAt", "type": "timestamp" },
+      { "name": "applyStartAt", "type": "timestamp" },
+      { "name": "applyEndAt", "type": "timestamp" },
+      { "name": "startYear", "type": "text" },
+      { "name": "startMonth", "type": "text" },
+      { "name": "monthCount", "type": "text" }
+    ]
+  },
+  "MealApplicationMeal": {
+    "pk": ["applicationId", "mealKind"],
+    "columns": [
+      { "name": "applicationId", "type": "text" },
+      { "name": "mealKind", "type": "text" },
+      { "name": "price", "type": "text" },
+      { "name": "exemptionSelectable", "type": "text" },
+      { "name": "method", "type": "text" }
+    ]
+  },
+  "MealApplicationMealDate": {
+    "pk": ["applicationId", "mealKind", "grade", "date"],
+    "columns": [
+      { "name": "applicationId", "type": "text" },
+      { "name": "mealKind", "type": "text" },
+      { "name": "grade", "type": "text" },
+      { "name": "date", "type": "date" }
+    ]
+  },
+  "MealRegistration": {
+    "pk": ["id"],
+    "columns": [
+      { "name": "id", "type": "text" },
+      { "name": "applicationId", "type": "text" },
+      { "name": "userId", "type": "text" },
+      { "name": "signature", "type": "text" },
+      { "name": "status", "type": "text" },
+      { "name": "createdAt", "type": "timestamp" },
+      { "name": "updatedAt", "type": "timestamp" },
+      { "name": "cancelledAt", "type": "timestamp" },
+      { "name": "cancelledBy", "type": "text" },
+      { "name": "addedBy", "type": "text" }
+    ]
+  },
+  "MealRegistrationMeal": {
+    "pk": ["registrationId", "mealKind"],
+    "columns": [
+      { "name": "registrationId", "type": "text" },
+      { "name": "mealKind", "type": "text" },
+      { "name": "applied", "type": "text" },
+      { "name": "exempt", "type": "text" },
+      { "name": "weekdaysByMonth", "type": "text" }
+    ]
+  },
+  "MealRegistrationMealDate": {
+    "pk": ["registrationId", "mealKind", "date"],
+    "columns": [
+      { "name": "registrationId", "type": "text" },
+      { "name": "mealKind", "type": "text" },
+      { "name": "date", "type": "date" }
+    ]
+  },
+  "CheckIn": {
+    "pk": ["id"],
+    "columns": [
+      { "name": "id", "type": "text" },
+      { "name": "userId", "type": "text" },
+      { "name": "date", "type": "date" },
+      { "name": "mealKind", "type": "text" },
+      { "name": "checkedAt", "type": "timestamp" },
+      { "name": "type", "type": "text" },
+      { "name": "source", "type": "text" }
+    ]
+  },
+  "SystemSetting": {
+    "pk": ["key"],
+    "columns": [
+      { "name": "key", "type": "text" },
+      { "name": "value", "type": "text" },
+      { "name": "updatedAt", "type": "timestamp" }
+    ]
+  },
+  "FaceProfile": {
+    "pk": ["id"],
+    "columns": [
+      { "name": "id", "type": "text" },
+      { "name": "userId", "type": "text" },
+      { "name": "embeddings", "type": "json" },
+      { "name": "modelVersion", "type": "text" },
+      { "name": "consentAt", "type": "timestamp" },
+      { "name": "consentVersion", "type": "text" },
+      { "name": "createdAt", "type": "timestamp" },
+      { "name": "updatedAt", "type": "timestamp" }
+    ]
+  }
+}

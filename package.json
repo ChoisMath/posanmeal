@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:academic": "vitest run --config vitest.integration.config.ts",
+    "academic:test-db": "tsx scripts/academic-year/test-db.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
@@ -51,6 +53,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vladmandic/human-models": "3.0.4",
+    "embedded-postgres": "^16.14.0-beta.17",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
