@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { todayKST } from "@/lib/timezone";
-import { issueKioskSnapshot, type SnapshotEvidence } from "@/lib/academic-year/kiosk-snapshot";
+import { kstDateKey, addDaysToDateKey } from "@/lib/academic-year/calendar";
+import { issueKioskDownload, SNAPSHOT_COVERAGE_DAYS } from "@/lib/academic-year/kiosk-snapshot";
 import { syncErrorResponse } from "@/lib/academic-year/sync-guard";
 import { rosterMode } from "@/lib/academic-year/registration-context";
 import { requireActor } from "@/lib/academic-year/request-actor";
@@ -14,61 +14,23 @@ export async function GET(request: Request) {
     const actor = await requireActor("WRITE_ADMIN");
     const mode = await rosterMode(prisma);
 
-    const today = new Date(todayKST());
-    const through = new Date(today);
-    through.setDate(through.getDate() + 13);
-
+    const now = new Date();
+    const todayStr = kstDateKey(now);
     const includeFaces = new URL(request.url).searchParams.get("faces") === "1";
-
-    const [settings, users, mealDateEntries, faceProfiles] = await Promise.all([
-      prisma.systemSetting.findMany(),
-      prisma.user.findMany({
-        where: { accessState: "ACTIVE" },
-        select: { id: true, name: true, role: true, grade: true, classNum: true, number: true },
-      }),
-      prisma.mealRegistrationMealDate.findMany({
-        where: {
-          date: { gte: today, lte: through },
-          registration: { status: "APPROVED" },
-        },
-        select: {
-          mealKind: true,
-          date: true,
-          registration: { select: { userId: true } },
-        },
-      }),
-      includeFaces
-        ? prisma.faceProfile.findMany({
-            where: { modelVersion: FACE_MODEL_VERSION, user: { accessState: "ACTIVE" } },
-            select: { userId: true, embeddings: true },
-          })
-        : Promise.resolve(null),
-    ]);
-
-    const settingsMap: Record<string, string> = {};
-    for (const s of settings) {
-      settingsMap[s.key] = s.value;
-    }
-
-    const eligibleEntries: Array<{ userId: number; date: string; mealKind: MealKind }> =
-      mealDateEntries.map((r) => ({
-        userId: r.registration.userId,
-        date: r.date.toISOString().slice(0, 10),
-        mealKind: r.mealKind,
-      }));
-
-    // Legacy field: today's DINNER entries, for older tablet clients that relied on eligibleUserIds
-    const todayStr = todayKST();
-    const eligibleUserIds = mealDateEntries
-      .filter((r) => r.mealKind === "DINNER" && r.date.toISOString().slice(0, 10) === todayStr)
-      .map((r) => r.registration.userId);
-
-    // PREPARING 동안에는 근거를 만들지 않는다. 초기 이전이 검증되기 전의 명부를
-    // "그때 이랬다"는 증거로 남기면 나중 판정이 그 빈 곳을 근거로 삼게 된다.
-    let snapshot: SnapshotEvidence | null = null;
-    if (mode === "READY") {
-      snapshot = await issueKioskSnapshot(prisma, actor, new Date());
-    }
+    const ready = mode === "READY" ? await issueKioskDownload(prisma, actor, now, { includeFaces }) : null;
+    const download = ready
+      ? {
+          ...ready,
+          eligibleEntries: ready.snapshot.eligible.map(({ userId, date, mealKind }) => ({
+            userId, date, mealKind: mealKind as MealKind,
+          })),
+        }
+      : await readLegacyDownload(todayStr, includeFaces);
+    const { users, settings, eligibleEntries, faceProfiles, snapshot } = download;
+    const settingsMap = Object.fromEntries(settings.map((setting) => [setting.key, setting.value]));
+    const eligibleUserIds = eligibleEntries
+      .filter((entry) => entry.mealKind === "DINNER" && entry.date === todayStr)
+      .map((entry) => entry.userId);
 
     const response = NextResponse.json({
       operationMode: settingsMap.operationMode || "online",
@@ -119,6 +81,36 @@ export async function GET(request: Request) {
 
     return response;
   });
+}
+
+async function readLegacyDownload(today: string, includeFaces: boolean) {
+  // 준비 중인 명부는 검증된 증거로 저장하지 않되 기존 태블릿 응답은 유지한다.
+  const through = addDaysToDateKey(today, SNAPSHOT_COVERAGE_DAYS);
+  const [settings, users, mealDateEntries, faceProfiles] = await Promise.all([
+    prisma.systemSetting.findMany(),
+    prisma.user.findMany({
+      where: { accessState: "ACTIVE" },
+      select: { id: true, name: true, role: true, grade: true, classNum: true, number: true },
+    }),
+    prisma.mealRegistrationMealDate.findMany({
+      where: { date: { gte: new Date(today), lte: new Date(through) }, registration: { status: "APPROVED" } },
+      select: { mealKind: true, date: true, registration: { select: { userId: true } } },
+    }),
+    includeFaces
+      ? prisma.faceProfile.findMany({
+          where: { modelVersion: FACE_MODEL_VERSION, user: { accessState: "ACTIVE" } },
+          select: { userId: true, embeddings: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  return {
+    settings, users, faceProfiles, snapshot: null,
+    eligibleEntries: mealDateEntries.map((entry) => ({
+      userId: entry.registration.userId,
+      date: entry.date.toISOString().slice(0, 10),
+      mealKind: entry.mealKind,
+    })),
+  };
 }
 
 function parseFloatOr(value: string | undefined, fallback: number): number {

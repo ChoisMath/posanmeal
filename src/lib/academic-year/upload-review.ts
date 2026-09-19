@@ -138,195 +138,140 @@ export async function processUploadedCheckIn(
   item: UploadedCheckIn,
   batch?: UploadBatch,
 ): Promise<UploadDecision> {
-  await assertActor(db, actor, "WRITE_ADMIN");
-
   const hash = payloadFingerprint(item);
-  const deviceKey = item.deviceId ? `${item.deviceId}:${item.clientId}` : `legacy:${hash}`;
+  const clientKey = item.deviceId ? `${item.deviceId}:${item.clientId}` : `legacy:${hash}`;
+  const run = () => db.$transaction(async (tx) => {
+    await assertActor(tx, actor, "WRITE_ADMIN");
+    const claim = await claimReview(tx, clientKey, hash, item, "판정 중");
 
-  const claimed = await db.localCheckInReview.findUnique({ where: { clientKey: deviceKey } });
-  if (claimed && claimed.payloadHash === hash) {
-    return storedDecision(claimed.id, claimed.state, claimed.decision, item.clientId);
-  }
-
-  // 같은 기기 번호에 다른 내용이 왔다. 기기가 번호를 다시 쓴 것인지 진짜 다른
-  // 사건인지 서버는 알 수 없으므로, 이 내용만의 키로 따로 보관해 관리자가
-  // 끝을 낼 수 있게 한다. 거절해 버리면 장치가 영원히 다시 보낸다.
-  if (claimed) {
-    const conflictKey = `${deviceKey}#${hash}`;
-    const parked = await db.localCheckInReview.findUnique({ where: { clientKey: conflictKey } });
-    if (parked) {
-      return storedDecision(parked.id, parked.state, parked.decision, item.clientId);
+    if (claim.review.payloadHash !== hash) {
+      const conflict = await claimReview(tx, `${clientKey}#${hash}`, hash, item, CLIENT_KEY_REUSED_REASON);
+      return storedDecision(conflict.review, item.clientId);
     }
-    const review = await recordReview(
-      db,
-      { clientKey: conflictKey, hash, item, snapshotId: null },
-      "PENDING",
-      CLIENT_KEY_REUSED_REASON,
+    if (!claim.created) return storedDecision(claim.review, item.clientId);
+
+    const reviewId = claim.review.id;
+    const normalized = normalizeItem(item);
+    if (!normalized) return finish(tx, reviewId, null, "REJECTED", "INVALID_PAYLOAD", item.clientId);
+
+    const context = batch ?? (await prepareUploadBatch(tx, [item]));
+    if (!context.knownUserIds.has(normalized.userId)) {
+      return finish(tx, reviewId, null, "REJECTED", "USER_NOT_FOUND", item.clientId);
+    }
+
+    const snapshot = normalized.snapshotId ? context.snapshots.get(normalized.snapshotId) ?? null : null;
+    const proof = proveCheckIn(
+      snapshot,
+      {
+        userId: normalized.userId,
+        date: normalized.date,
+        mealKind: normalized.mealKind,
+        checkedAt: normalized.checkedAt,
+        type: normalized.type,
+      },
+      { accessEvents: context.accessEvents, eligibilityEvents: context.eligibilityEvents },
     );
-    return {
-      status: "REVIEW",
-      clientId: item.clientId,
-      reviewId: review.id,
-      reason: CLIENT_KEY_REUSED_REASON,
-      final: false,
-    };
-  }
-
-  const clientKey = deviceKey;
-  const normalized = normalizeItem(item);
-  if (!normalized) {
-    await recordReview(db, { clientKey, hash, item, snapshotId: null }, "REJECTED", "INVALID_PAYLOAD");
-    return { status: "REJECTED", clientId: item.clientId, reason: "INVALID_PAYLOAD", final: true };
-  }
-
-  const context = batch ?? (await prepareUploadBatch(db, [item]));
-  if (!context.knownUserIds.has(normalized.userId)) {
-    await recordReview(db, { clientKey, hash, item, snapshotId: null }, "REJECTED", "USER_NOT_FOUND");
-    return { status: "REJECTED", clientId: item.clientId, reason: "USER_NOT_FOUND", final: true };
-  }
-
-  const snapshot = normalized.snapshotId ? context.snapshots.get(normalized.snapshotId) ?? null : null;
-  const proof = proveCheckIn(
-    snapshot,
-    {
-      userId: normalized.userId,
-      date: normalized.date,
-      mealKind: normalized.mealKind,
-      checkedAt: normalized.checkedAt,
-      type: normalized.type,
-    },
-    { accessEvents: context.accessEvents, eligibilityEvents: context.eligibilityEvents },
-  );
-
-  const evidence = { clientKey, hash, item, snapshotId: snapshot?.id ?? null };
-  if (!proof.proven) {
-    const review = await recordReview(db, evidence, "PENDING", proof.reason);
-    return { status: "REVIEW", clientId: item.clientId, reviewId: review.id, reason: proof.reason, final: false };
-  }
+    if (!proof.proven) {
+      return finish(tx, reviewId, snapshot?.id ?? null, "PENDING", proof.reason, item.clientId);
+    }
+    return commitProvenCheckIn(tx, reviewId, snapshot?.id ?? null, normalized, item.clientId);
+  }, USER_TX);
 
   try {
-    return await commitProvenCheckIn(db, evidence, normalized, item.clientId);
+    return await run();
   } catch (error) {
-    // 같은 자연키를 동시에 넣은 쪽이 있었다. 트랜잭션은 이미 중단됐으므로
-    // 그 안에서 다시 읽지 않고, 행이 보이는 상태에서 처음부터 한 번 더 판단한다.
+    // 자연키 insert 경쟁은 claim까지 rollback한다. 재시도도 clientKey/hash를 다시
+    // 확인해야 다른 원본이 먼저 차지한 슬롯에 체크인을 반영하지 않는다.
     if (!isUniqueViolation(error)) throw error;
-    return commitProvenCheckIn(db, evidence, normalized, item.clientId);
+    return run();
   }
 }
 
-/**
- * 반영과 그 증거를 한 트랜잭션에 넣는다. 명부 control 행은 잡지 않는다 — 늦은
- * 업로드가 전환 잠금을 기다리면 그동안 식당 줄의 온라인 체크인까지 멈춘다.
- */
+type StoredReview = {
+  id: string;
+  payloadHash: string;
+  state: string;
+  decision: Prisma.JsonValue;
+  reason: string;
+};
+
+async function claimReview(
+  tx: Tx,
+  clientKey: string,
+  hash: string,
+  item: UploadedCheckIn,
+  reason: string,
+): Promise<{ created: boolean; review: StoredReview }> {
+  // unique 선점과 행 잠금을 같은 transaction에서 처리한다. 최초 원본은 다시 쓰지
+  // 않고, 승인·거절도 이 행 잠금을 쓰므로 오래된 상태로 종결 결정을 덮지 않는다.
+  const inserted = await tx.localCheckInReview.createMany({
+    data: [{ clientKey, payloadHash: hash, payload: item as unknown as Prisma.InputJsonObject, reason, state: "PENDING" }],
+    skipDuplicates: true,
+  });
+  await tx.$queryRaw`SELECT "id" FROM "LocalCheckInReview" WHERE "clientKey" = ${clientKey} FOR UPDATE`;
+  const review = await tx.localCheckInReview.findUniqueOrThrow({
+    where: { clientKey },
+    select: { id: true, payloadHash: true, state: true, decision: true, reason: true },
+  });
+  return { created: inserted.count === 1, review };
+}
+
 async function commitProvenCheckIn(
-  db: PrismaClient,
-  evidence: ReviewEvidence,
+  tx: Tx,
+  reviewId: string,
+  snapshotId: string | null,
   item: NormalizedItem,
   clientId: number,
 ): Promise<UploadDecision> {
-  return db.$transaction(async (tx) => {
-    const existing = await tx.checkIn.findFirst({
-      where: { userId: item.userId, date: item.dateObj, mealKind: item.mealKind as MealKind },
-      select: { checkedAt: true, type: true },
-    });
+  const existing = await tx.checkIn.findFirst({
+    where: { userId: item.userId, date: item.dateObj, mealKind: item.mealKind as MealKind },
+    select: { checkedAt: true, type: true },
+  });
 
-    if (existing) {
-      return sameEvent(existing, item)
-        ? finish(tx, evidence, "DUPLICATE", "같은 기록이 이미 반영되어 있습니다.", clientId)
-        : finish(tx, evidence, "PENDING", "같은 날 다른 시각·유형의 기록이 있습니다.", clientId);
-    }
+  if (existing) {
+    return sameEvent(existing, item)
+      ? finish(tx, reviewId, snapshotId, "DUPLICATE", "같은 기록이 이미 반영되어 있습니다.", clientId)
+      : finish(tx, reviewId, snapshotId, "PENDING", "같은 날 다른 시각·유형의 기록이 있습니다.", clientId);
+  }
 
-    await tx.checkIn.create({
-      data: {
-        userId: item.userId,
-        date: item.dateObj,
-        mealKind: item.mealKind as MealKind,
-        checkedAt: item.checkedAt,
-        type: item.type,
-        source: "LOCAL_SYNC",
-      },
-    });
-
-    return finish(tx, evidence, "ACCEPTED", "근거로 확인됨", clientId);
-  }, USER_TX);
+  await tx.checkIn.create({
+    data: {
+      userId: item.userId,
+      date: item.dateObj,
+      mealKind: item.mealKind as MealKind,
+      checkedAt: item.checkedAt,
+      type: item.type,
+      source: "LOCAL_SYNC",
+    },
+  });
+  return finish(tx, reviewId, snapshotId, "ACCEPTED", "근거로 확인됨", clientId);
 }
 
 async function finish(
   tx: Tx,
-  evidence: ReviewEvidence,
-  state: "ACCEPTED" | "DUPLICATE" | "PENDING",
+  reviewId: string,
+  snapshotId: string | null,
+  state: "ACCEPTED" | "DUPLICATE" | "PENDING" | "REJECTED",
   reason: string,
   clientId: number,
 ): Promise<UploadDecision> {
-  const review = await recordReview(tx, evidence, state, reason);
-  if (state === "PENDING") {
-    return { status: "REVIEW", clientId, reviewId: review.id, reason, final: false };
-  }
-  return { status: state, clientId, reviewId: review.id, reason, final: true };
+  await tx.localCheckInReview.update({
+    where: { id: reviewId },
+    data: { snapshotId, reason, state, resolvedAt: state === "PENDING" ? null : new Date() },
+  });
+  return { status: state === "PENDING" ? "REVIEW" : state, clientId, reviewId, reason, final: state !== "PENDING" };
 }
 
-/** 같은 사건인지. 시각이나 유형이 다르면 자동으로 덮어쓰지 않고 검토로 보낸다. */
 function sameEvent(existing: { checkedAt: Date; type: string }, item: NormalizedItem): boolean {
-  return (
-    existing.checkedAt.getTime() === item.checkedAt.getTime() && existing.type === item.type
-  );
+  return existing.checkedAt.getTime() === item.checkedAt.getTime() && existing.type === item.type;
 }
 
-type ReviewEvidence = {
-  clientKey: string;
-  hash: string;
-  item: UploadedCheckIn;
-  snapshotId: string | null;
-};
-
-async function recordReview(
-  db: Db,
-  evidence: ReviewEvidence,
-  state: "ACCEPTED" | "DUPLICATE" | "PENDING" | "REJECTED",
-  reason: string,
-): Promise<{ id: string }> {
-  const settled = await db.localCheckInReview.findUnique({
-    where: { clientKey: evidence.clientKey },
-    select: { id: true, state: true },
-  });
-
-  // 같은 요청이 나란히 들어와 한쪽이 먼저 반영했다면, 진 쪽의 응답(중복)이 먼저
-  // 쓴 사실을 덮어쓰면 안 된다. 이미 결론이 난 행은 그대로 둔다.
-  if (settled) {
-    if (settled.state !== "PENDING") return settled;
-    await db.localCheckInReview.update({
-      where: { clientKey: evidence.clientKey },
-      data: { reason, state, resolvedAt: state === "PENDING" ? null : new Date() },
-    });
-    return settled;
-  }
-
-  return db.localCheckInReview.create({
-    data: {
-      clientKey: evidence.clientKey,
-      payloadHash: evidence.hash,
-      payload: evidence.item as unknown as Prisma.InputJsonObject,
-      snapshotId: evidence.snapshotId,
-      reason,
-      state,
-      resolvedAt: state === "PENDING" ? null : new Date(),
-    },
-    select: { id: true },
-  });
-}
-
-function storedDecision(
-  reviewId: string,
-  state: string,
-  decision: Prisma.JsonValue,
-  clientId: number,
-): UploadDecision {
-  const reason = readString(decision, "reason");
+function storedDecision(review: StoredReview, clientId: number): UploadDecision {
+  const { id: reviewId, state, decision } = review;
+  const reason = readString(decision, "reason") ?? review.reason;
   if (state === "PENDING") {
     return { status: "REVIEW", clientId, reviewId, reason, final: false };
   }
-  // 이미 반영한 기록이 다시 올라온 것은 중복이다. 관리자가 직접 승인한 건만
-  // ACCEPTED로 돌려줘, 장치가 "검토가 통과됐다"와 "이미 들어가 있다"를 구분한다.
   if (state === "ACCEPTED") {
     const decided = readString(decision, "decision") !== undefined;
     return { status: decided ? "ACCEPTED" : "DUPLICATE", clientId, reviewId, reason, final: true };

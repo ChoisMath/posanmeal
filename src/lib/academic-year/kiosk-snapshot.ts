@@ -1,11 +1,13 @@
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { dateKeyToUtcDate } from "@/lib/date-range";
+import { FACE_MODEL_VERSION } from "@/lib/face-constants";
 import { assertActor } from "./access";
 import { academicYearOfDate, addDaysToDateKey, kstDateKey, nextKstMidnight } from "./calendar";
 import type { Actor, MemberState } from "./contracts";
 import type { Db } from "./db";
 import { getReportProfilesByYear } from "./report-profile";
 import { activeYear } from "./roster-service";
+import { sqlStateOf } from "./mutation";
 
 /** 키오스크가 한 번 내려받은 명부로 찍을 수 있는 마지막 날. 오늘 + 13일이다. */
 export const SNAPSHOT_COVERAGE_DAYS = 13;
@@ -74,70 +76,98 @@ export async function issueKioskSnapshot(
   actor: Actor,
   now: Date,
 ): Promise<SnapshotEvidence> {
+  return (await issueKioskDownload(db, actor, now, { includeFaces: false })).snapshot;
+}
+
+export type KioskSnapshotDownload = {
+  snapshot: SnapshotEvidence;
+  users: Array<{
+    id: number; name: string; role: "STUDENT" | "TEACHER";
+    grade: number | null; classNum: number | null; number: number | null;
+  }>;
+  settings: Array<{ key: string; value: string }>;
+  faceProfiles: Array<{ userId: number; embeddings: Prisma.JsonValue }> | null;
+};
+
+export async function issueKioskDownload(
+  db: PrismaClient,
+  actor: Actor,
+  now: Date,
+  options: { includeFaces: boolean },
+): Promise<KioskSnapshotDownload> {
   const today = kstDateKey(now);
   const coversUntil = addDaysToDateKey(today, SNAPSHOT_COVERAGE_DAYS);
+  const collect = () => db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR SHARE`;
+    await assertActor(tx, actor, "WRITE_ADMIN");
 
-  return db.$transaction(
-    async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR SHARE`;
-      await assertActor(tx, actor, "WRITE_ADMIN");
+    // 실제 내려줄 명단·얼굴과 영속 증거가 다른 시점을 읽으면 방금 동기화한 기기도
+    // 취소된 자격으로 성공을 표시할 수 있다. 한 읽기 snapshot에서 모두 수집한다.
+    const [control, year, users, accessEvents, eligible, lastEvent, settings, faceProfiles] = await Promise.all([
+      tx.rosterControl.findUniqueOrThrow({ where: { id: 1 } }),
+      activeYear(tx),
+      tx.user.findMany({
+        where: { accessState: "ACTIVE", role: { in: ["STUDENT", "TEACHER"] } },
+        select: { id: true, name: true, role: true, grade: true, classNum: true, number: true },
+      }),
+      tx.userAccessEvent.groupBy({ by: ["userId"], _max: { id: true } }),
+      readConfirmedEligibility(tx, today, coversUntil),
+      tx.eligibilityEvent.findFirst({ orderBy: { id: "desc" }, select: { id: true } }),
+      tx.systemSetting.findMany({ select: { key: true, value: true } }),
+      options.includeFaces
+        ? tx.faceProfile.findMany({
+            where: { modelVersion: FACE_MODEL_VERSION, user: { accessState: "ACTIVE" } },
+            select: { userId: true, embeddings: true },
+          })
+        : Promise.resolve(null),
+    ]);
 
-      const [control, year, users, accessEvents, eligible, lastEvent] = await Promise.all([
-        tx.rosterControl.findUniqueOrThrow({ where: { id: 1 } }),
-        activeYear(tx),
-        tx.user.findMany({
-          where: { accessState: "ACTIVE", role: { in: ["STUDENT", "TEACHER"] } },
-          select: { id: true, role: true },
-        }),
-        tx.userAccessEvent.groupBy({ by: ["userId"], _max: { id: true } }),
-        readConfirmedEligibility(tx, today, coversUntil),
-        tx.eligibilityEvent.findFirst({ orderBy: { id: "desc" }, select: { id: true } }),
-      ]);
-
-      const lastAccessEventId = new Map(accessEvents.map((row) => [row.userId, row._max.id ?? 0]));
-      const snapshotUsers: SnapshotUser[] = users.map((user) => ({
-        userId: user.id,
-        role: user.role as "STUDENT" | "TEACHER",
-        accessState: "ACTIVE",
-        accessEventId: lastAccessEventId.get(user.id) ?? 0,
-      }));
-
-      const profiles = await readCoverageProfiles(
-        tx,
-        snapshotUsers.map((user) => user.userId),
-        today,
+    const lastAccessEventId = new Map(accessEvents.map((row) => [row.userId, row._max.id ?? 0]));
+    const snapshotUsers: SnapshotUser[] = users.map((user) => ({
+      userId: user.id,
+      role: user.role,
+      accessState: "ACTIVE",
+      accessEventId: lastAccessEventId.get(user.id) ?? 0,
+    }));
+    const profiles = await readCoverageProfiles(tx, snapshotUsers.map((user) => user.userId), today, coversUntil);
+    const payload: SnapshotPayload = {
+      version: control.version,
+      lastEligibilityEventId: lastEvent?.id ?? 0,
+      activeYear: year,
+      issuedAt: now.toISOString(),
+      freshUntil: nextKstMidnight(now).toISOString(),
+      coversUntil,
+      users: snapshotUsers,
+      eligible,
+      profiles,
+    };
+    const row = await tx.kioskSnapshot.create({
+      data: {
+        version: payload.version,
+        activeYear: payload.activeYear,
+        lastEligibilityEventId: payload.lastEligibilityEventId,
+        payload: payload as unknown as Prisma.InputJsonObject,
+        issuedAt: now,
+        freshUntil: new Date(payload.freshUntil),
         coversUntil,
-      );
+      },
+      select: { id: true },
+    });
+    return { snapshot: { id: row.id, ...payload }, users, settings, faceProfiles };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, maxWait: 10_000, timeout: 30_000 });
 
-      const payload: SnapshotPayload = {
-        version: control.version,
-        lastEligibilityEventId: lastEvent?.id ?? 0,
-        activeYear: year,
-        issuedAt: now.toISOString(),
-        freshUntil: nextKstMidnight(now).toISOString(),
-        coversUntil,
-        users: snapshotUsers,
-        eligible,
-        profiles,
-      };
-
-      const row = await tx.kioskSnapshot.create({
-        data: {
-          version: payload.version,
-          activeYear: payload.activeYear,
-          lastEligibilityEventId: payload.lastEligibilityEventId,
-          payload: payload as unknown as Prisma.InputJsonObject,
-          issuedAt: now,
-          freshUntil: new Date(payload.freshUntil),
-          coversUntil,
-        },
-        select: { id: true },
-      });
-
-      return { id: row.id, ...payload };
-    },
-    { maxWait: 10_000, timeout: 30_000 },
-  );
+  const maxAttempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await collect();
+    } catch (error) {
+      // 전환 중인 control 행 뒤에서 기다리면 첫 RR 읽기는 40001로 종료될 수 있다.
+      // rollback이 확인된 충돌만 처음부터 읽고, 연결 유실은 성공 여부를 추정하지 않는다.
+      const serializationFailure = error instanceof Prisma.PrismaClientKnownRequestError
+        && (error.code === "P2034" || sqlStateOf(error) === "40001");
+      if (!serializationFailure || attempt >= maxAttempts) throw error;
+    }
+  }
 }
 
 /** 저장된 근거를 다시 읽는다. 보존 기간이 지나 사라졌으면 null이다. */
