@@ -6,11 +6,13 @@ const mocks = vi.hoisted(() => ({
   faceProfileFindUnique: vi.fn(),
   faceProfileUpsert: vi.fn(),
   faceProfileDeleteMany: vi.fn(),
+  userFindUnique: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    user: { findUnique: mocks.userFindUnique },
     faceProfile: {
       findUnique: mocks.faceProfileFindUnique,
       upsert: mocks.faceProfileUpsert,
@@ -32,7 +34,15 @@ function postRequest(body: unknown) {
 describe("/api/users/me/face", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { dbUserId: 42 } });
+    mocks.auth.mockResolvedValue({
+      user: { dbUserId: 42, role: "STUDENT", adminLevel: "NONE", sessionVersion: 5 },
+    });
+    mocks.userFindUnique.mockResolvedValue({
+      role: "STUDENT",
+      adminLevel: "NONE",
+      accessState: "ACTIVE",
+      sessionVersion: 5,
+    });
   });
 
   it("비로그인 401", async () => {
@@ -40,6 +50,32 @@ describe("/api/users/me/face", () => {
     const { GET } = await import("@/app/api/users/me/face/route");
     const res = await GET();
     expect(res.status).toBe(401);
+  });
+
+  it("이용이 중지된 계정은 403", async () => {
+    mocks.userFindUnique.mockResolvedValue({
+      role: "STUDENT",
+      adminLevel: "NONE",
+      accessState: "INACTIVE",
+      sessionVersion: 5,
+    });
+    const { GET } = await import("@/app/api/users/me/face/route");
+    const res = await GET();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: { code: "ACCOUNT_INACTIVE" } });
+  });
+
+  it("세션 세대가 어긋나면 401", async () => {
+    mocks.userFindUnique.mockResolvedValue({
+      role: "STUDENT",
+      adminLevel: "NONE",
+      accessState: "ACTIVE",
+      sessionVersion: 6,
+    });
+    const { DELETE } = await import("@/app/api/users/me/face/route");
+    const res = await DELETE();
+    expect(res.status).toBe(401);
+    expect(mocks.faceProfileDeleteMany).not.toHaveBeenCalled();
   });
 
   it("GET: 등록 없으면 registered=false", async () => {

@@ -129,7 +129,8 @@ function putRequest(body: unknown) {
 describe("PUT /api/system/settings — faceMatchThreshold/Margin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { role: "ADMIN" } });
+    // 별도 관리자 로그인 세션(메인 관리자): dbUserId 0에는 DB 행이 없다.
+    mocks.auth.mockResolvedValue({ user: { role: "ADMIN", dbUserId: 0, adminLevel: "ADMIN" } });
     mocks.systemSettingFindMany.mockResolvedValue([]);
   });
 

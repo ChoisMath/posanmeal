@@ -1,8 +1,8 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/academic-year/api";
+import { requireActor } from "@/lib/academic-year/request-actor";
 import { prisma } from "@/lib/prisma";
 import { getCachedSettings, invalidateSettingsCache } from "@/lib/settings-cache";
-import { canWriteAdmin } from "@/lib/permissions";
 
 export async function GET() {
   const settings = await getCachedSettings();
@@ -22,9 +22,10 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const session = await auth();
-  if (!canWriteAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  try {
+    await requireActor("WRITE_ADMIN");
+  } catch (error) {
+    return errorResponse(error);
   }
 
   const body = await request.json();

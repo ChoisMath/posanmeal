@@ -11,11 +11,17 @@ declare module "next-auth" {
       role: string;
       dbUserId: number;
       adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
+      /** 로그인 시점의 세션 세대. 이 값이 없는 세션은 무효화 이력을 담지 못한다. */
+      sessionVersion?: number;
     };
   }
 
   interface User {
     role?: string;
+    dbUserId?: number;
+    dbRole?: string;
+    dbAdminLevel?: "NONE" | "SUBADMIN" | "ADMIN";
+    dbSessionVersion?: number;
   }
 }
 
@@ -24,5 +30,6 @@ declare module "next-auth/jwt" {
     role?: string;
     dbUserId?: number;
     adminLevel?: "NONE" | "SUBADMIN" | "ADMIN";
+    sessionVersion?: number;
   }
 }

@@ -1,19 +1,15 @@
 import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { canReadAdmin } from "@/lib/permissions";
+import { isPublicPath } from "@/lib/public-paths";
 
+// 여기의 판정은 화면 이동을 위한 선제 검사일 뿐이다. 실제 허용은 각 Route
+// Handler의 requireActor(최신 DB 재검증)가 정한다.
 export default auth((req) => {
   const { pathname } = req.nextUrl;
   const session = req.auth;
 
-  const publicExact = new Set(["/", "/check", "/facecheck", "/admin/login"]);
-  const publicPrefixes = [
-    "/api/auth", "/api/checkin", "/api/facecheck", "/api/uploads",
-    "/api/system/settings", "/api/sync", "/api/meals",
-    "/_next", "/uploads",
-  ];
-
-  if (publicExact.has(pathname) || publicPrefixes.some((p) => pathname.startsWith(p))) {
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 

@@ -1,5 +1,6 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/academic-year/api";
+import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 import { prisma } from "@/lib/prisma";
 import { faceEnrollSchema } from "@/lib/schemas/face";
 import { FACE_MODEL_VERSION } from "@/lib/face-constants";
@@ -7,13 +8,15 @@ import { FACE_CONSENT_VERSION } from "@/lib/face-consent";
 import { invalidateFaceCache } from "@/lib/face-embedding-cache";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: number;
+  try {
+    userId = selfUserId(await requireActor("SIGNED_IN"));
+  } catch (error) {
+    return errorResponse(error);
   }
 
   const profile = await prisma.faceProfile.findUnique({
-    where: { userId: session.user.dbUserId },
+    where: { userId },
     select: { consentAt: true, modelVersion: true, updatedAt: true },
   });
 
@@ -27,9 +30,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: number;
+  try {
+    userId = selfUserId(await requireActor("SIGNED_IN"));
+  } catch (error) {
+    return errorResponse(error);
   }
 
   const parsed = faceEnrollSchema.safeParse(await request.json().catch(() => null));
@@ -43,9 +48,9 @@ export async function POST(request: Request) {
   }
   const now = new Date();
   await prisma.faceProfile.upsert({
-    where: { userId: session.user.dbUserId },
+    where: { userId },
     create: {
-      userId: session.user.dbUserId,
+      userId,
       embeddings,
       modelVersion: FACE_MODEL_VERSION,
       consentAt: now,
@@ -64,12 +69,14 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: number;
+  try {
+    userId = selfUserId(await requireActor("SIGNED_IN"));
+  } catch (error) {
+    return errorResponse(error);
   }
 
-  await prisma.faceProfile.deleteMany({ where: { userId: session.user.dbUserId } });
+  await prisma.faceProfile.deleteMany({ where: { userId } });
   invalidateFaceCache();
   return NextResponse.json({ ok: true });
 }

@@ -49,21 +49,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (account?.provider === "google") {
         const dbUser = await prisma.user.findUnique({
           where: { email: user.email! },
-          select: { id: true, role: true, adminLevel: true },
+          select: { id: true, role: true, adminLevel: true, sessionVersion: true, accessState: true },
         });
-        if (!dbUser) return false;
-        (user as any).dbUserId = dbUser.id;
-        (user as any).dbRole = dbUser.role;
-        (user as any).dbAdminLevel = dbUser.adminLevel;
+        if (!dbUser || dbUser.accessState !== "ACTIVE") return false;
+        user.dbUserId = dbUser.id;
+        user.dbRole = dbUser.role;
+        user.dbAdminLevel = dbUser.adminLevel;
+        user.dbSessionVersion = dbUser.sessionVersion;
         return true;
       }
       return true;
     },
     async jwt({ token, user, account }) {
+      // 세션 세대는 로그인 시점에만 담는다. 재검증 때 최신 값으로 덮어쓰면
+      // 이미 끊어 둔 토큰이 되살아난다.
       if (account?.provider === "google" && user) {
-        token.dbUserId = (user as any).dbUserId;
-        token.role = (user as any).dbRole;
-        token.adminLevel = (user as any).dbAdminLevel ?? "NONE";
+        token.dbUserId = user.dbUserId;
+        token.role = user.dbRole;
+        token.adminLevel = user.dbAdminLevel ?? "NONE";
+        token.sessionVersion = user.dbSessionVersion;
       }
       if (account?.provider === "admin-login") {
         token.role = "ADMIN";
@@ -77,6 +81,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       session.user.dbUserId = token.dbUserId as number;
       session.user.adminLevel =
         (token.adminLevel as "NONE" | "SUBADMIN" | "ADMIN") ?? "NONE";
+      session.user.sessionVersion = token.sessionVersion;
       return session;
     },
   },

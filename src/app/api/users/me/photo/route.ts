@@ -1,5 +1,6 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { errorResponse } from "@/lib/academic-year/api";
+import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 import { prisma } from "@/lib/prisma";
 import sharp from "sharp";
 import { writeFile, unlink, mkdir } from "fs/promises";
@@ -9,9 +10,11 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(process.cwd(), "public", 
 const MAX_SIZE = (parseInt(process.env.MAX_FILE_SIZE_MB || "5")) * 1024 * 1024;
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: number;
+  try {
+    userId = selfUserId(await requireActor("SIGNED_IN"));
+  } catch (error) {
+    return errorResponse(error);
   }
 
   const formData = await request.formData();
@@ -35,13 +38,13 @@ export async function POST(request: Request) {
     .toBuffer();
 
   await mkdir(UPLOAD_DIR, { recursive: true });
-  const filename = `${session.user.dbUserId}.webp`;
+  const filename = `${userId}.webp`;
   const filepath = path.join(UPLOAD_DIR, filename);
   await writeFile(filepath, resized);
 
   const photoUrl = `/api/uploads/${filename}?t=${Date.now()}`;
   await prisma.user.update({
-    where: { id: session.user.dbUserId },
+    where: { id: userId },
     data: { photoUrl },
   });
 
@@ -49,18 +52,20 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: number;
+  try {
+    userId = selfUserId(await requireActor("SIGNED_IN"));
+  } catch (error) {
+    return errorResponse(error);
   }
 
-  const filename = `${session.user.dbUserId}.webp`;
+  const filename = `${userId}.webp`;
   const filepath = path.join(UPLOAD_DIR, filename);
 
   await Promise.all([
     unlink(filepath).catch(() => {}),
     prisma.user.update({
-      where: { id: session.user.dbUserId },
+      where: { id: userId },
       data: { photoUrl: null },
     }),
   ]);

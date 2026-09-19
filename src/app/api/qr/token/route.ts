@@ -1,5 +1,8 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { errorResponse } from "@/lib/academic-year/api";
+import { DomainError } from "@/lib/academic-year/errors";
+import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 import { signQRToken, getQRExpirySeconds } from "@/lib/qr-token";
 import { getCachedSettings } from "@/lib/settings-cache";
 import { isStudentEligibleToday, resolveMealKind } from "@/lib/meal-kind";
@@ -7,16 +10,20 @@ import { MEAL_LABEL } from "@/lib/meal-plan";
 import { nowKST, todayKST } from "@/lib/timezone";
 
 export async function GET(request: Request) {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: number;
+  let role: "STUDENT" | "TEACHER";
+  try {
+    userId = selfUserId(await requireActor("SIGNED_IN"));
+    // 역할은 토큰이 아니라 현재 DB 행에서 읽는다.
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (!user) throw new DomainError("MISSING_PROFILE", "사용자를 찾을 수 없습니다.");
+    role = user.role;
+  } catch (error) {
+    return errorResponse(error);
   }
 
   const { searchParams } = new URL(request.url);
   const type = searchParams.get("type") || "STUDENT";
-
-  const userId = session.user.dbUserId;
-  const role = session.user.role as "STUDENT" | "TEACHER";
   const settings = await getCachedSettings();
   const mealKind = resolveMealKind(nowKST(), settings.mealWindows);
 

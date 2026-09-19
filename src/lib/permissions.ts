@@ -1,5 +1,8 @@
 import type { Session } from "next-auth";
 
+// 토큰에 담긴 값만 보는 UI 표시·화면 이동용 판정이다. 서버 쓰기 허용의 근거로
+// 쓰지 말 것 — 그 자리는 academic-year/access.ts의 assertActor가 맡는다.
+
 export type EffectiveLevel = "NONE" | "SUBADMIN" | "ADMIN";
 
 export function getEffectiveAdminLevel(

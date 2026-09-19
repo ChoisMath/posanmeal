@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@/generated/prisma/client";
+import { assertActor } from "./access";
 import { ACADEMIC_BACKFILL_KEY } from "./backfill";
 import type { Actor } from "./contracts";
 import type { Db, Tx } from "./db";
@@ -41,12 +42,7 @@ export async function enableAcademicMode(db: PrismaClient, actor: Actor): Promis
       kind: "ENABLE_ACADEMIC_MODE",
       payloadHash: ACADEMIC_BACKFILL_KEY,
     },
-    async () => {
-      // Task 4에서 assertActor(tx, actor, "MAIN")로 교체할 자리.
-      if (actor.kind !== "MAIN") {
-        throw new DomainError("FORBIDDEN", "메인 관리자만 학년도 기능을 활성화할 수 있습니다.");
-      }
-    },
+    (tx: Tx) => assertActor(tx, actor, "MAIN"),
     async (tx: Tx) => {
       const backfill = await tx.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } });
       if (!backfill || backfill.state !== "VERIFIED" || readIssues(backfill.sourceManifest).length > 0) {
