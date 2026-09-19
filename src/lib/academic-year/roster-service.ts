@@ -76,8 +76,8 @@ export interface WriteRosterOptions {
    */
   applyIncluded?: boolean;
   /**
-   * 계정의 이메일을 명부 값으로 덮지 않는가. 학년도 전환만 true로 부른다 — 이메일
-   * 교체는 `changeEmail`의 일이고, 초안 스냅샷이 그 뒤의 교체를 되돌리면 안 된다.
+   * 계정의 이메일을 명부 값으로 덮지 않는가. 화면 편집·학년도 전환의 스냅샷이
+   * 전용 이메일 변경 후의 로그인 주소를 되돌리지 않도록 보호한다.
    */
   keepAccountEmail?: boolean;
 }
@@ -440,6 +440,14 @@ export async function upsertRosterProfile(
       throw new DomainError("VERSION_CONFLICT", "학년도 상태가 바뀌었습니다. 새로고침 후 다시 시도하세요.");
     }
 
+    if (input.userId !== undefined) {
+      const account = await tx.user.findUnique({ where: { id: input.userId }, select: { email: true } });
+      if (!account) throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
+      if (normalizeEmail(email) !== normalizeEmail(account.email)) {
+        throw new DomainError("IDENTITY_CONFLICT", "계정 이메일이 다릅니다. 최신 명부를 확인하고 이메일 변경 메뉴를 이용하세요.");
+      }
+    }
+
     const row: RosterRow = {
       entryId: input.entryId ?? randomUUID(),
       userId: input.userId ?? null,
@@ -450,7 +458,7 @@ export async function upsertRosterProfile(
       included: true,
     };
 
-    return writeRosterProfiles(tx, input.year, [row]);
+    return writeRosterProfiles(tx, input.year, [row], { keepAccountEmail: true });
   };
 
   if (target === null) {
@@ -738,6 +746,14 @@ async function writeConfirmedRows(
   const recordChanged = await runWithIdentityGuard(() =>
     tx.$queryRawUnsafe<{ userId: number }[]>(UPSERT_RECORDS_SQL, ...args),
   );
+
+  if (isActive) {
+    // 동일값 UPDATE는 행을 잠그지 않아 뒤의 명부 키 저장이 진행 중인 이메일 변경을 놓칠 수 있다.
+    await tx.$queryRaw`
+      SELECT "id" FROM "User" WHERE "id" = ANY(${columns.userIds}::int[])
+      ORDER BY "id" FOR UPDATE
+    `;
+  }
 
   const userChanged = isActive
     ? await runWithIdentityGuard(() =>

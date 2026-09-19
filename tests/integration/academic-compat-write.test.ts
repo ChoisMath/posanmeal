@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Client } from "pg";
 import { mirrorUsersToActiveYear, withCompatUserWrite } from "@/lib/academic-year/compat-write";
@@ -30,14 +30,6 @@ vi.mock("@/auth", () => ({ auth: mocks.auth }));
 const MAIN_SESSION = { user: { dbUserId: 0, role: "ADMIN", adminLevel: "ADMIN" } };
 const YEAR = 2026;
 
-function jsonRequest(path: string, method: string, body: unknown): Request {
-  return new Request(`http://localhost${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
 describe("compat writes mirror legacy user writes into the active year", () => {
   let db: PrismaClient;
   let pgClient: Client;
@@ -59,10 +51,6 @@ describe("compat writes mirror legacy user writes into the active year", () => {
     await resetAcademicTestDb(db);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   async function record(userId: number) {
     return db.userAcademicRecord.findUniqueOrThrow({ where: { year_userId: { year: YEAR, userId } } });
   }
@@ -75,8 +63,7 @@ describe("compat writes mirror legacy user writes into the active year", () => {
     return (await db.academicYear.findUniqueOrThrow({ where: { year: YEAR } })).version;
   }
 
-  // Release B에서 `/api/admin/users`는 새 명부 서비스로 옮겨 갔다. 미러는 이제
-  // Excel import만 쓰므로, 미러의 동작은 그 통로를 직접 불러 확인한다.
+  // Release B에서 기존 관리 경로가 교체되어도 호환 쓰기의 원자성은 유지해야 한다.
   async function createUser(body: Record<string, unknown>): Promise<number> {
     return withCompatUserWrite(db, async (tx) => {
       const created = await tx.user.create({
@@ -171,6 +158,39 @@ describe("compat writes mirror legacy user writes into the active year", () => {
 
     beforeEach(async () => {
       fx = await prepareAcademicFixture(db, pgClient);
+    });
+
+    it("rolls back users, mirrored records, entries and versions when a later row fails", async () => {
+      const before = {
+        users: await db.user.findMany({ orderBy: { id: "asc" } }),
+        records: await db.userAcademicRecord.findMany({ orderBy: { userId: "asc" } }),
+        entries: await db.rosterEntry.findMany({ orderBy: { id: "asc" } }),
+        year: await db.academicYear.findUniqueOrThrow({ where: { year: YEAR } }),
+      };
+
+      await expect(withCompatUserWrite(db, async (tx) => {
+        await tx.user.update({ where: { id: fx.studentId }, data: { name: "원자성변경", classNum: 4 } });
+        const created = await tx.user.create({
+          data: {
+            email: "rollback-new@example.posan.kr", name: "원자성신규", role: "STUDENT",
+            grade: 2, classNum: 2, number: 2, gender: "FEMALE",
+          },
+        });
+        await mirrorUsersToActiveYear(tx, [fx.studentId, created.id]);
+
+        expect(await tx.userAcademicRecord.findUniqueOrThrow({
+          where: { year_userId: { year: YEAR, userId: fx.studentId } },
+        })).toMatchObject({ name: "원자성변경", classNum: 4 });
+        expect(await tx.rosterEntry.count({ where: { year: YEAR, userId: created.id } })).toBe(1);
+
+        await tx.user.create({ data: { email: created.email, name: "중복실패", role: "TEACHER" } });
+        return { value: null, userIds: [fx.studentId, created.id] };
+      })).rejects.toMatchObject({ code: "P2002" });
+
+      expect(await db.user.findMany({ orderBy: { id: "asc" } })).toEqual(before.users);
+      expect(await db.userAcademicRecord.findMany({ orderBy: { userId: "asc" } })).toEqual(before.records);
+      expect(await db.rosterEntry.findMany({ orderBy: { id: "asc" } })).toEqual(before.entries);
+      expect(await db.academicYear.findUniqueOrThrow({ where: { year: YEAR } })).toEqual(before.year);
     });
 
     it("updates the existing record instead of skipping it and bumps both versions", async () => {

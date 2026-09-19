@@ -292,10 +292,18 @@ export async function resolveImportConflicts(
     canCommit: canCommitWith(rows, loaded.preview.fileIssues ?? []),
   };
 
-  await db.rosterImport.update({
-    where: { id: importId },
+  const updated = await db.rosterImport.updateMany({
+    where: {
+      id: importId,
+      year,
+      state: PREVIEW,
+      preview: { equals: loaded.preview as unknown as Prisma.InputJsonObject },
+    },
     data: { preview: preview as unknown as Prisma.InputJsonObject },
   });
+  if (updated.count !== 1) {
+    throw new DomainError("VERSION_CONFLICT", "미리보기가 변경되었거나 종료되었습니다. 파일을 다시 올려주세요.");
+  }
 
   return preview;
 }
@@ -319,10 +327,13 @@ export async function cancelRosterImport(
     throw new DomainError("VERSION_CONFLICT", "이미 반영된 가져오기는 취소할 수 없습니다.");
   }
 
-  await db.rosterImport.update({
-    where: { id: importId },
+  const cancelled = await db.rosterImport.updateMany({
+    where: { id: importId, year, state: { not: COMMITTED } },
     data: { state: CANCELLED, payload: Prisma.DbNull, preview: Prisma.DbNull },
   });
+  if (cancelled.count !== 1) {
+    throw new DomainError("VERSION_CONFLICT", "이미 반영되었거나 삭제된 가져오기는 취소할 수 없습니다.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -487,8 +498,14 @@ export async function commitRosterImport(
         ? await excludeDraftEntries(tx, year, payload.omittedEntryIds)
         : { changed: 0, ids: [] };
 
-      await tx.rosterImport.update({
-        where: { id: row.id },
+      // 읽은 뒤 취소되거나 충돌 선택이 바뀌면 명부 쓰기도 함께 되돌린다.
+      const committed = await tx.rosterImport.updateMany({
+        where: {
+          id: row.id,
+          year,
+          state: PREVIEW,
+          preview: { equals: row.preview as Prisma.InputJsonObject },
+        },
         data: {
           state: COMMITTED,
           payload: Prisma.DbNull,
@@ -501,6 +518,10 @@ export async function commitRosterImport(
           },
         },
       });
+
+      if (committed.count !== 1) {
+        throw new DomainError("VERSION_CONFLICT", "미리보기가 변경되었거나 취소되었습니다. 파일을 다시 올려주세요.");
+      }
 
       return {
         changed: summary.changed + excluded.changed,

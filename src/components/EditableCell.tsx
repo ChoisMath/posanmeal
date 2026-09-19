@@ -109,7 +109,7 @@ export function EditableTextCell({
           disabled={saving}
           placeholder={placeholder}
           aria-label={ariaLabel}
-          className="w-full px-1 py-0.5 rounded ring-1 ring-primary bg-background outline-none whitespace-nowrap text-sm disabled:opacity-60"
+          className="w-full px-1 py-0.5 rounded ring-1 ring-primary bg-background outline-none min-h-11 min-w-11 whitespace-nowrap text-base md:text-sm disabled:opacity-60"
         />
       </div>
     );
@@ -131,7 +131,7 @@ export function EditableTextCell({
       aria-disabled={disabled}
     >
       <span
-        className={`block px-1 py-1.5 rounded min-h-11 whitespace-nowrap text-sm ${
+        className={`block px-1 py-1.5 rounded min-h-11 min-w-11 whitespace-nowrap text-sm ${
           disabled ? "text-muted-foreground" : "cursor-pointer hover:bg-muted/40"
         } ${value === "" && placeholder ? "text-muted-foreground italic" : ""}`}
       >
@@ -223,7 +223,7 @@ export function EditableSelectCell({
           }}
           disabled={saving}
           aria-label={ariaLabel}
-          className="w-full px-1 py-0.5 rounded ring-1 ring-primary bg-background outline-none whitespace-nowrap text-sm disabled:opacity-60"
+          className="w-full px-1 py-0.5 rounded ring-1 ring-primary bg-background outline-none min-h-11 min-w-11 whitespace-nowrap text-base md:text-sm disabled:opacity-60"
         >
           {(emptyLabel != null || value === "") && (
             <option value="">{emptyLabel ?? "—"}</option>
@@ -254,7 +254,7 @@ export function EditableSelectCell({
       aria-disabled={disabled}
     >
       <span
-        className={`block px-1 py-1.5 rounded min-h-11 whitespace-nowrap text-sm ${
+        className={`block px-1 py-1.5 rounded min-h-11 min-w-11 whitespace-nowrap text-sm ${
           disabled ? "text-muted-foreground" : "cursor-pointer hover:bg-muted/40"
         } ${value === "" ? "text-muted-foreground" : ""}`}
       >

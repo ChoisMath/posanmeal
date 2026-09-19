@@ -12,7 +12,7 @@ export type AcademicYearRow = {
 };
 
 export type RosterViewRow = {
-  entryId: string;
+  entryId: string | null;
   userId: number | null;
   email: string;
   emailKey: string;
@@ -46,6 +46,13 @@ export type LegacyAdminUser = {
   adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
   accessState: string;
   profileVersion: number;
+  grade?: number | null;
+  classNum?: number | null;
+  number?: number | null;
+  gender?: "MALE" | "FEMALE" | null;
+  subject?: string | null;
+  homeroom?: string | null;
+  position?: string | null;
 };
 
 type FetchError = Error & { status?: number; info?: unknown };
@@ -118,5 +125,5 @@ export function useAccountRows(role: "STUDENT" | "TEACHER") {
   const byId = new Map<number, LegacyAdminUser>();
   for (const user of data?.users ?? []) byId.set(user.id, user);
 
-  return { accounts: byId, error, isLoading, mutate };
+  return { users: data?.users ?? [], accounts: byId, error, isLoading, mutate };
 }

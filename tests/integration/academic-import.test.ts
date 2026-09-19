@@ -168,6 +168,156 @@ describe("명부 파일 미리보기·확정", () => {
   // 미리보기 이후의 변경 / 미리보기 이전의 변경
   // -------------------------------------------------------------------------
 
+  function pauseImportRead(importId: string) {
+    let loaded!: () => void;
+    let release!: () => void;
+    const read = new Promise<void>((resolve) => { loaded = resolve; });
+    const resumed = new Promise<void>((resolve) => { release = resolve; });
+    let paused = false;
+    const client = db.$extends({
+      query: {
+        rosterImport: {
+          async findUnique({ args, query }) {
+            const result = await query(args);
+            if (args.where.id === importId && !paused) {
+              paused = true;
+              loaded();
+              await resumed;
+            }
+            return result;
+          },
+        },
+      },
+    }) as unknown as PrismaClient;
+    return { client, read, release };
+  }
+
+  it.each(["CANCELLED", "COMMITTED"] as const)(
+    "이미 %s인 사본에 늦은 충돌 선택이 개인정보를 다시 저장하지 않는다",
+    async (state) => {
+      const preview = await previewRosterImport(db, fx.main, YEAR, "PARTIAL", await renamedStudentFile());
+      const paused = pauseImportRead(preview.id);
+      const resolving = resolveImportConflicts(paused.client, fx.main, YEAR, preview.id, [])
+        .then(() => null, (error: unknown) => error);
+      await paused.read;
+      try {
+        if (state === "CANCELLED") await cancelRosterImport(db, fx.main, YEAR, preview.id);
+        else await commitRosterImport(db, commitInput(preview, "commit-before-late-patch"));
+      } finally {
+        paused.release();
+      }
+      const error = await resolving;
+      const stored = await db.rosterImport.findUniqueOrThrow({ where: { id: preview.id } });
+      expect(stored.state).toBe(state);
+      expect(stored.payload).toBeNull();
+      expect(stored.preview).toBeNull();
+      expect(error).toMatchObject({ code: "VERSION_CONFLICT" });
+    },
+  );
+
+  it("늦은 취소 요청은 이미 확정된 가져오기의 상태를 바꾸지 않는다", async () => {
+    const preview = await previewRosterImport(db, fx.main, YEAR, "PARTIAL", await renamedStudentFile());
+    const paused = pauseImportRead(preview.id);
+    const cancelling = cancelRosterImport(paused.client, fx.main, YEAR, preview.id)
+      .then(() => null, (error: unknown) => error);
+    await paused.read;
+    try {
+      await commitRosterImport(db, commitInput(preview, "commit-before-late-cancel"));
+    } finally {
+      paused.release();
+    }
+    const error = await cancelling;
+    const stored = await db.rosterImport.findUniqueOrThrow({ where: { id: preview.id } });
+    expect(stored.state).toBe("COMMITTED");
+    expect(stored.preview).toBeNull();
+    expect(stored.payload).toBeNull();
+    expect(stored.summary).toMatchObject({ year: YEAR, changed: 1 });
+    expect(error).toMatchObject({ code: "VERSION_CONFLICT" });
+  });
+
+  it("확정이 읽은 뒤 취소되면 명부 쓰기와 요청 결과를 모두 되돌린다", async () => {
+    const preview = await previewRosterImport(db, fx.main, YEAR, "PARTIAL", await renamedStudentFile());
+    const paused = pauseImportRead(preview.id);
+    const before = await captureLegacyFingerprint(pgClient);
+    const versionBefore = await controlVersion();
+    const committing = commitRosterImport(paused.client, commitInput(preview, "cancel-during-commit"))
+      .then(() => null, (error: unknown) => error);
+    await paused.read;
+    try {
+      await cancelRosterImport(db, fx.main, YEAR, preview.id);
+    } finally {
+      paused.release();
+    }
+    const error = await committing;
+    expect(await captureLegacyFingerprint(pgClient)).toEqual(before);
+    expect(await controlVersion()).toBe(versionBefore);
+    expect(await db.rosterMutation.findUnique({ where: { requestId: "cancel-during-commit" } })).toBeNull();
+    const stored = await db.rosterImport.findUniqueOrThrow({ where: { id: preview.id } });
+    expect(stored.state).toBe("CANCELLED");
+    expect(stored.payload).toBeNull();
+    expect(stored.preview).toBeNull();
+    expect(error).toMatchObject({ code: "VERSION_CONFLICT" });
+  });
+
+  async function conflictingTeacherPreview() {
+    const exported = await exportRoster(db, fx.main, YEAR, true, false);
+    const book = await loadBook(exported);
+    book.getWorksheet("교사")!.getCell(`${TEACHER_SUBJECT_CELL}2`).value = "파일과목";
+    await db.userAcademicRecord.update({
+      where: { year_userId: { year: YEAR, userId: fx.teacherId } },
+      data: { subject: "서버과목", version: { increment: 1 } },
+    });
+    const preview = await previewRosterImport(db, fx.main, YEAR, "PARTIAL", await toBytes(book));
+    const conflictRow = preview.rows.find((row) => row.kind === "CONFLICT")!;
+    return { preview, token: conflictRow.token };
+  }
+
+  it("같은 미리보기의 동시 PATCH는 먼저 저장된 충돌 선택을 덮지 않는다", async () => {
+    const { preview, token } = await conflictingTeacherPreview();
+    const paused = pauseImportRead(preview.id);
+    const stale = resolveImportConflicts(paused.client, fx.main, YEAR, preview.id, [
+      { token, resolution: "USE_FILE" },
+    ]).then(() => null, (error: unknown) => error);
+    await paused.read;
+    try {
+      await resolveImportConflicts(db, fx.main, YEAR, preview.id, [{ token, resolution: "KEEP_SERVER" }]);
+    } finally {
+      paused.release();
+    }
+    expect(await stale).toMatchObject({ code: "VERSION_CONFLICT" });
+    const stored = await db.rosterImport.findUniqueOrThrow({ where: { id: preview.id } });
+    expect((stored.preview as unknown as ImportPreview).rows.find((row) => row.token === token)?.resolution)
+      .toBe("KEEP_SERVER");
+  });
+
+  it("확정 중 충돌 선택이 바뀌면 예전 선택으로 쓰지 않고 전체 rollback한다", async () => {
+    const { preview, token } = await conflictingTeacherPreview();
+    const resolved = await resolveImportConflicts(db, fx.main, YEAR, preview.id, [{ token, resolution: "USE_FILE" }]);
+    const paused = pauseImportRead(preview.id);
+    const before = await captureLegacyFingerprint(pgClient);
+    const versionBefore = await controlVersion();
+    const committing = commitRosterImport(paused.client, commitInput(resolved, "patch-during-commit"))
+      .then(() => null, (error: unknown) => error);
+    await paused.read;
+    try {
+      await resolveImportConflicts(db, fx.main, YEAR, preview.id, [{ token, resolution: "KEEP_SERVER" }]);
+    } finally {
+      paused.release();
+    }
+    expect(await committing).toMatchObject({ code: "VERSION_CONFLICT" });
+    expect(await captureLegacyFingerprint(pgClient)).toEqual(before);
+    expect(await controlVersion()).toBe(versionBefore);
+    expect(await db.rosterMutation.findUnique({ where: { requestId: "patch-during-commit" } })).toBeNull();
+    const teacher = await db.userAcademicRecord.findUniqueOrThrow({
+      where: { year_userId: { year: YEAR, userId: fx.teacherId } },
+    });
+    expect(teacher.subject).toBe("서버과목");
+    const stored = await db.rosterImport.findUniqueOrThrow({ where: { id: preview.id } });
+    expect(stored.state).toBe("PREVIEW");
+    expect((stored.preview as unknown as ImportPreview).rows.find((row) => row.token === token)?.resolution)
+      .toBe("KEEP_SERVER");
+  });
+
   it("미리보기 이후 서버가 바뀌면 VERSION_CONFLICT로 물리고 아무것도 쓰지 않는다", async () => {
     const workbookBytes = await renamedStudentFile();
     const preview = await previewRosterImport(db, fx.main, YEAR, "PARTIAL", workbookBytes);

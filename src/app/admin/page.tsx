@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useSWRConfig } from "swr";
 import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, ScanFace, Settings, ChevronLeft, ChevronRight, AlertTriangle, Database, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
+import { useAccountRows } from "@/hooks/useAcademicRoster";
 import { RosterManager } from "@/components/admin-roster/RosterManager";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
@@ -35,14 +37,6 @@ import {
   type FaceMatchForm,
   type FaceMatchValues,
 } from "@/lib/face-match-validation";
-
-interface User {
-  id: number; email: string; name: string; role: string;
-  grade?: number; classNum?: number; number?: number;
-  subject?: string; homeroom?: string; position?: string;
-  adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
-  gender?: "MALE" | "FEMALE" | null;
-}
 
 interface MealAppMealItem {
   mealKind: string;
@@ -96,8 +90,9 @@ const emptyForm = {
 
 export default function AdminPage() {
   const adminPerm = useAdminPermission();
-  const [users, setUsers] = useState<User[]>([]);
+  const { mutate } = useSWRConfig();
   const [userFilter, setUserFilter] = useState<"STUDENT" | "TEACHER">("STUDENT");
+  const { users, mutate: refreshUsers } = useAccountRows(userFilter);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardDate, setDashboardDate] = useState<string>(() => todayKST());
 
@@ -452,9 +447,7 @@ export default function AdminPage() {
   }
 
   async function fetchUsers() {
-    const res = await fetch(`/api/admin/users?role=${userFilter}`);
-    const data = await res.json();
-    setUsers(data.users || []);
+    await refreshUsers();
   }
 
   async function fetchDashboard(date: string = dashboardDate) {
@@ -463,8 +456,7 @@ export default function AdminPage() {
     setDashboard(data);
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchUsers(); fetchSystemSettings(); fetchApps(); }, [userFilter]);
+  useEffect(() => { fetchSystemSettings(); fetchApps(); }, [userFilter]);
   useEffect(() => { refreshUnsyncedBadge(); }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -502,7 +494,9 @@ export default function AdminPage() {
     }
     setAddDialogOpen(false);
     setAddForm({ ...emptyForm });
-    fetchUsers();
+    await mutate((key) => typeof key === "string" && (
+      key.startsWith("/api/admin/users?role=") || /^\/api\/admin\/academic-years\/\d+\/roster\?/.test(key)
+    ));
   }
 
   type EditableUserField =
@@ -517,7 +511,6 @@ export default function AdminPage() {
     next: string,
   ): Promise<SaveResult> {
     const body: Record<string, unknown> = { id };
-    let normalizedNext: unknown = next;
 
     if (field === "grade" || field === "classNum" || field === "number") {
       const trimmed = next.trim();
@@ -527,11 +520,9 @@ export default function AdminPage() {
         return { ok: false, message: `${label}은(는) 1 이상 정수여야 합니다.` };
       }
       body[field] = n;
-      normalizedNext = n;
     } else if (field === "gender") {
       const g = next === "" ? null : next;
       body.gender = g;
-      normalizedNext = g;
     } else {
       body[field] = next;
     }
@@ -550,11 +541,7 @@ export default function AdminPage() {
       const data = await res.json().catch(() => ({}));
       return { ok: false, message: data?.reason ?? "수정에 실패했습니다." };
     }
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === id ? { ...u, [field]: normalizedNext as User[typeof field] } : u,
-      ),
-    );
+    await refreshUsers();
     return { ok: true };
   }
 
@@ -585,7 +572,7 @@ export default function AdminPage() {
       const data = await res.json().catch(() => ({}));
       return { ok: false, message: data?.reason ?? "권한 변경에 실패했습니다." };
     }
-    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, adminLevel: next } : u)));
+    await refreshUsers();
     return { ok: true };
   }
 
@@ -720,7 +707,7 @@ export default function AdminPage() {
                 <RosterManager
                   canWrite={adminPerm.canWrite}
                   isMain={adminPerm.isEnvAdmin}
-                  onAddUser={adminPerm.canWrite ? () => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); } : undefined}
+                  onAddUser={adminPerm.canWrite ? (role = userFilter) => { setAddForm({ ...emptyForm, role }); setAddDialogOpen(true); } : undefined}
                   legacyFallback={
                     <div className="flex flex-col gap-2 min-h-0">
                       <div className="flex gap-2">

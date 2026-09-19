@@ -29,7 +29,7 @@ export type RosterTableProps = {
 };
 
 const HEAD = "p-2 text-left bg-muted whitespace-nowrap sticky top-0 z-[2]";
-const HEAD_FIRST = `${HEAD} left-0 z-[4]`;
+const HEAD_FIRST = "p-2 text-left bg-muted whitespace-nowrap sticky top-0 left-0 z-[4]";
 const CELL_FIRST = "p-1 align-middle whitespace-nowrap sticky left-0 z-[3] bg-card";
 
 function positiveInteger(label: string) {
@@ -56,7 +56,7 @@ function RowStatus({ row }: { row: RosterViewRow }) {
   return (
     <span
       title={text}
-      className="inline-block max-w-[14rem] overflow-hidden text-ellipsis whitespace-nowrap text-amber-700"
+      className="inline-block whitespace-nowrap text-amber-700"
     >
       {text}
     </span>
@@ -78,7 +78,7 @@ export function RosterTable({
   const student = role === "STUDENT";
 
   return (
-    <div className="border rounded-lg overflow-x-auto overflow-y-auto max-h-[70dvh]">
+    <div className="h-full border rounded-lg overflow-auto">
       <table className="w-full text-sm whitespace-nowrap">
         <thead>
           <tr>
@@ -219,7 +219,7 @@ export function RosterTable({
                 <td className="p-2 align-middle">
                   <span
                     title={row.email}
-                    className="inline-block max-w-[16rem] overflow-hidden text-ellipsis whitespace-nowrap align-middle"
+                    className="inline-block whitespace-nowrap align-middle"
                   >
                     {row.email}
                   </span>

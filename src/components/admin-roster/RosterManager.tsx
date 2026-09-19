@@ -2,6 +2,8 @@
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { canAddRosterUser } from "@/lib/admin-roster/labels";
 import type { SaveResult } from "@/components/EditableCell";
 import type { ImportScope, Profile } from "@/lib/academic-year/contracts";
 import { sendMutation } from "@/lib/admin-roster/mutate";
@@ -27,7 +29,7 @@ export type RosterManagerProps = {
   isMain: boolean;
   /** 학년도 기능이 아직 준비 중일 때 그대로 보여 줄 기존 사용자 목록. */
   legacyFallback: ReactNode;
-  onAddUser?: () => void;
+  onAddUser?: (role?: "STUDENT" | "TEACHER") => void;
   /** 14b가 붙일 자리. 넘기지 않으면 아무것도 그리지 않는다. */
   rolloverAction?: ReactNode;
   archivedAction?: ReactNode;
@@ -60,6 +62,7 @@ export function RosterManager({
   const [role, setRole] = useState<"STUDENT" | "TEACHER">("STUDENT");
   const [includeData, setIncludeData] = useState(true);
   const [includeCurrent, setIncludeCurrent] = useState(false);
+  const [includeExcluded, setIncludeExcluded] = useState(false);
   const [scope, setScope] = useState<ImportScope>("PARTIAL");
   const [importOpen, setImportOpen] = useState(false);
   const [emailTarget, setEmailTarget] = useState<AccountTarget | null>(null);
@@ -74,16 +77,19 @@ export function RosterManager({
   const selected = years.years.find((year) => year.year === selectedYear) ?? null;
   const archived = selected?.state === "ARCHIVED";
 
-  const roster = useRoster(selectedYear, role);
+  const roster = useRoster(selectedYear, role, { includeExcluded: selected?.state === "DRAFT" && canWrite && includeExcluded });
   const accountRows = useAccountRows(role);
+  const importStudents = useRoster(importOpen ? selectedYear : null, "STUDENT", { includeExcluded: true });
+  const importTeachers = useRoster(importOpen ? selectedYear : null, "TEACHER", { includeExcluded: true });
+  const canAdd = canAddRosterUser(canWrite, years.notReady, selectedYear, years.activeYear?.year ?? null);
 
   const nameOf = useMemo(() => {
     const byId = new Map<number, string>();
-    for (const row of roster.rows) {
+    for (const row of [...roster.rows, ...importStudents.rows, ...importTeachers.rows]) {
       if (row.userId !== null) byId.set(row.userId, row.profile.name);
     }
     return (userId: number) => byId.get(userId);
-  }, [roster.rows]);
+  }, [roster.rows, importStudents.rows, importTeachers.rows]);
 
   if (years.notReady) {
     return (
@@ -91,13 +97,19 @@ export function RosterManager({
         <p className="text-sm text-muted-foreground break-keep">
           학년도 기능 준비 중 — 기존 사용자 관리만 사용할 수 있습니다.
         </p>
+        {canAdd && onAddUser && (
+          <Button className="min-h-11 w-fit whitespace-nowrap" onClick={() => onAddUser()}>추가</Button>
+        )}
         {legacyFallback}
       </div>
     );
   }
 
   async function refreshAll(): Promise<void> {
-    await Promise.all([roster.mutate(), accountRows.mutate(), years.mutate()]);
+    await Promise.all([
+      roster.mutate(), accountRows.mutate(), years.mutate(),
+      importStudents.mutate(), importTeachers.mutate(),
+    ]);
   }
 
   async function saveField(
@@ -147,7 +159,14 @@ export function RosterManager({
     const result = await sendMutation(path, "PUT", { ...body, requestId: slot.requestId }, fallback);
     if (!result.ok) {
       toast.error(result.message);
-      if (result.conflict) await refreshAll();
+      if (result.conflict) {
+        await refreshAll();
+        setEmailTarget(null);
+        setAccessTarget(null);
+        setPermissionsTarget(null);
+        accountSlot.current = null;
+        toast.info("최신 내용을 확인한 뒤 변경 창을 다시 열어 주세요.");
+      }
       return false;
     }
 
@@ -175,22 +194,32 @@ export function RosterManager({
         canWrite={canWrite}
         includeData={includeData}
         includeCurrent={includeCurrent}
+        includeExcluded={includeExcluded}
+        canAdd={canAdd}
         onSelectYear={setPickedYear}
         onSelectRole={setRole}
         onToggleIncludeData={setIncludeData}
         onToggleIncludeCurrent={setIncludeCurrent}
+        onToggleIncludeExcluded={setIncludeExcluded}
         onDownload={download}
         onOpenImport={() => setImportOpen(true)}
-        onAddUser={onAddUser}
+        onAddUser={onAddUser ? () => onAddUser(role) : undefined}
         rolloverAction={rolloverAction}
         archivedAction={archivedAction}
       />
+
+      {years.error && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+          <p className="break-keep">학년도 목록을 불러오지 못했습니다.</p>
+          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => void years.mutate()}>다시 불러오기</Button>
+        </div>
+      )}
 
       {roster.error && (
         <p className="text-sm text-destructive break-keep">명부를 불러오지 못했습니다.</p>
       )}
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <RosterTable
           rows={roster.rows}
           role={role}
@@ -227,6 +256,7 @@ export function RosterManager({
       )}
 
       <EmailChangeDialog
+        key={`email:${emailTarget?.account.id ?? "closed"}`}
         target={emailTarget}
         onClose={() => setEmailTarget(null)}
         onSubmit={(target, email) =>
@@ -240,6 +270,7 @@ export function RosterManager({
       />
 
       <AccessChangeDialog
+        key={`access:${accessTarget?.account.id ?? "closed"}`}
         target={accessTarget}
         isMain={isMain}
         onClose={() => setAccessTarget(null)}
@@ -254,6 +285,7 @@ export function RosterManager({
       />
 
       <PermissionsDialog
+        key={`permissions:${permissionsTarget?.account.id ?? "closed"}`}
         target={permissionsTarget}
         onClose={() => setPermissionsTarget(null)}
         onSubmit={(target, level) =>

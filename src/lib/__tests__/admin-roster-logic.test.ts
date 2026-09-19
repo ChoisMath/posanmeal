@@ -70,7 +70,8 @@ function preview(rows: RowChange[], overrides: Partial<ImportPreview> = {}): Imp
 }
 
 function sessionWith(p: ImportPreview): ImportSession {
-  return importReducer(initialImportSession, { type: "VALIDATE_OK", preview: p });
+  const validating = importReducer(initialImportSession, { type: "VALIDATE_START", year: p.year });
+  return importReducer(validating, { type: "VALIDATE_OK", preview: p, token: validating.token, year: p.year });
 }
 
 describe("requestIdFor", () => {
@@ -102,7 +103,7 @@ describe("import 상태 흐름", () => {
     const withPreview = sessionWith(preview([row("NEW", "a")]));
     const confirmed = importReducer(withPreview, { type: "CONFIRM_ALL_NEW" });
 
-    const restarted = importReducer(confirmed, { type: "VALIDATE_START" });
+    const restarted = importReducer(confirmed, { type: "VALIDATE_START", year: 2027 });
 
     expect(restarted.ui.stage).toBe("VALIDATING");
     expect(restarted.confirmedTokens).toEqual([]);
@@ -115,7 +116,9 @@ describe("import 상태 흐름", () => {
       type: "CONFIRM_ALL_NEW",
     });
 
-    expect(importReducer(confirmed, { type: "RESET" })).toEqual(initialImportSession);
+    expect(importReducer(confirmed, { type: "RESET" })).toEqual({
+      ...initialImportSession, token: confirmed.token + 1,
+    });
   });
 
   it("신규 행 확인을 토글한다", () => {
@@ -135,6 +138,7 @@ describe("import 상태 흐름", () => {
 
     const updated = importReducer(session, {
       type: "PREVIEW_UPDATED",
+      token: session.token, year: 2027,
       preview: preview([row("NEW", "a")]),
     });
 
@@ -147,7 +151,7 @@ describe("import 상태 흐름", () => {
       requestId: "req-1",
     });
 
-    const failed = importReducer(session, { type: "COMMIT_FAIL", message: "잠시 후 다시" });
+    const failed = importReducer(session, { type: "COMMIT_FAIL", message: "잠시 후 다시", token: session.token, requestId: "req-1" });
 
     expect(failed.ui.stage).toBe("PREVIEW");
     expect(failed.requestId).toBe("req-1");
@@ -162,6 +166,7 @@ describe("import 상태 흐름", () => {
 
     const done = importReducer(session, {
       type: "COMMIT_OK",
+      token: session.token, requestId: "req-1",
       receipt: { requestId: "req-1", version: 8, changed: 1 },
     });
 
@@ -170,6 +175,48 @@ describe("import 상태 흐름", () => {
       receipt: { requestId: "req-1", version: 8, changed: 1 },
     });
   });
+
+  it("다른 시도·연도·단계에서 돌아온 검증 응답을 무시한다", () => {
+    const validating = importReducer(initialImportSession, { type: "VALIDATE_START", year: 2027 });
+    const staleAction = { type: "VALIDATE_OK" as const, preview: preview([]), token: validating.token, year: 2027 };
+    const reset = importReducer(validating, { type: "RESET" });
+    const next = importReducer(reset, { type: "VALIDATE_START", year: 2028 });
+    expect(importReducer(reset, staleAction)).toBe(reset);
+    expect(importReducer(next, staleAction)).toBe(next);
+    expect(importReducer(next, { ...staleAction, token: next.token })).toBe(next);
+    expect(importReducer(next, { ...staleAction, token: next.token, year: 2028 })).toBe(next);
+    expect(importReducer(next, { type: "VALIDATE_FAIL", token: validating.token, message: "old" })).toBe(next);
+  });
+
+  it("다른 미리보기 ID를 가진 PATCH 응답은 현재 내용을 덮지 않는다", () => {
+    const session = sessionWith(preview([row("CHANGED", "a")]));
+    expect(importReducer(session, {
+      type: "PREVIEW_UPDATED", token: session.token, year: 2027,
+      preview: preview([], { id: "import-other" }),
+    })).toBe(session);
+  });
+
+  it("충돌 선택을 저장하는 동안 확정을 막는다", () => {
+    const session = importReducer(sessionWith(preview([row("CHANGED", "a")])), { type: "RESOLVE_START" });
+    expect(canCommitImport(session)).toBe(false);
+    expect(importReducer(session, { type: "COMMIT_START", requestId: "too-early" })).toBe(session);
+  });
+
+  it("중복 확정과 다른 시도의 확정 응답을 무시한다", () => {
+    const session = importReducer(sessionWith(preview([row("CHANGED", "a")])), {
+      type: "COMMIT_START", requestId: "req-1",
+    });
+    expect(importReducer(session, { type: "COMMIT_START", requestId: "req-2" })).toBe(session);
+    expect(importReducer(session, {
+      type: "COMMIT_FAIL", token: session.token, requestId: "req-2", message: "old",
+    })).toBe(session);
+    const reset = importReducer(session, { type: "RESET" });
+    expect(importReducer(reset, {
+      type: "COMMIT_OK", token: session.token, requestId: "req-1",
+      receipt: { requestId: "req-1", version: 8, changed: 1 },
+    })).toBe(reset);
+  });
+
 });
 
 describe("확정 가능 판정", () => {

@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:academic": "vitest run --config vitest.integration.config.ts",
+    "test:guide": "vitest run --config vitest.guide.config.ts",
     "academic:test-db": "tsx scripts/academic-year/test-db.ts"
   },
   "dependencies": {

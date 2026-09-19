@@ -1,5 +1,14 @@
 import type { ImportPreview, Profile, RowChange, YearState } from "@/lib/academic-year/contracts";
 
+export function canAddRosterUser(
+  canWrite: boolean,
+  notReady: boolean,
+  selectedYear: number | null,
+  activeYear: number | null,
+): boolean {
+  return canWrite && (notReady || (selectedYear !== null && selectedYear === activeYear));
+}
+
 export const YEAR_STATE_LABEL: Record<YearState, string> = {
   ACTIVE: "운영 중",
   DRAFT: "준비 중",

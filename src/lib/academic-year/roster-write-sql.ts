@@ -75,9 +75,8 @@ export const UPSERT_RECORDS_SQL = `
 `;
 
 /**
- * $17은 "계정의 이메일은 그대로 둔다"는 뜻이다. 학년도 전환만 true로 보낸다 —
- * 이메일 교체는 Task 4의 `changeEmail`만이 할 일이고, 초안을 뜬 뒤에 바뀐 로그인
- * 주소를 명부 스냅샷이 되돌리면 그 사람은 로그인을 못 하게 된다.
+ * $17은 "계정의 이메일은 그대로 둔다"는 뜻이다. 화면 편집·전환은 true로 보내
+ * 전용 이메일 변경 뒤의 로그인 주소를 오래된 명부 스냅샷이 되돌리지 않도록 한다.
  */
 const emailKept = (keep: string) => `CASE WHEN $17::bool THEN ${keep} ELSE v.email END`;
 const emailKeyKept = (keep: string) => `CASE WHEN $17::bool THEN ${keep} ELSE v.email_key END`;
@@ -108,6 +107,7 @@ export const UPDATE_USERS_SQL = `
 /**
  * 확정 연도의 명부 항목. 기존 항목이 있으면 그 id를 그대로 써서 (year, emailKey)
  * 색인과 (year, userId) 색인이 서로 다른 행을 가리키는 상태를 만들지 않는다.
+ * 주소 검사 직후 전용 이메일 변경이 끝날 수도 있어 키는 최신 계정에서 가져온다.
  *
  * $17은 "호출자가 included를 직접 정한다"는 뜻이다. 셀 편집 같은 보통의 쓰기는
  * false로 보내고, 그러면 관리자가 명부에서 뺀 사람(included=false)이 남의 이름
@@ -117,8 +117,8 @@ export const UPSERT_ENTRIES_SQL = `
   INSERT INTO "RosterEntry" (
     "id", "year", "userId", "emailKey", "included", "baseUserVersion", "version"
   )
-  SELECT COALESCE(e."id", v.entry_id), $1::int, v.user_id, v.email_key, v.included,
-         u."profileVersion", 0
+  SELECT COALESCE(e."id", v.entry_id), $1::int, v.user_id,
+         COALESCE(u."emailKey", lower(btrim(u."email"))), v.included, u."profileVersion", 0
   FROM ${UNNEST_ROWS}
   JOIN "User" u ON u."id" = v.user_id
   LEFT JOIN "RosterEntry" e ON e."year" = $1::int AND e."userId" = v.user_id

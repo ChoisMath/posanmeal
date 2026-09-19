@@ -23,10 +23,13 @@ export type RosterToolbarProps = {
   canWrite: boolean;
   includeData: boolean;
   includeCurrent: boolean;
+  includeExcluded: boolean;
+  canAdd: boolean;
   onSelectYear: (year: number) => void;
   onSelectRole: (role: "STUDENT" | "TEACHER") => void;
   onToggleIncludeData: (next: boolean) => void;
   onToggleIncludeCurrent: (next: boolean) => void;
+  onToggleIncludeExcluded: (next: boolean) => void;
   onDownload: () => void;
   onOpenImport: () => void;
   onAddUser?: () => void;
@@ -46,10 +49,13 @@ export function RosterToolbar({
   canWrite,
   includeData,
   includeCurrent,
+  includeExcluded,
+  canAdd,
   onSelectYear,
   onSelectRole,
   onToggleIncludeData,
   onToggleIncludeCurrent,
+  onToggleIncludeExcluded,
   onDownload,
   onOpenImport,
   onAddUser,
@@ -134,7 +140,7 @@ export function RosterToolbar({
             </Button>
           )}
           {canWrite && onAddUser && (
-            <Button size="sm" className="min-h-11 whitespace-nowrap" onClick={onAddUser}>
+            <Button size="sm" className="min-h-11 whitespace-nowrap" onClick={onAddUser} disabled={!canAdd}>
               추가
             </Button>
           )}
@@ -143,8 +149,12 @@ export function RosterToolbar({
         </div>
       </div>
 
+      {canWrite && selectedState === "DRAFT" && (
+        <p className="text-xs text-muted-foreground break-keep">준비 중인 학년도에는 Excel 올리기로 사용자를 추가하세요.</p>
+      )}
+
       <div className="flex flex-wrap items-center gap-4 text-sm">
-        <label className="flex items-center gap-2 whitespace-nowrap">
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 whitespace-nowrap">
           <input
             type="checkbox"
             className={CHECKBOX}
@@ -154,7 +164,7 @@ export function RosterToolbar({
           기존 데이터 포함
         </label>
         {isPastYear && (
-          <label className="flex items-center gap-2 whitespace-nowrap">
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 whitespace-nowrap">
             <input
               type="checkbox"
               className={CHECKBOX}
@@ -162,6 +172,13 @@ export function RosterToolbar({
               onChange={(event) => onToggleIncludeCurrent(event.target.checked)}
             />
             현재 학급도 함께 표시
+          </label>
+        )}
+        {canWrite && selectedState === "DRAFT" && (
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 whitespace-nowrap">
+            <input type="checkbox" className={CHECKBOX} checked={includeExcluded}
+              onChange={(event) => onToggleIncludeExcluded(event.target.checked)} />
+            제외된 항목 보기
           </label>
         )}
       </div>

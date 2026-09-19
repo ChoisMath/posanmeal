@@ -19,7 +19,7 @@ type EmailDialogProps = {
 };
 
 export function EmailChangeDialog({ target, onClose, onSubmit }: EmailDialogProps) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(target?.account.email ?? "");
   const [busy, setBusy] = useState(false);
 
   const open = target !== null;
@@ -29,11 +29,10 @@ export function EmailChangeDialog({ target, onClose, onSubmit }: EmailDialogProp
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
-        else setEmail(target?.account.email ?? "");
+        if (!next && !busy) onClose();
       }}
     >
-      <DialogContent className={PANEL}>
+      <DialogContent className={`${PANEL} top-4 translate-y-0 sm:top-1/2 sm:-translate-y-1/2`}>
         <DialogHeader>
           <DialogTitle className="whitespace-nowrap">이메일 변경</DialogTitle>
         </DialogHeader>
@@ -47,13 +46,13 @@ export function EmailChangeDialog({ target, onClose, onSubmit }: EmailDialogProp
             id="roster-email"
             type="email"
             inputMode="email"
-            className="rounded-xl text-base"
+            className="h-11 rounded-xl text-base"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={onClose}>
+          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={onClose} disabled={busy}>
             취소
           </Button>
           <Button
@@ -95,18 +94,14 @@ export function AccessChangeDialog({ target, isMain, onClose, onSubmit }: Access
   const reasons = target ? deactivateReasons(target.row.profile.role) : [];
   const hasPrivileges = target !== null && target.account.adminLevel !== "NONE";
   const ready = reactivating
-    ? isMain
+    ? isMain && confirmPrivileges
     : reason !== "" && (!hasPrivileges || confirmPrivileges);
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
-        else {
-          setReason("");
-          setConfirmPrivileges(false);
-        }
+        if (!next && !busy) onClose();
       }}
     >
       <DialogContent className={PANEL}>
@@ -145,10 +140,10 @@ export function AccessChangeDialog({ target, isMain, onClose, onSubmit }: Access
               </div>
             </div>
             {hasPrivileges && (
-              <label className="flex items-start gap-2 text-sm break-keep">
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm break-keep">
                 <input
                   type="checkbox"
-                  className="mt-1 size-5"
+                  className="size-5 shrink-0"
                   checked={confirmPrivileges}
                   onChange={(event) => setConfirmPrivileges(event.target.checked)}
                 />
@@ -166,9 +161,16 @@ export function AccessChangeDialog({ target, isMain, onClose, onSubmit }: Access
             이용 재개는 메인 관리자만 할 수 있습니다.
           </p>
         )}
+        {reactivating && isMain && (
+          <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm break-keep">
+            <input type="checkbox" className="size-5 shrink-0" checked={confirmPrivileges}
+              onChange={(event) => setConfirmPrivileges(event.target.checked)} />
+            현재 권한({ADMIN_LEVEL_LABEL[target?.account.adminLevel ?? "NONE"]})을 확인했으며 이 권한으로 이용을 재개합니다.
+          </label>
+        )}
 
         <div className="flex justify-end gap-2">
-          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={onClose}>
+          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={onClose} disabled={busy}>
             취소
           </Button>
           <Button
@@ -201,15 +203,14 @@ type PermissionsDialogProps = {
 };
 
 export function PermissionsDialog({ target, onClose, onSubmit }: PermissionsDialogProps) {
-  const [level, setLevel] = useState<"NONE" | "SUBADMIN" | "ADMIN">("NONE");
+  const [level, setLevel] = useState<"NONE" | "SUBADMIN" | "ADMIN">(target?.account.adminLevel ?? "NONE");
   const [busy, setBusy] = useState(false);
 
   return (
     <Dialog
       open={target !== null}
       onOpenChange={(next) => {
-        if (!next) onClose();
-        else setLevel(target?.account.adminLevel ?? "NONE");
+        if (!next && !busy) onClose();
       }}
     >
       <DialogContent className={PANEL}>
@@ -234,7 +235,7 @@ export function PermissionsDialog({ target, onClose, onSubmit }: PermissionsDial
           ))}
         </div>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={onClose}>
+          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={onClose} disabled={busy}>
             취소
           </Button>
           <Button

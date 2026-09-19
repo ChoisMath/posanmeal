@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Client } from "pg";
 import type { Profile, RosterRow } from "@/lib/academic-year/contracts";
+import { changeEmail } from "@/lib/academic-year/account-service";
 import { isDomainError } from "@/lib/academic-year/errors";
 import { getAcademicProfiles } from "@/lib/academic-year/profile-service";
 import {
@@ -402,18 +403,18 @@ describe("academic year roster services", () => {
         payloadHash: "sync-1",
         year: YEAR,
         userId: fx.studentId,
-        email: "Moved.Student@example.posan.kr",
+        email: "student-test@example.posan.kr",
         profile: studentProfile({ name: "이사", grade: 2, classNum: 4, number: 11 }),
       });
 
       expect(await record(fx.studentId)).toMatchObject({ grade: 2, classNum: 4, number: 11, name: "이사" });
       const user = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
-      expect(user).toMatchObject({ grade: 2, classNum: 4, number: 11, email: "Moved.Student@example.posan.kr" });
-      expect(user.emailKey).toBe("moved.student@example.posan.kr");
+      expect(user).toMatchObject({ grade: 2, classNum: 4, number: 11, email: "student-test@example.posan.kr" });
+      expect(user.emailKey).toBe("student-test@example.posan.kr");
       const entry = await db.rosterEntry.findUniqueOrThrow({
         where: { year_userId: { year: YEAR, userId: fx.studentId } },
       });
-      expect(entry.emailKey).toBe("moved.student@example.posan.kr");
+      expect(entry.emailKey).toBe("student-test@example.posan.kr");
       expect(entry.baseUserVersion).toBe(user.profileVersion);
     });
 
@@ -806,6 +807,167 @@ describe("academic year roster services", () => {
 
       expect(res.status).toBe(201);
       expect((await db.academicYear.findUniqueOrThrow({ where: { year: NEXT_YEAR } })).state).toBe("DRAFT");
+    });
+  });
+
+  describe("roster edits cannot change account email", () => {
+    let fx: AcademicFixture;
+
+    beforeEach(async () => {
+      fx = await prepareAcademicFixture(db, pgClient);
+    });
+
+    async function changeStudentEmail() {
+      const user = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+      return changeEmail(db, {
+        actor: fx.main, requestId: "dedicated-email-change", kind: "EMAIL",
+        expectedRowVersion: user.profileVersion, payloadHash: "dedicated-email-change",
+        userId: fx.studentId, email: "moved.student@example.posan.kr",
+      });
+    }
+
+    async function writeRecord(email: string, version: number) {
+      const { PUT } = await import("@/app/api/admin/academic-years/[year]/records/[userId]/route");
+      return PUT(jsonRequest(`/api/admin/academic-years/${YEAR}/records/${fx.studentId}`, "PUT", {
+        requestId: "record-profile-write", expectedRowVersion: version,
+        email, profile: studentProfile({ name: "이름수정" }),
+      }), { params: Promise.resolve({ year: String(YEAR), userId: String(fx.studentId) }) });
+    }
+
+    it.each(["record", "legacy-email", "legacy-mixed"])(
+      "%s 경로는 이메일 변경을 섞은 프로필 수정을 거절하고 모두 보존한다",
+      async (route) => {
+        const userBefore = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+        const recordBefore = await record(fx.studentId);
+        const entryBefore = await db.rosterEntry.findMany({ where: { userId: fx.studentId } });
+        const mutationCount = await db.rosterMutation.count();
+        let response: Response;
+        if (route === "record") {
+          response = await writeRecord("bypass@example.posan.kr", recordBefore.version);
+        } else {
+          const { PUT } = await import("@/app/api/admin/users/route");
+          response = await PUT(jsonRequest("/api/admin/users", "PUT", {
+            id: fx.studentId, expectedRowVersion: recordBefore.version,
+            email: "bypass@example.posan.kr", ...(route === "legacy-mixed" ? { name: "이름수정" } : {}),
+          }));
+        }
+        expect(response.status).toBe(409);
+        expect(JSON.stringify(await response.json())).toContain("이메일 변경");
+        expect(await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).toEqual(userBefore);
+        expect(await record(fx.studentId)).toEqual(recordBefore);
+        expect(await db.rosterEntry.findMany({ where: { userId: fx.studentId } })).toEqual(entryBefore);
+        expect(await db.rosterMutation.count()).toBe(mutationCount);
+      },
+    );
+
+    it("다른 관리자의 이메일 변경 후 예전 화면에서 이름을 저장해도 주소를 되돌리지 않는다", async () => {
+      const oldVersion = await rowVersion(fx.studentId);
+      await changeStudentEmail();
+      expect(await rowVersion(fx.studentId)).toBe(oldVersion);
+      const changedAccount = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+      const response = await writeRecord("student-test@example.posan.kr", oldVersion);
+      expect(response.status).toBe(409);
+      expect(await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).toEqual(changedAccount);
+      expect((await record(fx.studentId)).name).toBe("학생테스트");
+      expect((await db.rosterEntry.findFirstOrThrow({ where: { userId: fx.studentId } })).emailKey)
+        .toBe("moved.student@example.posan.kr");
+    });
+
+    it("같은 주소의 공백·대소문자 차이는 프로필만 저장하고 계정 표기를 유지한다", async () => {
+      const response = await writeRecord("  Student-Test@Example.Posan.KR  ", await rowVersion(fx.studentId));
+      expect(response.status).toBe(200);
+      const user = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+      expect(user).toMatchObject({ name: "이름수정", email: "student-test@example.posan.kr", sessionVersion: 0 });
+    });
+
+    it("초안의 기존 계정 이메일은 일반 프로필 편집으로 변경할 수 없다", async () => {
+      await createDraftYear(db, { actor: fx.main, requestId: "email-guard-draft", expectedVersion: fx.version,
+        kind: "YEAR_CREATE", payloadHash: "email-guard-draft", year: NEXT_YEAR });
+      const entry = await db.rosterEntry.findUniqueOrThrow({
+        where: { year_userId: { year: NEXT_YEAR, userId: fx.studentId } },
+      });
+      await expectDomainCode(upsertRosterProfile(db, {
+        actor: fx.main, requestId: "draft-email-bypass", kind: "ROSTER_ROW", payloadHash: "draft-email-bypass",
+        expectedRowVersion: entry.version, year: NEXT_YEAR, entryId: entry.id, userId: fx.studentId,
+        email: "bypass@example.posan.kr", profile: studentProfile({ name: "초안수정" }),
+      }), "IDENTITY_CONFLICT");
+      expect(await db.rosterEntry.findUniqueOrThrow({ where: { id: entry.id } })).toEqual(entry);
+    });
+
+    it("동일값 프로필 저장도 진행 중인 이메일 변경 뒤의 최신 명부 키를 유지한다", async () => {
+      let changed!: () => void;
+      let release!: () => void;
+      const emailWritten = new Promise<void>((resolve) => { changed = resolve; });
+      const resumed = new Promise<void>((resolve) => { release = resolve; });
+      const emailClient = db.$extends({ query: { rosterEntry: {
+        async updateMany({ args, query }) {
+          const result = await query(args);
+          changed();
+          await resumed;
+          return result;
+        },
+      } } }) as unknown as PrismaClient;
+      const account = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+      const emailChange = changeEmail(emailClient, {
+        actor: fx.main, requestId: "pending-email-change", kind: "EMAIL", payloadHash: "pending-email-change",
+        expectedRowVersion: account.profileVersion, userId: fx.studentId, email: "moved.student@example.posan.kr",
+      });
+      await emailWritten;
+      const profileWrite = upsertRosterProfile(db, {
+        actor: fx.main, requestId: "no-op-email-race", kind: "ROSTER_ROW", payloadHash: "no-op-email-race",
+        expectedRowVersion: await rowVersion(fx.studentId), year: YEAR, userId: fx.studentId,
+        email: account.email, profile: studentProfile({ name: account.name }),
+      });
+      try {
+        await vi.waitFor(async () => {
+          const waiting = await pgClient.query<{ count: number }>(`
+            SELECT count(*)::int AS count FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+              AND query LIKE '%"User"%'
+          `);
+          expect(waiting.rows[0]?.count).toBeGreaterThan(0);
+        }, { timeout: 2_000, interval: 10 });
+      } finally {
+        release();
+        await Promise.all([emailChange, profileWrite]);
+      }
+      expect(await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).toMatchObject({
+        email: "moved.student@example.posan.kr", emailKey: "moved.student@example.posan.kr", sessionVersion: 1,
+      });
+      expect((await db.rosterEntry.findFirstOrThrow({ where: { userId: fx.studentId } })).emailKey)
+        .toBe("moved.student@example.posan.kr");
+    });
+
+    it("계정 주소 검사 직후 이메일이 바뀌어도 이름 저장이 로그인 주소와 명부 키를 되돌리지 않는다", async () => {
+      let read!: () => void;
+      let release!: () => void;
+      const readFinished = new Promise<void>((resolve) => { read = resolve; });
+      const resumed = new Promise<void>((resolve) => { release = resolve; });
+      let paused = false;
+      const client = db.$extends({ query: { user: {
+        async findUnique({ args, query }) {
+          const account = await query(args);
+          if (args.where.id === fx.studentId && args.select?.email && !paused) {
+            paused = true;
+            read();
+            await resumed;
+          }
+          return account;
+        },
+      } } }) as unknown as PrismaClient;
+      const pending = upsertRosterProfile(client, {
+        actor: fx.main, requestId: "email-race-profile", kind: "ROSTER_ROW", payloadHash: "email-race-profile",
+        expectedRowVersion: await rowVersion(fx.studentId), year: YEAR, userId: fx.studentId,
+        email: "student-test@example.posan.kr", profile: studentProfile({ name: "동시이름수정" }),
+      });
+      await readFinished;
+      try { await changeStudentEmail(); } finally { release(); }
+      await pending;
+      const user = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+      expect(user).toMatchObject({ name: "동시이름수정", email: "moved.student@example.posan.kr",
+        emailKey: "moved.student@example.posan.kr", sessionVersion: 1 });
+      expect((await db.rosterEntry.findFirstOrThrow({ where: { userId: fx.studentId } })).emailKey)
+        .toBe("moved.student@example.posan.kr");
     });
   });
 

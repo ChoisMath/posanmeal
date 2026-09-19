@@ -7,12 +7,10 @@ export type ImportUiState =
   | { stage: "COMMITTING"; requestId: string }
   | { stage: "DONE"; receipt: MutationReceipt };
 
-/**
- * 화면이 들고 다니는 전체 상태. `ui`는 계약에 정해진 단계 그대로이고, 반영 중
- * 실패해 미리보기로 돌아갈 때 필요한 값만 옆에 둔다 — 단계 타입에 되돌아갈
- * 자리를 만들지 않으려고 분리했다.
- */
 export type ImportSession = {
+  token: number;
+  year: number | null;
+  resolving: boolean;
   ui: ImportUiState;
   preview: ImportPreview | null;
   confirmedTokens: string[];
@@ -23,18 +21,23 @@ export type ImportSession = {
 
 export type ImportAction =
   | { type: "RESET" }
-  | { type: "VALIDATE_START" }
-  | { type: "VALIDATE_OK"; preview: ImportPreview }
-  | { type: "VALIDATE_FAIL"; message: string }
-  | { type: "PREVIEW_UPDATED"; preview: ImportPreview }
+  | { type: "VALIDATE_START"; year: number }
+  | { type: "VALIDATE_OK"; preview: ImportPreview; token: number; year: number }
+  | { type: "VALIDATE_FAIL"; message: string; token: number }
+  | { type: "PREVIEW_UPDATED"; preview: ImportPreview; token: number; year: number }
+  | { type: "RESOLVE_START" }
+  | { type: "RESOLVE_FAIL"; token: number; previewId: string; message: string }
   | { type: "TOGGLE_NEW"; token: string }
   | { type: "CONFIRM_ALL_NEW" }
   | { type: "SET_OMISSIONS"; confirmed: boolean }
   | { type: "COMMIT_START"; requestId: string }
-  | { type: "COMMIT_OK"; receipt: MutationReceipt }
-  | { type: "COMMIT_FAIL"; message: string };
+  | { type: "COMMIT_OK"; receipt: MutationReceipt; token: number; requestId: string }
+  | { type: "COMMIT_FAIL"; message: string; token: number; requestId: string };
 
 export const initialImportSession: ImportSession = {
+  token: 0,
+  year: null,
+  resolving: false,
   ui: { stage: "SELECT" },
   preview: null,
   confirmedTokens: [],
@@ -42,6 +45,15 @@ export const initialImportSession: ImportSession = {
   requestId: null,
   error: null,
 };
+
+function isStale(
+  session: ImportSession,
+  action: { token: number; year?: number; preview?: ImportPreview },
+): boolean {
+  return action.token !== session.token ||
+    (action.year !== undefined && action.year !== session.year) ||
+    (action.preview !== undefined && action.preview.year !== session.year);
+}
 
 function previewStage(session: ImportSession, preview: ImportPreview): ImportSession {
   // 미리보기가 다시 오면 사라진 행의 확인은 함께 버린다.
@@ -57,6 +69,7 @@ function previewStage(session: ImportSession, preview: ImportPreview): ImportSes
     },
     preview,
     confirmedTokens,
+    resolving: false,
     error: null,
   };
 }
@@ -64,20 +77,48 @@ function previewStage(session: ImportSession, preview: ImportPreview): ImportSes
 export function importReducer(session: ImportSession, action: ImportAction): ImportSession {
   switch (action.type) {
     case "RESET":
-      return initialImportSession;
+      return { ...initialImportSession, token: session.token + 1 };
 
     case "VALIDATE_START":
-      return { ...initialImportSession, ui: { stage: "VALIDATING" } };
+      return {
+        ...initialImportSession,
+        token: session.token + 1,
+        year: action.year,
+        ui: { stage: "VALIDATING" },
+      };
 
     case "VALIDATE_OK":
-      return previewStage({ ...initialImportSession }, action.preview);
+      if (session.ui.stage !== "VALIDATING" || isStale(session, action)) return session;
+      return previewStage(session, action.preview);
 
     case "VALIDATE_FAIL":
-      return { ...initialImportSession, ui: { stage: "SELECT" }, error: action.message };
+      if (session.ui.stage !== "VALIDATING" || isStale(session, action)) return session;
+      return {
+        ...initialImportSession,
+        token: session.token,
+        ui: { stage: "SELECT" },
+        error: action.message,
+      };
 
     case "PREVIEW_UPDATED":
-      if (session.preview === null) return session;
+      if (session.ui.stage !== "PREVIEW" || isStale(session, action) ||
+        action.preview.id !== session.preview?.id) return session;
       return previewStage(session, action.preview);
+
+    case "RESOLVE_START":
+      if (session.ui.stage !== "PREVIEW" || session.resolving) return session;
+      return { ...session, resolving: true, error: null };
+
+    case "RESOLVE_FAIL":
+      if (session.ui.stage !== "PREVIEW" || isStale(session, action) ||
+        action.previewId !== session.preview?.id) return session;
+      return {
+        ...session,
+        resolving: false,
+        error: action.message,
+        preview: { ...session.ui.preview, canCommit: false },
+        ui: { ...session.ui, preview: { ...session.ui.preview, canCommit: false } },
+      };
 
     case "TOGGLE_NEW": {
       if (session.ui.stage !== "PREVIEW") return session;
@@ -107,7 +148,7 @@ export function importReducer(session: ImportSession, action: ImportAction): Imp
     }
 
     case "COMMIT_START":
-      if (session.ui.stage !== "PREVIEW") return session;
+      if (!canCommitImport(session)) return session;
       return {
         ...session,
         ui: { stage: "COMMITTING", requestId: action.requestId },
@@ -116,9 +157,13 @@ export function importReducer(session: ImportSession, action: ImportAction): Imp
       };
 
     case "COMMIT_OK":
+      if (session.ui.stage !== "COMMITTING" || isStale(session, action) ||
+        action.requestId !== session.requestId || action.receipt.requestId !== session.requestId) return session;
       return { ...session, ui: { stage: "DONE", receipt: action.receipt }, error: null };
 
     case "COMMIT_FAIL": {
+      if (session.ui.stage !== "COMMITTING" || isStale(session, action) ||
+        action.requestId !== session.requestId) return session;
       if (session.preview === null) {
         return { ...session, ui: { stage: "SELECT" }, error: action.message };
       }
@@ -147,6 +192,7 @@ export function unresolvedConflicts(preview: ImportPreview): RowChange[] {
 
 export type CommitBlock =
   | "NOT_PREVIEW"
+  | "SELECTION_PENDING"
   | "SERVER_BLOCKED"
   | "NEW_ROWS_UNCONFIRMED"
   | "CONFLICTS_UNRESOLVED";
@@ -157,6 +203,7 @@ export function commitBlocks(session: ImportSession): CommitBlock[] {
   const { preview, confirmedTokens } = session.ui;
 
   const blocks: CommitBlock[] = [];
+  if (session.resolving) blocks.push("SELECTION_PENDING");
   if (!preview.canCommit) blocks.push("SERVER_BLOCKED");
 
   const confirmed = new Set(confirmedTokens);
