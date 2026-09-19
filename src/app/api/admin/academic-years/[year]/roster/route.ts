@@ -2,33 +2,45 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { deleteArchivedRoster } from "@/lib/academic-year/archive-service";
-import { payloadHash, routeResponse } from "@/lib/academic-year/api";
+import { parseYearParam, payloadHash, routeResponse } from "@/lib/academic-year/api";
 import { DomainError } from "@/lib/academic-year/errors";
 import { requireAcademicReady } from "@/lib/academic-year/readiness";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { listRosterView, userIdsWithoutRecord } from "@/lib/academic-year/roster-service";
 
-function parseYear(raw: string): number {
-  const year = Number.parseInt(raw, 10);
-  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-    throw new DomainError("YEAR_MISMATCH", "학년도를 확인하세요.");
-  }
-  return year;
-}
+const flagSchema = z
+  .enum(["0", "1", "true", "false"])
+  .optional()
+  .default("0")
+  .transform((value) => value === "1" || value === "true");
+
+const querySchema = z.object({
+  includeExcluded: flagSchema,
+  includeEntryless: flagSchema,
+});
 
 export async function GET(request: Request, { params }: { params: Promise<{ year: string }> }) {
   return routeResponse(async () => {
     await requireActor("READ_ADMIN");
     await requireAcademicReady(prisma);
 
-    const year = parseYear((await params).year);
-    const roleParam = new URL(request.url).searchParams.get("role");
+    const year = parseYearParam((await params).year);
+    const searchParams = new URL(request.url).searchParams;
+    const roleParam = searchParams.get("role");
     if (roleParam !== null && roleParam !== "STUDENT" && roleParam !== "TEACHER") {
-      throw new DomainError("MISSING_PROFILE", "역할은 학생 또는 교사여야 합니다.");
+      throw new DomainError("INVALID_INPUT", "역할은 학생 또는 교사여야 합니다.");
+    }
+
+    const parsedQuery = querySchema.safeParse({
+      includeExcluded: searchParams.get("includeExcluded") ?? undefined,
+      includeEntryless: searchParams.get("includeEntryless") ?? undefined,
+    });
+    if (!parsedQuery.success) {
+      throw new DomainError("INVALID_INPUT", "includeExcluded/includeEntryless 값을 확인하세요.");
     }
 
     const [rows, missingProfileUserIds] = await Promise.all([
-      listRosterView(prisma, year, roleParam ?? undefined),
+      listRosterView(prisma, year, roleParam ?? undefined, parsedQuery.data),
       userIdsWithoutRecord(prisma, year),
     ]);
 
@@ -47,7 +59,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ y
     const actor = await requireActor("MAIN");
     await requireAcademicReady(prisma);
 
-    const year = parseYear((await params).year);
+    const year = parseYearParam((await params).year);
 
     const parsed = deleteBodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, Plus, Download, Trash2, FileSpreadsheet, ArrowLeftRight, RefreshCw, Camera, ScanFace, Settings, ChevronLeft, ChevronRight, AlertTriangle, Database, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
+import { RosterManager } from "@/components/admin-roster/RosterManager";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
@@ -93,11 +94,6 @@ const emptyForm = {
   gender: "" as "" | "MALE" | "FEMALE",
 };
 
-const sheetImportGuides = [
-  { label: "학생", columns: ["email", "grade", "classNum", "number", "name", "gender"] },
-  { label: "교사", columns: ["email", "subject", "homeroom", "position", "name"] },
-] as const;
-
 export default function AdminPage() {
   const adminPerm = useAdminPermission();
   const [users, setUsers] = useState<User[]>([]);
@@ -109,12 +105,6 @@ export default function AdminPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addForm, setAddForm] = useState({ ...emptyForm });
 
-  // Sheet import dialog
-  const [sheetDialogOpen, setSheetDialogOpen] = useState(false);
-  const [studentSheetUrl, setStudentSheetUrl] = useState("");
-  const [teacherSheetUrl, setTeacherSheetUrl] = useState("");
-  const [importMessage, setImportMessage] = useState("");
-  const [importing, setImporting] = useState(false);
 
   // Applications (신청관리)
   const [apps, setApps] = useState<MealAppItem[]>([]);
@@ -489,43 +479,6 @@ export default function AdminPage() {
     setDashboardDate(`${yyyy}-${mm}-${dd}`);
   }
 
-  const [importError, setImportError] = useState("");
-
-  async function handleImport() {
-    if (!studentSheetUrl && !teacherSheetUrl) {
-      setImportError("학생 또는 교사 시트 URL을 하나 이상 입력하세요.");
-      return;
-    }
-    setImporting(true); setImportMessage(""); setImportError("");
-    try {
-      const res = await fetch("/api/admin/import", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentSheetUrl, teacherSheetUrl }),
-      });
-      let data: { message?: string; error?: string; warnings?: string };
-      try {
-        data = await res.json();
-      } catch {
-        setImportError("서버 응답을 처리할 수 없습니다. 잠시 후 다시 시도하세요.");
-        setImporting(false);
-        return;
-      }
-      if (data.error) {
-        setImportError(data.error);
-      }
-      if (data.message) {
-        setImportMessage(data.message);
-      }
-      if (data.warnings) {
-        setImportError((prev) => prev ? prev + "\n\n" + data.warnings : data.warnings!);
-      }
-      fetchUsers();
-    } catch {
-      setImportError("네트워크 오류가 발생했습니다. 인터넷 연결을 확인하세요.");
-    }
-    setImporting(false);
-  }
-
   async function handleAddUser() {
     if (addForm.role === "STUDENT" && addForm.gender !== "MALE" && addForm.gender !== "FEMALE") {
       toast.error("학생은 성별을 선택해야 합니다.");
@@ -764,22 +717,16 @@ export default function AdminPage() {
           <TabsContent value="users" className="flex-1 min-h-0 mt-1 overflow-hidden">
             <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex gap-2">
-                    <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("STUDENT")}>학생</Button>
-                    <Button variant={userFilter === "TEACHER" ? "default" : "outline"} size="sm" onClick={() => setUserFilter("TEACHER")}>교사</Button>
-                  </div>
-                  {adminPerm.canWrite && (
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={() => { setImportMessage(""); setSheetDialogOpen(true); }}>
-                        <FileSpreadsheet className="h-4 w-4 mr-1" /> Sheet연결
-                      </Button>
-                      <Button size="sm" onClick={() => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); }}>
-                        <Plus className="h-4 w-4 mr-1" /> 추가
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                <RosterManager
+                  canWrite={adminPerm.canWrite}
+                  isMain={adminPerm.isEnvAdmin}
+                  onAddUser={adminPerm.canWrite ? () => { setAddForm({ ...emptyForm, role: userFilter }); setAddDialogOpen(true); } : undefined}
+                  legacyFallback={
+                    <div className="flex flex-col gap-2 min-h-0">
+                      <div className="flex gap-2">
+                        <Button variant={userFilter === "STUDENT" ? "default" : "outline"} size="sm" className="min-h-11 whitespace-nowrap" onClick={() => setUserFilter("STUDENT")}>학생</Button>
+                        <Button variant={userFilter === "TEACHER" ? "default" : "outline"} size="sm" className="min-h-11 whitespace-nowrap" onClick={() => setUserFilter("TEACHER")}>교사</Button>
+                      </div>
                 <div className="border rounded-lg overflow-auto max-h-[70dvh]">
                   <table className="w-full text-sm whitespace-nowrap">
                     <thead className="sticky top-0 z-20">
@@ -988,6 +935,9 @@ export default function AdminPage() {
                     </tbody>
                   </table>
                 </div>
+                    </div>
+                  }
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1560,44 +1510,6 @@ export default function AdminPage() {
                 닫기
               </Button>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Sheet Import Dialog */}
-      <Dialog open={sheetDialogOpen} onOpenChange={setSheetDialogOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Google Spreadsheet 가져오기</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="rounded-xl border bg-muted/40 p-3 text-sm">
-              <p className="font-medium text-foreground">시트 헤더 안내</p>
-              <p className="mt-1 text-xs text-muted-foreground">첫 번째 행(head)에 아래 항목을 순서대로 입력해 주세요.</p>
-              <div className="mt-3 space-y-2">
-                {sheetImportGuides.map((guide) => (
-                  <div key={guide.label} className="flex items-center gap-2 overflow-x-auto">
-                    <p className="shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground">{guide.label}</p>
-                    <div className="flex gap-1.5">
-                      {guide.columns.map((column) => (
-                        <code key={column} className="whitespace-nowrap rounded-md bg-background px-2 py-1 text-xs text-foreground">
-                          {column}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-xs text-muted-foreground">
-                <code>gender</code> 열은 학생만 필수입니다. &quot;남&quot; 또는 &quot;여&quot;로 입력하세요. (M/F·male/female 도 허용)
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                ⚠️ 기존 시트를 사용 중이라면 가장 오른쪽에 <code>gender</code> 열을 추가하고 학생별 값을 채운 뒤 가져오기 해주세요.
-              </p>
-            </div>
-            <div><Label>학생 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={studentSheetUrl} onChange={(e) => setStudentSheetUrl(e.target.value)} className="rounded-xl" /></div>
-            <div><Label>교사 시트 URL</Label><Input placeholder="https://docs.google.com/spreadsheets/d/..." value={teacherSheetUrl} onChange={(e) => setTeacherSheetUrl(e.target.value)} className="rounded-xl" /></div>
-            <Button onClick={handleImport} disabled={importing} className="w-full">{importing ? "가져오는 중..." : "Data 호출"}</Button>
-            {importMessage && <p className="text-sm text-green-600 dark:text-green-400">{importMessage}</p>}
-            {importError && <p className="text-sm text-red-600 dark:text-red-400 whitespace-pre-line">{importError}</p>}
           </div>
         </DialogContent>
       </Dialog>

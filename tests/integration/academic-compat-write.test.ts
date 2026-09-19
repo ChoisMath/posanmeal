@@ -164,26 +164,6 @@ describe("compat writes mirror legacy user writes into the active year", () => {
       });
     });
 
-    it("mirrors a spreadsheet import before any record exists", async () => {
-      stubSheets(
-        ["email,grade,classNum,number,name,gender", "pre-a@example.posan.kr,2,1,1,이전A,남"].join("\n"),
-        ["email,subject,homeroom,position,name", "pre-t@example.posan.kr,국어,2-1,교사,이전교사"].join("\n"),
-      );
-
-      const { POST } = await import("@/app/api/admin/import/route");
-      const res = await POST(
-        jsonRequest("/api/admin/import", "POST", { studentSheetUrl: STUDENT_SHEET, teacherSheetUrl: TEACHER_SHEET }),
-      );
-
-      expect(res.status).toBe(200);
-      const imported = await db.user.findMany({ where: { email: { startsWith: "pre-" } } });
-      expect(imported).toHaveLength(2);
-      for (const row of imported) {
-        expect((await record(row.id)).name).toBe(row.name);
-      }
-      // 기존 사용자는 이번 배치에 없으므로 기록이 생기지 않는다.
-      expect(await db.userAcademicRecord.count()).toBe(2);
-    });
   });
 
   describe("after the backfill has run", () => {
@@ -413,85 +393,4 @@ describe("compat writes mirror legacy user writes into the active year", () => {
     });
   });
 
-  const STUDENT_SHEET = "https://docs.google.com/spreadsheets/d/sheet-id/edit#gid=0";
-  const TEACHER_SHEET = "https://docs.google.com/spreadsheets/d/sheet-id/edit#gid=1";
-
-  function stubSheets(studentCsv: string, teacherCsv: string): void {
-    vi.stubGlobal("fetch", async (input: string | URL) => {
-      const csv = String(input).includes("gid=1") ? teacherCsv : studentCsv;
-      return new Response(csv, { status: 200 });
-    });
-  }
-
-  describe("spreadsheet import", () => {
-    beforeEach(async () => {
-      await prepareAcademicFixture(db, pgClient);
-    });
-
-    it("mirrors every imported row in one batch", async () => {
-      stubSheets(
-        [
-          "email,grade,classNum,number,name,gender",
-          "import-a@example.posan.kr,2,1,1,가져오기A,남",
-          "import-b@example.posan.kr,2,1,2,가져오기B,여",
-        ].join("\n"),
-        ["email,subject,homeroom,position,name", "import-t@example.posan.kr,국어,2-1,교사,가져오기교사"].join("\n"),
-      );
-
-      const { POST } = await import("@/app/api/admin/import/route");
-      const res = await POST(
-        jsonRequest("/api/admin/import", "POST", { studentSheetUrl: STUDENT_SHEET, teacherSheetUrl: TEACHER_SHEET }),
-      );
-
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.studentCount).toBe(2);
-      expect(body.teacherCount).toBe(1);
-
-      const imported = await db.user.findMany({ where: { email: { startsWith: "import-" } } });
-      expect(imported).toHaveLength(3);
-      for (const row of imported) {
-        expect((await record(row.id)).name).toBe(row.name);
-      }
-    });
-
-    it("rolls back the users and the records when one row fails", async () => {
-      stubSheets(
-        ["email,grade,classNum,number,name,gender", "import-a@example.posan.kr,2,1,1,가져오기A,남"].join("\n"),
-        ["email,subject,homeroom,position,name", "import-bad@example.posan.kr,국어,2-1,교사,나쁜 이름"].join("\n"),
-      );
-
-      const { POST } = await import("@/app/api/admin/import/route");
-      const res = await POST(
-        jsonRequest("/api/admin/import", "POST", { studentSheetUrl: STUDENT_SHEET, teacherSheetUrl: TEACHER_SHEET }),
-      );
-
-      expect(res.status).toBe(500);
-      expect(await db.user.count({ where: { email: { startsWith: "import-" } } })).toBe(0);
-      expect(await db.userAcademicRecord.count({ where: { name: { startsWith: "가져오기" } } })).toBe(0);
-    });
-
-    it("imports a full school inside the transaction timeout", async () => {
-      const rows = ["email,grade,classNum,number,name,gender"];
-      for (let i = 0; i < 1000; i++) {
-        const grade = Math.floor(i / 400) + 1;
-        const classNum = Math.floor((i % 400) / 40) + 1;
-        const number = (i % 40) + 1;
-        rows.push(`bulk-${i}@example.posan.kr,${grade},${classNum},${number},대량${i},${i % 2 === 0 ? "남" : "여"}`);
-      }
-      stubSheets(rows.join("\n"), "");
-
-      const { POST } = await import("@/app/api/admin/import/route");
-      const startedAt = Date.now();
-      const res = await POST(jsonRequest("/api/admin/import", "POST", { studentSheetUrl: STUDENT_SHEET }));
-      const elapsedMs = Date.now() - startedAt;
-
-      expect(res.status).toBe(200);
-      expect((await res.json()).studentCount).toBe(1000);
-      expect(await db.userAcademicRecord.count({ where: { name: { startsWith: "대량" } } })).toBe(1000);
-
-      console.info(`[compat-write] 1000행 import 소요 ${elapsedMs}ms`);
-      expect(elapsedMs).toBeLessThan(20_000);
-    }, 90_000);
-  });
 });

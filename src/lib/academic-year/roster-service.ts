@@ -299,6 +299,8 @@ export interface LegacyAdminUser {
   gender: "MALE" | "FEMALE" | null;
   adminLevel: "NONE" | "SUBADMIN" | "ADMIN";
   accessState: string;
+  /** 계정 변경(이메일·이용 상태·권한)이 쓰는 버전. 명부 행 버전과 별개다. */
+  profileVersion: number;
   rowVersion: number | null;
   needsReview: boolean;
   missingAcademicRecord: boolean;
@@ -311,7 +313,7 @@ export interface LegacyAdminUser {
  * 새 학년도 API는 이 폴백을 쓰지 않는다.
  */
 const LEGACY_ADMIN_USERS_SQL = `
-  SELECT u."id", u."email", u."adminLevel", u."accessState",
+  SELECT u."id", u."email", u."adminLevel", u."accessState", u."profileVersion",
          COALESCE(r."role"::text, u."role"::text) AS "role",
          COALESCE(r."name", u."name") AS "name",
          COALESCE(r."grade", u."grade") AS "grade",
