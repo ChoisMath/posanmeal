@@ -97,4 +97,6 @@ export type DomainErrorCode =
   | "IDENTITY_CONFLICT"
   | "REVIEW_REQUIRED"
   | "YEAR_MISMATCH"
-  | "MISSING_PROFILE";
+  | "MISSING_PROFILE"
+  /** 요청 본문·입력값 자체가 규칙에 맞지 않는다. 대상이 없다는 뜻의 MISSING_PROFILE과 구분한다. */
+  | "INVALID_INPUT";

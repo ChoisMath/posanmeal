@@ -21,11 +21,13 @@ import {
   activeYear,
   listRosterView,
   rosterRowArgs,
+  runWithIdentityGuard,
   writeRosterProfiles,
   type RosterRowView,
 } from "./roster-service";
 import {
   DELETE_LEAVER_ENTRIES_SQL,
+  DELETE_ORPHAN_DRAFT_ENTRIES_SQL,
   LEAVER_MEMBER_STATE_SQL,
   LINK_ROLLOVER_ENTRIES_SQL,
   ROLLOVER_ACCOUNTS_SQL,
@@ -116,14 +118,20 @@ interface AccountRow {
   emailKey: string;
   role: Profile["role"];
   accessState: string;
+  profileVersion: number;
 }
 
 interface RolloverPlan {
   sourceYear: number;
   sourceVersion: number;
   yearVersion: number;
-  /** 새 학년도에 들어갈 초안 행(included = true). */
+  /**
+   * 새 학년도에 들어갈 초안 행(included = true). 계정이 이미 있는데 항목이 아직
+   * 이어지지 않은 행은 여기서 이미 `userId`가 채워져 있다.
+   */
   rows: RosterRowView[];
+  /** 이번에 이메일로 계정을 찾아 이어 준 행의 entryId. 저장된 항목은 아직 userId가 없다. */
+  linkedByEmail: Set<string>;
   missing: RolloverMissing[];
   issues: string[];
   warnings: RolloverWarnings;
@@ -179,6 +187,41 @@ function accountOf(
   return row.userId !== null ? byId.get(row.userId) : byKey.get(normalizeEmail(row.email));
 }
 
+/**
+ * `userId`가 비어 있지만 그 이메일의 계정이 이미 있는 행(돌아온 사람, Excel로 이메일만
+ * 넣어 다시 올린 행)을 그 계정에 잇는다. 이어 두지 않으면 전환이 같은 emailKey로 계정을
+ * 또 만들려다 unique 위반으로 통째로 뒤집힌다. 역할이 다르거나 이용 중지인 계정은
+ * 잇지 않고 기존 차단(ROLE_MISMATCH·INACTIVE_ACCOUNT)이 그대로 잡는다.
+ */
+function linkExistingAccounts(
+  included: RosterRowView[],
+  byKey: Map<string, AccountRow>,
+): { rows: RosterRowView[]; linkedByEmail: Set<string>; duplicateAccounts: number } {
+  const taken = new Set(
+    included.map((row) => row.userId).filter((id): id is number => id !== null),
+  );
+  const linkedByEmail = new Set<string>();
+  let duplicateAccounts = 0;
+
+  const rows = included.map((row) => {
+    if (row.userId !== null) return row;
+    const account = byKey.get(normalizeEmail(row.email));
+    if (!account || account.role !== row.profile.role || account.accessState !== "ACTIVE") {
+      return row;
+    }
+    if (taken.has(account.id)) {
+      // 같은 계정을 두 행이 가리킨다. 이으면 (year, userId) 유일 색인이 깨지므로 알린다.
+      duplicateAccounts += 1;
+      return row;
+    }
+    taken.add(account.id);
+    linkedByEmail.add(row.entryId);
+    return { ...row, userId: account.id };
+  });
+
+  return { rows, linkedByEmail, duplicateAccounts };
+}
+
 async function countMealDateWarnings(
   tx: Tx,
   sourceYear: number,
@@ -213,7 +256,11 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
   const source = await tx.academicYear.findUniqueOrThrow({ where: { year: sourceYear } });
 
   const allRows = await listRosterView(tx, year, undefined, { includeExcluded: true });
-  const rows = allRows.filter((row) => row.included);
+  const { byKey, byId } = await loadAccounts(tx, allRows.filter((row) => row.included));
+  const { rows, linkedByEmail, duplicateAccounts } = linkExistingAccounts(
+    allRows.filter((row) => row.included),
+    byKey,
+  );
   const includedUserIds = new Set(
     rows.map((row) => row.userId).filter((id): id is number => id !== null),
   );
@@ -258,14 +305,19 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
     leavers.push({ userId: person.userId, memberState: decision.decision });
   }
 
-  const { byKey, byId } = await loadAccounts(tx, rows);
   let roleMismatch = 0;
   let inactive = 0;
+  let staleAccounts = 0;
   for (const row of rows) {
     const account = accountOf(row, byKey, byId);
     if (!account) continue;
     if (account.role !== row.profile.role) roleMismatch += 1;
     if (account.accessState !== "ACTIVE") inactive += 1;
+    // 이어 붙인 지 얼마 안 된 행(linkedByEmail)은 지금 계정 값을 기준으로 삼으므로
+    // 뒤처졌을 수가 없다. 초안을 뜬 뒤 계정이 움직인 행만 사람이 다시 봐야 한다.
+    if (!linkedByEmail.has(row.entryId) && account.profileVersion !== row.baseUserVersion) {
+      staleAccounts += 1;
+    }
   }
 
   const issues: string[] = [];
@@ -274,6 +326,8 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
   countIssue(issues, "DUPLICATE_EMAIL", duplicateEmails(rows));
   countIssue(issues, "ROLE_MISMATCH", roleMismatch);
   countIssue(issues, "INACTIVE_ACCOUNT", inactive);
+  countIssue(issues, "STALE_ACCOUNT", staleAccounts);
+  countIssue(issues, "DUPLICATE_ACCOUNT", duplicateAccounts);
   countIssue(issues, "MISSING_DECISION", undecided);
   countIssue(issues, "STALE_DECISION", stale);
 
@@ -296,6 +350,7 @@ async function planRollover(tx: Tx, year: number, today: string): Promise<Rollov
     sourceVersion: source.version,
     yearVersion: target.version,
     rows,
+    linkedByEmail,
     missing,
     issues,
     warnings: { ...mealDates, studentsWithSameGrade },
@@ -381,7 +436,7 @@ export async function saveRolloverDecision(
       const role = record.role as Profile["role"];
       if (input.decision !== "RESTORE" && !isLeavingState(role, input.decision)) {
         throw new DomainError(
-          "MISSING_PROFILE",
+          "INVALID_INPUT",
           role === "STUDENT"
             ? "학생은 졸업 또는 전출로만 종료할 수 있습니다."
             : "교사는 전출 또는 퇴직으로만 종료할 수 있습니다.",
@@ -454,6 +509,31 @@ function assertActivatable(input: ActivateAcademicYearInput, plan: RolloverPlan)
 }
 
 /**
+ * 남아 있어서는 안 되는 상태를 마지막으로 확인한다. 계정이 있는데 제외됐고 종료
+ * 결정도 없는 재학·재직자는 `MISSING_DECISION`이 이미 막으므로 여기까지 올 수 없다 —
+ * 그래도 그 사람의 계정이 조용히 사라지는 일만은 없게 불변식으로 남긴다.
+ */
+async function assertNoUndecidedExclusions(
+  tx: Tx,
+  year: number,
+  plan: RolloverPlan,
+): Promise<void> {
+  const decided = new Set(plan.leavers.map((leaver) => leaver.userId));
+  const continuing = new Set(plan.missing.map((person) => person.userId));
+  const excluded = await tx.rosterEntry.findMany({
+    where: { year, included: false, userId: { not: null } },
+    select: { userId: true },
+  });
+
+  const undecided = excluded.filter(
+    (entry) => entry.userId !== null && continuing.has(entry.userId) && !decided.has(entry.userId),
+  );
+  if (undecided.length > 0) {
+    throw new DomainError("REVIEW_REQUIRED", "종료 여부를 정하지 않은 인원이 남아 있습니다.");
+  }
+}
+
+/**
  * 하나의 transaction. 원본을 먼저 ARCHIVED로 내린 뒤 대상을 ACTIVE로 올린다 —
  * "ACTIVE는 하나"라는 부분 unique 색인은 지연 검사가 아니므로 순서가 곧 정합성이다.
  * 그 뒤의 모든 쓰기는 집합 연산이며, 기존 신청·확정일·체크인과 계속 다니는 사람의
@@ -491,9 +571,9 @@ export async function activateAcademicYear(
       });
 
       const args = rosterRowArgs(input.year, plan.rows);
-      const created = await tx.$queryRawUnsafe<{ id: number; emailKey: string }[]>(
-        INSERT_USERS_SQL,
-        ...args,
+      // 검사와 이 INSERT 사이에 누가 같은 이메일을 차지했다면 원본 오류 대신 409로 끝낸다.
+      const created = await runWithIdentityGuard(() =>
+        tx.$queryRawUnsafe<{ id: number; emailKey: string }[]>(INSERT_USERS_SQL, ...args),
       );
       if (created.length > 0) {
         await tx.userAccessEvent.createMany({
@@ -527,8 +607,16 @@ export async function activateAcademicYear(
       if (leaverIds.length > 0) {
         await tx.$executeRawUnsafe(DELETE_LEAVER_ENTRIES_SQL, input.year, leaverIds);
       }
+      const orphans = await tx.$queryRawUnsafe<{ id: string }[]>(
+        DELETE_ORPHAN_DRAFT_ENTRIES_SQL,
+        input.year,
+      );
+      await assertNoUndecidedExclusions(tx, input.year, plan);
 
-      const written = await writeRosterProfiles(tx, input.year, rows, { applyIncluded: true });
+      const written = await writeRosterProfiles(tx, input.year, rows, {
+        applyIncluded: true,
+        keepAccountEmail: true,
+      });
 
       if (leaverIds.length > 0) {
         await tx.$executeRawUnsafe(
@@ -550,6 +638,8 @@ export async function activateAcademicYear(
         ids: [input.year, plan.sourceYear],
         sourceYear: plan.sourceYear,
         newAccounts: created.length,
+        linkedAccounts: plan.linkedByEmail.size,
+        removedDraftCandidates: orphans.length,
         members: rows.length,
         leavers: leaverIds.length,
         kiosksPaused: input.kiosksPaused,

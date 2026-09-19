@@ -15,7 +15,7 @@ export const SOURCE_MEMBERS_SQL = `
 /** 초안 행이 가리키는 계정. 이메일로도 id로도 찾아 역할·이용 상태를 확인한다. */
 export const ROLLOVER_ACCOUNTS_SQL = `
   SELECT u."id", COALESCE(u."emailKey", lower(btrim(u."email"))) AS "emailKey",
-         u."role"::text AS "role", u."accessState"
+         u."role"::text AS "role", u."accessState", u."profileVersion"
   FROM "User" u
   WHERE COALESCE(u."emailKey", lower(btrim(u."email"))) = ANY($1::text[])
      OR u."id" = ANY($2::int[])
@@ -34,7 +34,9 @@ export const ROLLOVER_MEAL_DATE_WARNINGS_SQL = `
     )::int AS "remainingMealDatesInSourceYear"
   FROM "MealRegistrationMealDate" d
   JOIN "MealRegistration" reg ON reg."id" = d."registrationId"
-  WHERE reg."status" = 'APPROVED'
+  JOIN "MealRegistrationMeal" m
+    ON m."registrationId" = d."registrationId" AND m."mealKind" = d."mealKind"
+  WHERE reg."status" = 'APPROVED' AND m."applied" = true
 `;
 
 /**
@@ -57,6 +59,16 @@ export const LINK_ROLLOVER_ENTRIES_SQL = `
 export const DELETE_LEAVER_ENTRIES_SQL = `
   DELETE FROM "RosterEntry"
   WHERE "year" = $1::int AND "included" = false AND "userId" = ANY($2::int[])
+`;
+
+/**
+ * 초안에 넣었다가 뺐고 계정이 된 적도 없는 후보 행. 지킬 이력이 없는 반면 남겨 두면
+ * 화면에 보이지 않은 채 그 해의 (year, emailKey) 자리를 계속 차지한다.
+ */
+export const DELETE_ORPHAN_DRAFT_ENTRIES_SQL = `
+  DELETE FROM "RosterEntry"
+  WHERE "year" = $1::int AND "included" = false AND "userId" IS NULL
+  RETURNING "id"
 `;
 
 /**

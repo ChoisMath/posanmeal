@@ -74,9 +74,19 @@ export const UPSERT_RECORDS_SQL = `
   RETURNING "userId"
 `;
 
+/**
+ * $17은 "계정의 이메일은 그대로 둔다"는 뜻이다. 학년도 전환만 true로 보낸다 —
+ * 이메일 교체는 Task 4의 `changeEmail`만이 할 일이고, 초안을 뜬 뒤에 바뀐 로그인
+ * 주소를 명부 스냅샷이 되돌리면 그 사람은 로그인을 못 하게 된다.
+ */
+const emailKept = (keep: string) => `CASE WHEN $17::bool THEN ${keep} ELSE v.email END`;
+const emailKeyKept = (keep: string) => `CASE WHEN $17::bool THEN ${keep} ELSE v.email_key END`;
+
 export const UPDATE_USERS_SQL = `
   UPDATE "User" u SET
-    "email" = v.email, "emailKey" = v.email_key, "name" = v.name, "role" = v.role::"Role",
+    "email" = ${emailKept('u."email"')},
+    "emailKey" = ${emailKeyKept('u."emailKey"')},
+    "name" = v.name, "role" = v.role::"Role",
     "grade" = v.grade, "classNum" = v.class_num, "number" = v.number,
     "gender" = (${genderKept('u."gender"::text')})::"Gender",
     "subject" = v.subject, "homeroom" = v.homeroom, "position" = v.position,
@@ -88,7 +98,8 @@ export const UPDATE_USERS_SQL = `
       u."email", u."emailKey", u."name", u."role"::text, u."grade", u."classNum",
       u."number", u."gender"::text, u."subject", u."homeroom", u."position"
     ) IS DISTINCT FROM (
-      v.email, v.email_key, v.name, v.role, v.grade, v.class_num,
+      ${emailKept('u."email"')}, ${emailKeyKept('u."emailKey"')},
+      v.name, v.role, v.grade, v.class_num,
       v.number, ${genderKept('u."gender"::text')}, v.subject, v.homeroom, v.position
     )
   RETURNING u."id"
@@ -125,6 +136,11 @@ export const UPSERT_ENTRIES_SQL = `
   )
 `;
 
+/**
+ * 초안 항목을 저장할 때 `baseUserVersion`을 그 계정의 현재 `profileVersion`으로 다시
+ * 찍는다. "이 행을 지금의 계정 값과 맞춰 봤다"는 표시이며, 전환 검토가 초안을 뜬 뒤
+ * 계정이 바뀐 행(STALE_ACCOUNT)을 이 값으로 가려낸다.
+ */
 export const UPSERT_DRAFT_ENTRIES_SQL = `
   INSERT INTO "RosterEntry" (
     "id", "year", "userId", "emailKey", "draftEmail", "draftProfile",
@@ -136,19 +152,22 @@ export const UPSERT_DRAFT_ENTRIES_SQL = `
            'number', v.number, 'gender', v.gender, 'subject', v.subject,
            'homeroom', v.homeroom, 'position', v.position
          ),
-         v.included, v.base_user_version, 0
+         v.included, COALESCE(u."profileVersion", v.base_user_version), 0
   FROM ${UNNEST_ROWS}
+  LEFT JOIN "User" u ON u."id" = v.user_id
   ON CONFLICT ("id") DO UPDATE SET
     "emailKey" = EXCLUDED."emailKey",
     "draftEmail" = EXCLUDED."draftEmail",
     "draftProfile" = EXCLUDED."draftProfile",
+    "baseUserVersion" = EXCLUDED."baseUserVersion",
     "included" = CASE WHEN $17::bool THEN EXCLUDED."included" ELSE "RosterEntry"."included" END,
     "version" = "RosterEntry"."version" + 1
   WHERE (
     "RosterEntry"."emailKey", "RosterEntry"."draftEmail",
-    "RosterEntry"."draftProfile", "RosterEntry"."included"
+    "RosterEntry"."draftProfile", "RosterEntry"."baseUserVersion", "RosterEntry"."included"
   ) IS DISTINCT FROM (
     EXCLUDED."emailKey", EXCLUDED."draftEmail", EXCLUDED."draftProfile",
+    EXCLUDED."baseUserVersion",
     CASE WHEN $17::bool THEN EXCLUDED."included" ELSE "RosterEntry"."included" END
   )
   RETURNING "id"

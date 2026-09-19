@@ -386,7 +386,7 @@ describe("account access and mutations", () => {
         reason: "RETIRED",
         confirmPrivileges: false,
       }),
-    ).rejects.toMatchObject({ code: "MISSING_PROFILE" });
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
 
     expect((await db.user.findUniqueOrThrow({ where: { id: fx.studentId } })).accessState).toBe(
       "ACTIVE",

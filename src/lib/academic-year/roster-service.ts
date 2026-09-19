@@ -68,6 +68,11 @@ export interface WriteRosterOptions {
    * 뺄지"를 다루지 않는 쓰기는 false여야 저장된 제외 상태를 덮지 않는다.
    */
   applyIncluded?: boolean;
+  /**
+   * 계정의 이메일을 명부 값으로 덮지 않는가. 학년도 전환만 true로 부른다 — 이메일
+   * 교체는 `changeEmail`의 일이고, 초안 스냅샷이 그 뒤의 교체를 되돌리면 안 된다.
+   */
+  keepAccountEmail?: boolean;
 }
 
 export type UpsertRosterProfileInput = {
@@ -558,7 +563,7 @@ export async function writeRosterProfiles(
 
   return state === "DRAFT"
     ? writeDraftRows(tx, year, rows, applyIncluded)
-    : writeConfirmedRows(tx, year, rows, state, applyIncluded);
+    : writeConfirmedRows(tx, year, rows, state, applyIncluded, options?.keepAccountEmail ?? false);
 }
 
 /**
@@ -665,6 +670,7 @@ async function writeConfirmedRows(
   rows: RosterRow[],
   state: YearState,
   applyIncluded: boolean,
+  keepAccountEmail: boolean,
 ): Promise<Summary> {
   const isActive = state === "ACTIVE";
   const newRows = rows.filter((row) => row.userId === null);
@@ -719,7 +725,9 @@ async function writeConfirmedRows(
   );
 
   const userChanged = isActive
-    ? await runWithIdentityGuard(() => tx.$queryRawUnsafe<{ id: number }[]>(UPDATE_USERS_SQL, ...args))
+    ? await runWithIdentityGuard(() =>
+        tx.$queryRawUnsafe<{ id: number }[]>(UPDATE_USERS_SQL, ...args, keepAccountEmail),
+      )
     : [];
   if (isActive) {
     await runWithIdentityGuard(() =>
@@ -792,7 +800,7 @@ const UNIQUE_VIOLATION = "23505";
  * 위반을 500으로 흘리지 않고 검사에 걸렸을 때와 같은 409로 맞춘다. raw 쿼리는
  * P2002가 아니라 P2010으로 오므로 원본 SQLSTATE를 본다.
  */
-async function runWithIdentityGuard<T>(run: () => Promise<T>): Promise<T> {
+export async function runWithIdentityGuard<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } catch (error) {

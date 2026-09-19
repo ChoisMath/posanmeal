@@ -2,7 +2,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Client } from "pg";
 import type { Actor } from "@/lib/academic-year/contracts";
-import { createDraftYear } from "@/lib/academic-year/roster-service";
+import { changeEmail } from "@/lib/academic-year/account-service";
+import {
+  createDraftYear,
+  listRosterView,
+  upsertRosterProfile,
+} from "@/lib/academic-year/roster-service";
 import {
   activateAcademicYear,
   reviewRollover,
@@ -121,6 +126,30 @@ describe("academic year rollover", () => {
     await db.rosterEntry.updateMany({
       where: { year: TARGET_YEAR, userId: fx.studentId },
       data: { included: false },
+    });
+  }
+
+  /** Task 5의 실제 편집 경로. 그 학년도 version을 올리는 것이 검토 무효화의 근거다. */
+  async function editRoster(
+    year: number,
+    requestId: string,
+    overrides: { name?: string; email?: string } = {},
+  ): Promise<void> {
+    const rows = await listRosterView(db, year, undefined, { includeExcluded: true });
+    const row = rows.find((candidate) => candidate.userId === fx.studentId);
+    if (!row) throw new Error(`no roster row for the student in ${year}`);
+
+    await upsertRosterProfile(db, {
+      actor: fx.main,
+      requestId,
+      kind: "ROSTER_ROW",
+      payloadHash: requestId,
+      expectedRowVersion: row.version,
+      year,
+      userId: fx.studentId,
+      entryId: row.entryId.length > 0 ? row.entryId : undefined,
+      email: overrides.email ?? row.email,
+      profile: { ...row.profile, name: overrides.name ?? row.profile.name },
     });
   }
 
@@ -413,9 +442,9 @@ describe("academic year rollover", () => {
     await makeDraft();
     await excludeStudent();
 
-    await expect(decide(fx.studentId, "RETIRED")).rejects.toMatchObject({ code: "MISSING_PROFILE" });
+    await expect(decide(fx.studentId, "RETIRED")).rejects.toMatchObject({ code: "INVALID_INPUT" });
     await expect(decide(fx.teacherId, "GRADUATED")).rejects.toMatchObject({
-      code: "MISSING_PROFILE",
+      code: "INVALID_INPUT",
     });
   });
 
@@ -427,19 +456,13 @@ describe("academic year rollover", () => {
     await makeDraft();
     const first = await review();
 
-    await db.academicYear.update({
-      where: { year: TARGET_YEAR },
-      data: { version: { increment: 1 } },
-    });
+    await editRoster(TARGET_YEAR, "edit-draft", { name: "학생초안수정" });
     await expect(activate(first, { requestId: "stale-draft" })).rejects.toMatchObject({
       code: "VERSION_CONFLICT",
     });
 
     const second = await review();
-    await db.academicYear.update({
-      where: { year: SOURCE_YEAR },
-      data: { version: { increment: 1 } },
-    });
+    await editRoster(SOURCE_YEAR, "edit-source", { name: "학생원본수정" });
     await expect(activate(second, { requestId: "stale-source" })).rejects.toMatchObject({
       code: "VERSION_CONFLICT",
     });
@@ -585,6 +608,263 @@ describe("academic year rollover", () => {
     expect(await activeYearNumber()).toBe(TARGET_YEAR);
     expect(await db.userAcademicRecord.count({ where: { year: TARGET_YEAR } })).toBe(people + 2);
   }, 180_000);
+
+  // -------------------------------------------------------------------------
+  // 이메일은 전환이 건드리지 않는다 (fix round 1)
+  // -------------------------------------------------------------------------
+
+  it("never reverts an email changed after the draft was copied", async () => {
+    await makeDraft();
+    await changeEmail(db, {
+      actor: fx.main,
+      requestId: "email-moved",
+      expectedRowVersion: (await db.user.findUniqueOrThrow({ where: { id: fx.studentId } }))
+        .profileVersion,
+      kind: "EMAIL",
+      payloadHash: "email-moved-hash",
+      userId: fx.studentId,
+      email: "moved.student@example.posan.kr",
+    });
+
+    const stale = await review();
+    expect(stale.issues).toContain("STALE_ACCOUNT:1");
+    expect(stale.canActivate).toBe(false);
+    await expect(activate(stale)).rejects.toMatchObject({ code: "REVIEW_REQUIRED" });
+
+    // 관리자가 그 행을 다시 저장하면 baseUserVersion이 현재 계정 값으로 다시 찍힌다.
+    await editRoster(TARGET_YEAR, "re-save", { email: "moved.student@example.posan.kr" });
+
+    const current = await review();
+    expect(current.issues).toEqual([]);
+    await activate(current, { requestId: "rollover-after-email" });
+
+    const student = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
+    expect(student.email).toBe("moved.student@example.posan.kr");
+    expect(student.emailKey).toBe("moved.student@example.posan.kr");
+  });
+
+  it("links a returning person's draft row to the account that already owns the email", async () => {
+    await db.userAcademicRecord.update({
+      where: { year_userId: { year: SOURCE_YEAR, userId: fx.studentId } },
+      data: { memberState: "TRANSFERRED" },
+    });
+    await makeDraft();
+    await db.rosterEntry.deleteMany({ where: { year: TARGET_YEAR, userId: fx.studentId } });
+    await db.rosterEntry.create({
+      data: {
+        id: "returning-entry",
+        year: TARGET_YEAR,
+        emailKey: "student-test@example.posan.kr",
+        draftEmail: "student-test@example.posan.kr",
+        draftProfile: {
+          role: "STUDENT",
+          name: "학생테스트",
+          grade: 2,
+          classNum: 3,
+          number: 4,
+          gender: "MALE",
+          subject: null,
+          homeroom: null,
+          position: null,
+        },
+        included: true,
+      },
+    });
+
+    const current = await review();
+    expect(current.issues).toEqual([]);
+    await activate(current);
+
+    const entry = await db.rosterEntry.findUniqueOrThrow({ where: { id: "returning-entry" } });
+    expect(entry.userId).toBe(fx.studentId);
+    expect(await db.user.count({ where: { emailKey: "student-test@example.posan.kr" } })).toBe(1);
+
+    const record = await db.userAcademicRecord.findUniqueOrThrow({
+      where: { year_userId: { year: TARGET_YEAR, userId: fx.studentId } },
+    });
+    expect(record.grade).toBe(2);
+    expect(await db.faceProfile.count({ where: { userId: fx.studentId } })).toBe(1);
+  });
+
+  it("blocks a userId-less draft row whose email belongs to the other role or an inactive account", async () => {
+    await makeDraft();
+    await db.rosterEntry.deleteMany({ where: { year: TARGET_YEAR, userId: fx.teacherId } });
+    await db.rosterEntry.create({
+      data: {
+        id: "other-role-entry",
+        year: TARGET_YEAR,
+        emailKey: "teacher-test@example.posan.kr",
+        draftEmail: "teacher-test@example.posan.kr",
+        draftProfile: {
+          role: "STUDENT",
+          name: "교사테스트",
+          grade: 1,
+          classNum: 5,
+          number: 6,
+          gender: "MALE",
+          subject: null,
+          homeroom: null,
+          position: null,
+        },
+        included: true,
+      },
+    });
+    expect((await review()).issues).toContain("ROLE_MISMATCH:1");
+
+    await db.user.update({ where: { id: fx.teacherId }, data: { accessState: "INACTIVE" } });
+    await db.rosterEntry.update({
+      where: { id: "other-role-entry" },
+      data: {
+        draftProfile: {
+          role: "TEACHER",
+          name: "교사테스트",
+          grade: null,
+          classNum: null,
+          number: null,
+          gender: null,
+          subject: null,
+          homeroom: "1-1",
+          position: null,
+        },
+      },
+    });
+    expect((await review()).issues).toContain("INACTIVE_ACCOUNT:1");
+  });
+
+  it("links rather than duplicates when the email is claimed after the review", async () => {
+    await makeDraft();
+    await db.rosterEntry.create({
+      data: {
+        id: "racer-entry",
+        year: TARGET_YEAR,
+        emailKey: "racer@example.posan.kr",
+        draftEmail: "racer@example.posan.kr",
+        draftProfile: {
+          role: "STUDENT",
+          name: "경합학생",
+          grade: 3,
+          classNum: 9,
+          number: 9,
+          gender: "FEMALE",
+          subject: null,
+          homeroom: null,
+          position: null,
+        },
+        included: true,
+      },
+    });
+    const reviewed = await review();
+    expect(reviewed.canActivate).toBe(true);
+
+    // 검토 뒤 다른 경로가 그 주소로 계정을 만든다. 전환은 트랜잭션 안에서 다시 보고
+    // 계정을 또 만드는 대신 그 계정에 잇는다.
+    const claimed = await db.user.create({
+      data: {
+        email: "racer@example.posan.kr",
+        emailKey: "racer@example.posan.kr",
+        name: "먼저등록",
+        role: "STUDENT",
+        grade: 3,
+        classNum: 9,
+        number: 8,
+        gender: "FEMALE",
+      },
+    });
+
+    await activate(reviewed);
+    expect(await db.user.count({ where: { emailKey: "racer@example.posan.kr" } })).toBe(1);
+    expect((await db.rosterEntry.findUniqueOrThrow({ where: { id: "racer-entry" } })).userId).toBe(
+      claimed.id,
+    );
+  });
+
+  it("turns a residual email collision into an identity conflict, never a raw error", async () => {
+    await makeDraft();
+    await db.user.create({
+      data: {
+        email: "Held@Example.Posan.KR",
+        // 정규화되지 않은 채 저장된 키. 대조는 정규화한 주소로 계정을 찾으므로 이 행을
+        // 못 보고 지나가지만, INSERT는 초안 항목의 키를 그대로 써서 unique에 걸린다.
+        emailKey: "Held@Example.Posan.KR",
+        name: "보유자",
+        role: "STUDENT",
+        grade: 3,
+        classNum: 7,
+        number: 7,
+        gender: "MALE",
+      },
+    });
+    await db.rosterEntry.create({
+      data: {
+        id: "collision-entry",
+        year: TARGET_YEAR,
+        emailKey: "Held@Example.Posan.KR",
+        draftEmail: "fresh@example.posan.kr",
+        draftProfile: {
+          role: "STUDENT",
+          name: "충돌학생",
+          grade: 3,
+          classNum: 7,
+          number: 6,
+          gender: "MALE",
+          subject: null,
+          homeroom: null,
+          position: null,
+        },
+        included: true,
+      },
+    });
+
+    await expect(activate(await review())).rejects.toMatchObject({ code: "IDENTITY_CONFLICT" });
+    expect(await activeYearNumber()).toBe(SOURCE_YEAR);
+  });
+
+  it("clears an excluded candidate that never became an account and frees its email slot", async () => {
+    await makeDraft();
+    await db.rosterEntry.create({
+      data: {
+        id: "abandoned-entry",
+        year: TARGET_YEAR,
+        emailKey: "abandoned@example.posan.kr",
+        draftEmail: "abandoned@example.posan.kr",
+        draftProfile: {
+          role: "STUDENT",
+          name: "취소학생",
+          grade: 2,
+          classNum: 8,
+          number: 8,
+          gender: "MALE",
+          subject: null,
+          homeroom: null,
+          position: null,
+        },
+        included: false,
+      },
+    });
+
+    await activate(await review());
+    expect(await db.rosterEntry.count({ where: { id: "abandoned-entry" } })).toBe(0);
+
+    // 자리가 풀렸으므로 같은 주소를 이제 ACTIVE가 된 학년도에 다시 넣을 수 있다.
+    await db.rosterEntry.create({
+      data: {
+        year: TARGET_YEAR,
+        emailKey: "abandoned@example.posan.kr",
+        included: true,
+      },
+    });
+  });
+
+  it("ignores a confirmed meal date whose meal was never applied for", async () => {
+    await db.mealRegistrationMeal.updateMany({
+      where: { registrationId: fx.registrationId },
+      data: { applied: false },
+    });
+    await makeDraft();
+
+    const current = await review();
+    expect(current.warnings.remainingMealDatesInSourceYear).toBe(0);
+  });
 
   it("records no personal data in the activation receipt", async () => {
     await makeDraft();

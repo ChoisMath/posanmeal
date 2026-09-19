@@ -120,7 +120,7 @@ function leavingStateFor(role: "STUDENT" | "TEACHER", reason: string): string {
   const state = LEAVING_STATE_BY_REASON[reason]?.[role];
   if (!state) {
     throw new DomainError(
-      "MISSING_PROFILE",
+      "INVALID_INPUT",
       role === "STUDENT"
         ? "학생의 이용 중단 사유는 GRADUATED 또는 TRANSFERRED여야 합니다."
         : "교사의 이용 중단 사유는 TRANSFERRED 또는 RETIRED여야 합니다.",

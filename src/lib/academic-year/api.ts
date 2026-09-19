@@ -15,6 +15,7 @@ const STATUS: Record<DomainErrorCode, number> = {
   YEAR_MISMATCH: 422,
   REVIEW_REQUIRED: 422,
   MISSING_PROFILE: 422,
+  INVALID_INPUT: 422,
   NOT_READY: 503,
 };
 
@@ -55,6 +56,14 @@ export function parseIdParam(raw: string): number {
     throw new DomainError("MISSING_PROFILE", "대상 사용자를 찾을 수 없습니다.");
   }
   return id;
+}
+
+export function parseYearParam(raw: string): number {
+  const year = Number.parseInt(raw, 10);
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new DomainError("YEAR_MISMATCH", "학년도를 확인하세요.");
+  }
+  return year;
 }
 
 export async function routeResponse(
