@@ -169,6 +169,17 @@ export const INSERT_USERS_SQL = `
   RETURNING "id", "emailKey"
 `;
 
+/**
+ * 초안에서 "이 사람은 파일에 없었다"만 기록한다. 이름·이메일·초안 값은 건드리지
+ * 않으므로, 미리보기 이후 누군가 그 사람을 고쳤더라도 그 수정이 지워지지 않는다.
+ */
+export const EXCLUDE_DRAFT_ENTRIES_SQL = `
+  UPDATE "RosterEntry"
+  SET "included" = false, "version" = "version" + 1
+  WHERE "year" = $1::int AND "id" = ANY($2::text[]) AND "included" = true
+  RETURNING "id"
+`;
+
 export const BUMP_YEAR_SQL = `
   UPDATE "AcademicYear" SET "version" = "version" + 1, "updatedAt" = CURRENT_TIMESTAMP
   WHERE "year" = $1::int

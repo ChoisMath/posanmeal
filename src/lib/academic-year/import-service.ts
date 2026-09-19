@@ -24,7 +24,12 @@ import {
 import { withAcademicMutation } from "./mutation";
 import { normalizeEmail } from "./profile-schema";
 import { requireAcademicReady } from "./readiness";
-import { listRosterView, readYearState, writeRosterProfiles } from "./roster-service";
+import {
+  excludeDraftEntries,
+  listRosterView,
+  readYearState,
+  writeRosterProfiles,
+} from "./roster-service";
 import type { WorkbookManifest } from "./workbook";
 import { parseRosterWorkbook } from "./workbook-parser";
 
@@ -41,7 +46,8 @@ const CANCELLED = "CANCELLED";
  */
 interface ImportPayload extends Prisma.InputJsonObject {
   checks: ImportCheck[] & Prisma.InputJsonArray;
-  omittedRows: RosterRow[] & Prisma.InputJsonArray;
+  /** 파일에 없던 초안 항목의 id. 값은 담지 않는다 — 확정은 included만 쓴다. */
+  omittedEntryIds: string[] & Prisma.InputJsonArray;
   templateOnly: boolean;
 }
 
@@ -50,7 +56,7 @@ type Summary = MutationSummary & Prisma.InputJsonObject;
 export interface CommitRosterImportInput extends MutationInput {
   importId: string;
   /** 경로가 가리킨 학년도. 보관된 미리보기의 학년도와 다르면 확정하지 않는다. */
-  year?: number;
+  year: number;
   confirmedNewRowTokens: string[];
   omissionsConfirmed: boolean;
 }
@@ -60,20 +66,54 @@ export interface CommitRosterImportInput extends MutationInput {
 // ---------------------------------------------------------------------------
 
 const ACCOUNTS_SQL = `
-  SELECT u."id", u."role"::text AS "role", u."accessState",
+  SELECT u."id", u."role"::text AS "role", u."accessState", u."profileVersion",
+         u."name", u."grade", u."classNum", u."number", u."gender"::text AS "gender",
+         u."subject", u."homeroom", u."position",
          COALESCE(u."emailKey", lower(btrim(u."email"))) AS "emailKey"
   FROM "User" u
   WHERE COALESCE(u."emailKey", lower(btrim(u."email"))) = ANY($1::text[])
 `;
 
+interface AccountRow {
+  id: number;
+  role: Profile["role"];
+  accessState: string;
+  profileVersion: number;
+  emailKey: string;
+  name: string;
+  grade: number | null;
+  classNum: number | null;
+  number: number | null;
+  gender: "MALE" | "FEMALE" | null;
+  subject: string | null;
+  homeroom: string | null;
+  position: string | null;
+}
+
+function accountOf(row: AccountRow): ExistingAccount {
+  return {
+    id: row.id,
+    role: row.role,
+    accessState: row.accessState,
+    profileVersion: row.profileVersion,
+    profile: {
+      role: row.role,
+      name: row.name,
+      grade: row.grade,
+      classNum: row.classNum,
+      number: row.number,
+      gender: row.gender,
+      subject: row.subject,
+      homeroom: row.homeroom,
+      position: row.position,
+    },
+  };
+}
+
 async function loadAccounts(db: Db, emailKeys: string[]): Promise<Map<string, ExistingAccount>> {
   if (emailKeys.length === 0) return new Map();
-  const rows = await db.$queryRawUnsafe<
-    { id: number; role: Profile["role"]; accessState: string; emailKey: string }[]
-  >(ACCOUNTS_SQL, emailKeys);
-  return new Map(
-    rows.map((row) => [row.emailKey, { id: row.id, role: row.role, accessState: row.accessState }]),
-  );
+  const rows = await db.$queryRawUnsafe<AccountRow[]>(ACCOUNTS_SQL, emailKeys);
+  return new Map(rows.map((row) => [row.emailKey, accountOf(row)]));
 }
 
 async function loadUserVersions(db: Db, userIds: number[]): Promise<Map<number, number>> {
@@ -125,6 +165,12 @@ export async function previewRosterImport(
         "이 파일의 서버 기록이 보존 기간(30일)이 지나 정리되었습니다. 명부를 다시 내려받아 사용하세요.",
       );
     }
+    if (stored.year !== year) {
+      throw new DomainError(
+        "YEAR_MISMATCH",
+        `이 파일은 ${stored.year}학년도 명부로 발행된 것입니다.`,
+      );
+    }
     manifest = stored.manifest as unknown as WorkbookManifest;
   }
 
@@ -156,7 +202,7 @@ export async function previewRosterImport(
 
   const payload: ImportPayload = {
     checks: diff.checks as ImportPayload["checks"],
-    omittedRows: diff.omittedRows as ImportPayload["omittedRows"],
+    omittedEntryIds: diff.omittedEntryIds as ImportPayload["omittedEntryIds"],
     templateOnly: parsed.templateOnly,
   };
 
@@ -189,11 +235,12 @@ interface LoadedImport {
   payload: ImportPayload;
 }
 
-async function loadPreviewImport(db: Db, importId: string): Promise<LoadedImport> {
+async function loadPreviewImport(db: Db, year: number, importId: string): Promise<LoadedImport> {
   const row = await db.rosterImport.findUnique({ where: { id: importId } });
   if (!row) {
     throw new DomainError("MISSING_PROFILE", "미리보기를 찾을 수 없습니다.");
   }
+  assertSameYear(year, row.year);
   if (row.state !== PREVIEW || row.preview === null || row.payload === null) {
     throw new DomainError(
       "VERSION_CONFLICT",
@@ -210,16 +257,24 @@ async function loadPreviewImport(db: Db, importId: string): Promise<LoadedImport
   };
 }
 
+/** 화면이 보고 있는 학년도와 보관된 미리보기의 학년도가 어긋나면 손대지 않는다. */
+function assertSameYear(expected: number, stored: number): void {
+  if (expected !== stored) {
+    throw new DomainError("YEAR_MISMATCH", "이 미리보기는 다른 학년도의 것입니다.");
+  }
+}
+
 export async function resolveImportConflicts(
   db: PrismaClient,
   actor: Actor,
+  year: number,
   importId: string,
   choices: Array<{ token: string; resolution: "USE_FILE" | "KEEP_SERVER" }>,
 ): Promise<ImportPreview> {
   await assertActor(db, actor, "WRITE_ADMIN");
   await requireAcademicReady(db);
 
-  const loaded = await loadPreviewImport(db, importId);
+  const loaded = await loadPreviewImport(db, year, importId);
   const byToken = new Map(choices.map((choice) => [choice.token, choice.resolution]));
 
   const rows: RowChange[] = loaded.preview.rows.map((row) => {
@@ -249,6 +304,7 @@ export async function resolveImportConflicts(
 export async function cancelRosterImport(
   db: PrismaClient,
   actor: Actor,
+  year: number,
   importId: string,
 ): Promise<void> {
   await assertActor(db, actor, "WRITE_ADMIN");
@@ -258,6 +314,7 @@ export async function cancelRosterImport(
   if (!row) {
     throw new DomainError("MISSING_PROFILE", "미리보기를 찾을 수 없습니다.");
   }
+  assertSameYear(year, row.year);
   if (row.state === COMMITTED) {
     throw new DomainError("VERSION_CONFLICT", "이미 반영된 가져오기는 취소할 수 없습니다.");
   }
@@ -302,8 +359,15 @@ async function assertNoDrift(tx: Tx, year: number, state: YearState, checks: Imp
     roster.filter((row) => row.userId !== null).map((row) => [row.userId as number, row]),
   );
 
-  const userIds = checks.map((check) => check.userId).filter((id): id is number => id !== null);
-  const userVersions = state === "DRAFT" ? new Map<number, number>() : await loadUserVersions(tx, userIds);
+  const emailKeys = checks
+    .map((check) => check.requireEmailFree)
+    .filter((key): key is string => key !== null);
+  const userIds = [...checkedUserIds(checks)];
+  const [takenEmails, accountById, userVersions] = await Promise.all([
+    loadAccounts(tx, emailKeys),
+    loadAccountsById(tx, userIds),
+    state === "DRAFT" ? Promise.resolve(new Map<number, number>()) : loadUserVersions(tx, userIds),
+  ]);
 
   const stale = new DomainError(
     "VERSION_CONFLICT",
@@ -311,6 +375,23 @@ async function assertNoDrift(tx: Tx, year: number, state: YearState, checks: Imp
   );
 
   for (const check of checks) {
+    if (check.requireEmailFree !== null) {
+      // 미리보기 때 비어 있던 이메일을 그 사이 누군가 차지했다.
+      if (takenEmails.has(check.requireEmailFree)) throw stale;
+      continue;
+    }
+
+    if (check.rowVersion === null) {
+      // 그 해 명부에는 없지만 이미 있는 계정을 끌어오는 행.
+      const account = check.userId !== null ? accountById.get(check.userId) : undefined;
+      if (!account) throw stale;
+      if (check.accessState !== null && account.accessState !== check.accessState) throw stale;
+      if (account.accessState !== "ACTIVE") throw stale;
+      if (check.role !== null && account.role !== check.role) throw stale;
+      if (check.userVersion !== null && account.profileVersion !== check.userVersion) throw stale;
+      continue;
+    }
+
     const current =
       (check.entryId !== null ? byEntryId.get(check.entryId) : undefined) ??
       (check.userId !== null ? byUserId.get(check.userId) : undefined);
@@ -321,20 +402,31 @@ async function assertNoDrift(tx: Tx, year: number, state: YearState, checks: Imp
   }
 }
 
-function rowsToWrite(
-  preview: ImportPreview,
-  payload: ImportPayload,
-  state: YearState,
-  applyIncluded: boolean,
-): RosterRow[] {
-  const rows = preview.rows
+function checkedUserIds(checks: ImportCheck[]): Set<number> {
+  return new Set(checks.map((check) => check.userId).filter((id): id is number => id !== null));
+}
+
+const ACCOUNTS_BY_ID_SQL = `
+  SELECT u."id", u."role"::text AS "role", u."accessState", u."profileVersion",
+         u."name", u."grade", u."classNum", u."number", u."gender"::text AS "gender",
+         u."subject", u."homeroom", u."position",
+         COALESCE(u."emailKey", lower(btrim(u."email"))) AS "emailKey"
+  FROM "User" u WHERE u."id" = ANY($1::int[])
+`;
+
+async function loadAccountsById(db: Db, ids: number[]): Promise<Map<number, ExistingAccount>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db.$queryRawUnsafe<AccountRow[]>(ACCOUNTS_BY_ID_SQL, ids);
+  return new Map(rows.map((row) => [row.id, accountOf(row)]));
+}
+
+function rowsToWrite(preview: ImportPreview, applyIncluded: boolean): RosterRow[] {
+  return preview.rows
     .filter((row) => row.resolution !== "KEEP_SERVER")
     // included를 직접 정하는 확정에서는 값이 같은 행도 함께 보내야 그 행의
     // 포함 여부가 파일 기준으로 다시 세워진다.
     .filter((row) => applyIncluded || row.kind !== "SAME")
     .map((row) => row.input);
-
-  return applyIncluded && state === "DRAFT" ? [...rows, ...payload.omittedRows] : rows;
 }
 
 /**
@@ -362,13 +454,21 @@ export async function commitRosterImport(
         );
       }
 
-      if (input.year !== undefined && input.year !== row.year) {
-        throw new DomainError("YEAR_MISMATCH", "이 미리보기는 다른 학년도의 것입니다.");
-      }
+      assertSameYear(input.year, row.year);
 
       const preview = row.preview as unknown as ImportPreview;
       const payload = row.payload as unknown as ImportPayload;
       const year = row.year;
+
+      // 요청의 버전이 보관된 미리보기가 본 control 버전과 같아야 한다. control
+      // 버전은 전역 변경(전환·초안 생성·다른 Excel 확정)에서만 움직이므로, 다른
+      // 관리자의 평범한 셀 편집 때문에 확정이 물리지는 않는다.
+      if (input.expectedVersion !== preview.controlVersion) {
+        throw new DomainError(
+          "VERSION_CONFLICT",
+          "이 미리보기 이후 다른 일괄 변경이 반영되었습니다. 파일을 다시 올려주세요.",
+        );
+      }
 
       const state = await readYearState(tx, year);
       assertWritableYear(state);
@@ -378,8 +478,14 @@ export async function commitRosterImport(
 
       const applyIncluded =
         state === "DRAFT" && preview.scope === "FULL" && input.omissionsConfirmed;
-      const rows = rowsToWrite(preview, payload, state, applyIncluded);
+      const rows = rowsToWrite(preview, applyIncluded);
       const summary = await writeRosterProfiles(tx, year, rows, { applyIncluded });
+
+      // 누락된 사람에게는 제외 표시만 쓴다. 값 upsert를 태우면 미리보기 시점의
+      // 이름·이메일이 그 사이의 수정을 덮어써 버린다.
+      const excluded = applyIncluded
+        ? await excludeDraftEntries(tx, year, payload.omittedEntryIds)
+        : { changed: 0, ids: [] };
 
       await tx.rosterImport.update({
         where: { id: row.id },
@@ -387,11 +493,19 @@ export async function commitRosterImport(
           state: COMMITTED,
           payload: Prisma.DbNull,
           preview: Prisma.DbNull,
-          summary: { year, changed: summary.changed, rows: rows.length },
+          summary: {
+            year,
+            changed: summary.changed + excluded.changed,
+            rows: rows.length,
+            excluded: excluded.changed,
+          },
         },
       });
 
-      return summary;
+      return {
+        changed: summary.changed + excluded.changed,
+        ids: [...summary.ids, ...excluded.ids],
+      };
     },
   );
 

@@ -32,6 +32,7 @@ import {
   COPY_DRAFT_SQL,
   DRAFT_EMAIL_TAKEN_SQL,
   EMAIL_TAKEN_SQL,
+  EXCLUDE_DRAFT_ENTRIES_SQL,
   INSERT_USERS_SQL,
   MISSING_RECORDS_SQL,
   PARK_SEATS_SQL,
@@ -550,6 +551,33 @@ export async function writeRosterProfiles(
   return state === "DRAFT"
     ? writeDraftRows(tx, year, rows, applyIncluded)
     : writeConfirmedRows(tx, year, rows, state, applyIncluded);
+}
+
+/**
+ * 초안 명부에서 지정한 항목만 제외 표시한다. 값 upsert를 지나지 않으므로 이름·
+ * 이메일·초안 profile은 손대지 않는다 — Excel 확정이 "파일에 없던 사람"을 표시할
+ * 때 그 사람에 대한 다른 사람의 최신 수정을 되돌리지 않기 위한 유일한 경로다.
+ */
+export async function excludeDraftEntries(
+  tx: Tx,
+  year: number,
+  entryIds: string[],
+): Promise<Summary> {
+  if (entryIds.length === 0) return { changed: 0, ids: [] };
+
+  if ((await readYearState(tx, year)) !== "DRAFT") {
+    throw new DomainError("YEAR_MISMATCH", "초안 학년도에서만 명부 제외를 표시할 수 있습니다.");
+  }
+
+  const excluded = await tx.$queryRawUnsafe<{ id: string }[]>(
+    EXCLUDE_DRAFT_ENTRIES_SQL,
+    year,
+    entryIds,
+  );
+  if (excluded.length > 0) {
+    await tx.$executeRawUnsafe(BUMP_YEAR_SQL, year);
+  }
+  return { changed: excluded.length, ids: excluded.map((row) => row.id) };
 }
 
 /**

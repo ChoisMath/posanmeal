@@ -13,9 +13,13 @@ import type { ParsedRosterRow, ParsedRosterWorkbook } from "./workbook-parser";
 import { ROW_TOKEN_HEADER, type WorkbookManifest } from "./workbook";
 
 /**
- * 확정 때 "미리보기 이후 서버가 바뀌지 않았는가"를 다시 볼 기준. 행 버전은 확정
- * 연도면 `UserAcademicRecord.version`, 초안이면 `RosterEntry.version`이고,
- * `userVersion`은 확정 연도 쓰기가 함께 덮는 `User.profileVersion`이다.
+ * 확정 때 "미리보기가 본 값이 그대로인가"를 다시 볼 기준. 명부 행이 있는 경우의
+ * 행 버전은 확정 연도면 `UserAcademicRecord.version`, 초안이면 `RosterEntry.version`
+ * 이고, `userVersion`은 확정 연도 쓰기가 함께 덮는 `User.profileVersion`이다.
+ *
+ * 그 해 명부에 아직 없는 행도 검사 대상이다 — 기존 계정을 가리키면 그 계정이
+ * (버전·이용 상태·역할 모두) 그대로여야 하고, 아무 계정도 없던 이메일이면
+ * 확정 시점에도 비어 있어야 한다.
  */
 export interface ImportCheck {
   token: string;
@@ -23,12 +27,20 @@ export interface ImportCheck {
   userId: number | null;
   rowVersion: number | null;
   userVersion: number | null;
+  /** 기존 계정을 가리키는 행에서 그 계정이 유지해야 하는 이용 상태·역할. */
+  accessState: string | null;
+  role: Profile["role"] | null;
+  /** 확정 시점에도 아무 계정이 쓰지 않아야 하는 이메일. */
+  requireEmailFree: string | null;
 }
 
 export interface ExistingAccount {
   id: number;
   role: Profile["role"];
   accessState: string;
+  profileVersion: number;
+  /** `User` 행이 현재 담고 있는 값. 확정 연도의 신규 편입 행이 무엇을 덮는지 보여 준다. */
+  profile: Profile;
 }
 
 export interface DiffRosterImportInput {
@@ -50,8 +62,11 @@ export interface DiffRosterImportResult {
   rows: RowChange[];
   checks: ImportCheck[];
   missingUserIds: number[];
-  /** DRAFT + FULL 확정이 `included=false`로 표시할 후보. 그 밖에는 비어 있다. */
-  omittedRows: RosterRow[];
+  /**
+   * DRAFT + FULL 확정이 `included=false`로 표시할 초안 항목. 값이 아니라 id만
+   * 넘긴다 — 누락된 사람의 이름·이메일은 확정 때 쓰지 않는다.
+   */
+  omittedEntryIds: string[];
   fileIssues: RowIssue[];
   canCommit: boolean;
 }
@@ -90,7 +105,7 @@ function rowFrom(current: RosterRowView, source: ParsedRosterRow, emailKey: stri
   };
 }
 
-function checkFor(
+function memberCheck(
   token: string,
   current: RosterRowView,
   state: YearState,
@@ -106,6 +121,39 @@ function checkFor(
       state === "DRAFT" || current.userId === null
         ? null
         : userVersions.get(current.userId) ?? null,
+    accessState: null,
+    role: null,
+    requireEmailFree: null,
+  };
+}
+
+function newRowCheck(
+  token: string,
+  emailKey: string,
+  account: ExistingAccount | undefined,
+  state: YearState,
+): ImportCheck {
+  if (!account) {
+    return {
+      token,
+      entryId: null,
+      userId: null,
+      rowVersion: null,
+      userVersion: null,
+      accessState: null,
+      role: null,
+      requireEmailFree: emailKey,
+    };
+  }
+  return {
+    token,
+    entryId: null,
+    userId: account.id,
+    rowVersion: null,
+    userVersion: state === "DRAFT" ? null : account.profileVersion,
+    accessState: account.accessState,
+    role: account.role,
+    requireEmailFree: null,
   };
 }
 
@@ -127,6 +175,15 @@ function indexRoster(roster: RosterRowView[]): RosterIndex {
   return { byEntryId, byUserId, byEmailKey };
 }
 
+/** 한 파일 행의 판정 결과. 같은 사람을 두 번 가리키는 파일을 뒤에서 걸러내려고 근거를 들고 있는다. */
+interface DiffEntry {
+  source: ParsedRosterRow;
+  change: RowChange;
+  check: ImportCheck | null;
+  /** 이 행이 가리킨 사람. 같은 값이 두 번 나오면 파일이 한 사람을 두 줄로 적은 것이다. */
+  subject: string | null;
+}
+
 /**
  * 순수 대조. DB에 닿지 않고 파일·현재 명부·서버 대응표만으로 행 종류를 정한다.
  * 어느 행도 이름 유사도나 학번으로 사람을 추측해 묶지 않는다 — 대응표의 토큰이나
@@ -135,108 +192,111 @@ function indexRoster(roster: RosterRowView[]): RosterIndex {
 export function diffRosterImport(input: DiffRosterImportInput): DiffRosterImportResult {
   const { parsed, state, scope, manifest, accounts } = input;
   const index = indexRoster(input.roster);
-
-  const rows: RowChange[] = [];
-  const checks: ImportCheck[] = [];
-  const matchedEntryIds = new Set<string>();
-  const matchedUserIds = new Set<number>();
+  const entries: DiffEntry[] = [];
 
   for (const source of parsed.rows) {
     const emailKey = normalizeEmail(source.email);
     const token = randomUUID();
     const issues: RowIssue[] = [];
 
-    const review = (change: Omit<RowChange, "token">): void => {
-      rows.push({ ...change, token });
-    };
-
     const current = source.rowToken
       ? resolveByToken(source, manifest, index, issues)
       : resolveByEmail(source, emailKey, parsed.templateOnly, index, issues);
 
     if (issues.length > 0) {
-      review({
-        kind: "REVIEW",
-        input: {
-          entryId: current?.entryId ?? randomUUID(),
-          userId: current?.userId ?? null,
-          email: source.email,
-          emailKey,
-          profile: source.profile,
-          baseUserVersion: current?.baseUserVersion ?? null,
-          included: true,
+      entries.push({
+        source,
+        check: null,
+        subject: null,
+        change: {
+          kind: "REVIEW",
+          token,
+          input: {
+            entryId: current?.entryId ?? randomUUID(),
+            userId: current?.userId ?? null,
+            email: source.email,
+            emailKey,
+            profile: source.profile,
+            baseUserVersion: current?.baseUserVersion ?? null,
+            included: true,
+          },
+          before: current?.profile ?? null,
+          issues,
         },
-        before: current?.profile ?? null,
-        issues,
       });
       continue;
     }
 
     if (current) {
-      if (current.entryId.length > 0) matchedEntryIds.add(current.entryId);
-      if (current.userId !== null) matchedUserIds.add(current.userId);
-
       const row = rowFrom(current, source, emailKey);
-      checks.push(checkFor(token, current, state, input.userVersions));
-
       const seen = source.rowToken ? manifest?.rows[source.rowToken]?.version : undefined;
-      if (seen !== undefined && seen !== current.version) {
-        review({
-          kind: "CONFLICT",
-          input: row,
-          before: current.profile,
-          issues: [],
-          server: current.profile,
-        });
-        continue;
-      }
+      const conflicted = seen !== undefined && seen !== current.version;
 
-      review({
-        kind: sameProfile(source.profile, current.profile) ? "SAME" : "CHANGED",
-        input: row,
-        before: current.profile,
-        issues: [],
+      entries.push({
+        source,
+        check: memberCheck(token, current, state, input.userVersions),
+        subject: subjectKeyOf(current.entryId, current.userId),
+        change: conflicted
+          ? {
+              kind: "CONFLICT",
+              token,
+              input: row,
+              before: current.profile,
+              issues: [],
+              server: current.profile,
+            }
+          : {
+              kind: sameProfile(source.profile, current.profile) ? "SAME" : "CHANGED",
+              token,
+              input: row,
+              before: current.profile,
+              issues: [],
+            },
       });
       continue;
     }
 
     const account = accounts.get(emailKey);
     const blocked = newRowIssue(source, account);
-    if (blocked) {
-      review({
-        kind: "REVIEW",
-        input: {
-          entryId: randomUUID(),
-          userId: account?.id ?? null,
-          email: source.email,
-          emailKey,
-          profile: source.profile,
-          baseUserVersion: null,
-          included: true,
-        },
-        before: null,
-        issues: [blocked],
-      });
-      continue;
-    }
+    const newInput: RosterRow = {
+      entryId: randomUUID(),
+      userId: account?.id ?? null,
+      email: source.email,
+      emailKey,
+      profile: source.profile,
+      baseUserVersion: null,
+      included: true,
+    };
 
-    review({
-      kind: "NEW",
-      input: {
-        entryId: randomUUID(),
-        userId: account?.id ?? null,
-        email: source.email,
-        emailKey,
-        profile: source.profile,
-        baseUserVersion: null,
-        included: true,
-      },
-      before: null,
-      issues: [],
+    entries.push({
+      source,
+      check: blocked ? null : newRowCheck(token, emailKey, account, state),
+      subject: blocked ? null : subjectKeyOf(null, account?.id ?? null) ?? `email:${emailKey}`,
+      change: blocked
+        ? { kind: "REVIEW", token, input: newInput, before: null, issues: [blocked] }
+        : {
+            kind: "NEW",
+            token,
+            input: newInput,
+            // 이미 있는 계정을 그 해 명부로 끌어오는 행이면 무엇을 덮게 되는지 보여 준다.
+            before: account?.profile ?? null,
+            issues: [],
+          },
     });
   }
 
-  const { missingUserIds, omittedRows } = omissionsOf(
+  flagDuplicateSubjects(entries);
+
+  const matchedEntryIds = new Set<string>();
+  const matchedUserIds = new Set<number>();
+  for (const entry of entries) {
+    if (entry.change.kind === "REVIEW") continue;
+    const { entryId, userId } = entry.change.input;
+    if (entryId.length > 0) matchedEntryIds.add(entryId);
+    if (userId !== null) matchedUserIds.add(userId);
+  }
+
+  const { missingUserIds, omittedEntryIds, omittedChecks } = omissionsOf(
     input,
     matchedEntryIds,
     matchedUserIds,
@@ -244,14 +304,61 @@ export function diffRosterImport(input: DiffRosterImportInput): DiffRosterImport
     state,
   );
 
+  const rows = entries.map((entry) => entry.change);
+  const checks = entries
+    .map((entry) => entry.check)
+    .filter((check): check is ImportCheck => check !== null);
+
   return {
     rows,
-    checks,
+    checks: [...checks, ...omittedChecks],
     missingUserIds,
-    omittedRows,
+    omittedEntryIds,
     fileIssues: parsed.issues,
     canCommit: canCommitWith(rows, parsed.issues),
   };
+}
+
+function subjectKeyOf(entryId: string | null, userId: number | null): string | null {
+  if (entryId !== null && entryId.length > 0) return `entry:${entryId}`;
+  if (userId !== null) return `user:${userId}`;
+  return null;
+}
+
+/**
+ * 한 사람을 두 줄로 적은 파일(토큰 둘이 같은 행을 가리키거나, 토큰 있는 줄과
+ * 토큰 없는 줄이 같은 사람을 가리키는 경우). 확정 때 일괄 쓰기의 식별 충돌로
+ * 터지기 전에 두 줄 모두를 보여 주고 막는다.
+ */
+function flagDuplicateSubjects(entries: DiffEntry[]): void {
+  const seen = new Map<string, DiffEntry[]>();
+  for (const entry of entries) {
+    if (entry.subject === null) continue;
+    const bucket = seen.get(entry.subject);
+    if (bucket) bucket.push(entry);
+    else seen.set(entry.subject, [entry]);
+  }
+
+  for (const bucket of seen.values()) {
+    if (bucket.length < 2) continue;
+    for (const entry of bucket) {
+      entry.check = null;
+      entry.subject = null;
+      entry.change = {
+        ...entry.change,
+        kind: "REVIEW",
+        issues: [
+          ...entry.change.issues,
+          issue(
+            entry.source,
+            ROW_TOKEN_HEADER,
+            "DUPLICATE_ROSTER_MATCH",
+            "같은 사람을 가리키는 행이 여러 개입니다. 한 줄만 남긴 뒤 다시 올려주세요.",
+          ),
+        ],
+      };
+    }
+  }
 }
 
 function resolveByToken(
@@ -342,14 +449,19 @@ function newRowIssue(source: ParsedRosterRow, account: ExistingAccount | undefin
   return null;
 }
 
+/**
+ * 누락된 사람에게는 `included` 말고 아무것도 쓰지 않으므로 값을 실어 두지 않는다.
+ * 다만 미리보기가 그 행의 버전을 봤다는 사실은 남겨, 목록을 보여 준 뒤 누군가
+ * 그 사람을 고쳤다면 확정이 물리게 한다.
+ */
 function omissionsOf(
   input: DiffRosterImportInput,
   matchedEntryIds: Set<string>,
   matchedUserIds: Set<number>,
   scope: ImportScope,
   state: YearState,
-): { missingUserIds: number[]; omittedRows: RosterRow[] } {
-  if (scope !== "FULL") return { missingUserIds: [], omittedRows: [] };
+): { missingUserIds: number[]; omittedEntryIds: string[]; omittedChecks: ImportCheck[] } {
+  if (scope !== "FULL") return { missingUserIds: [], omittedEntryIds: [], omittedChecks: [] };
 
   const covered = new Set(input.parsed.coveredRoles);
   const omitted = input.roster.filter(
@@ -360,20 +472,28 @@ function omissionsOf(
       !(row.userId !== null && matchedUserIds.has(row.userId)),
   );
 
+  if (state !== "DRAFT") {
+    return {
+      missingUserIds: omitted.map((row) => row.userId).filter((id): id is number => id !== null),
+      omittedEntryIds: [],
+      omittedChecks: [],
+    };
+  }
+
+  const withEntry = omitted.filter((row) => row.entryId.length > 0);
   return {
     missingUserIds: omitted.map((row) => row.userId).filter((id): id is number => id !== null),
-    omittedRows:
-      state === "DRAFT"
-        ? omitted.map((row) => ({
-            entryId: row.entryId,
-            userId: row.userId,
-            email: row.email,
-            emailKey: row.emailKey,
-            profile: row.profile,
-            baseUserVersion: row.baseUserVersion,
-            included: false,
-          }))
-        : [],
+    omittedEntryIds: withEntry.map((row) => row.entryId),
+    omittedChecks: withEntry.map((row) => ({
+      token: `omitted:${row.entryId}`,
+      entryId: row.entryId,
+      userId: row.userId,
+      rowVersion: row.version,
+      userVersion: null,
+      accessState: null,
+      role: null,
+      requireEmailFree: null,
+    })),
   };
 }
 

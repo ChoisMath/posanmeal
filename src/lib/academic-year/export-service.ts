@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { assertActor } from "./access";
 import type { Actor } from "./contracts";
+import type { PrismaClient } from "@/generated/prisma/client";
 import type { Db } from "./db";
 import { requireAcademicReady } from "./readiness";
 import { purgeExpiredRosterCopies } from "./retention";
@@ -39,7 +40,7 @@ async function exportableRows(db: Db, year: number): Promise<{ rows: (RosterRow 
  * 성공적으로 만들어진 뒤에만 기록해, 빌드 실패가 짝 없는 행을 남기지 않는다.
  */
 export async function exportRoster(
-  db: Db,
+  db: PrismaClient,
   actor: Actor,
   year: number,
   includeData: boolean,

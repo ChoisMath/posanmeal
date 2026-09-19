@@ -23,40 +23,53 @@ function maxFileSizeMb(): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 5;
 }
 
+function tooLarge(limitMb: number): NextResponse {
+  return NextResponse.json(
+    {
+      error: {
+        code: "FILE_TOO_LARGE",
+        message: `파일이 너무 큽니다. 최대 ${limitMb}MB까지 올릴 수 있습니다.`,
+      },
+    },
+    { status: 413 },
+  );
+}
+
 export async function POST(request: Request, { params }: { params: Promise<{ year: string }> }) {
-  return routeResponse(async () => {
-    const actor = await requireActor("WRITE_ADMIN");
-    const year = parseYear((await params).year);
+  try {
+    return await routeResponse(async () => {
+      const actor = await requireActor("WRITE_ADMIN");
+      const year = parseYear((await params).year);
 
-    const form = await request.formData().catch(() => null);
-    const file = form?.get("file");
-    if (!(file instanceof File)) {
-      throw new DomainError("INVALID_FILE", "파일이 필요합니다.");
-    }
+      // 본문을 버퍼에 올리기 전에 먼저 끊는다. Content-Length가 없거나 거짓이면
+      // 아래 file.size 검사가 같은 한도로 다시 막는다.
+      const limitMb = maxFileSizeMb();
+      const declared = Number.parseInt(request.headers.get("content-length") ?? "", 10);
+      if (Number.isInteger(declared) && declared > limitMb * 1024 * 1024) {
+        return tooLarge(limitMb);
+      }
 
-    const scope = scopeSchema.safeParse(form?.get("scope"));
-    if (!scope.success) {
-      throw new DomainError("MISSING_PROFILE", "반영 범위는 PARTIAL 또는 FULL이어야 합니다.");
-    }
+      const form = await request.formData().catch(() => null);
+      const file = form?.get("file");
+      if (!(file instanceof File)) {
+        throw new DomainError("INVALID_FILE", "파일이 필요합니다.");
+      }
 
-    // 파싱 전에 크기를 끊는다. 큰 워크북은 읽는 동안 메모리를 그만큼 차지한다.
-    const limitMb = maxFileSizeMb();
-    if (file.size > limitMb * 1024 * 1024) {
-      return NextResponse.json(
-        {
-          error: {
-            code: "FILE_TOO_LARGE",
-            message: `파일이 너무 큽니다. 최대 ${limitMb}MB까지 올릴 수 있습니다.`,
-          },
-        },
-        { status: 413 },
-      );
-    }
+      const scope = scopeSchema.safeParse(form?.get("scope"));
+      if (!scope.success) {
+        throw new DomainError("MISSING_PROFILE", "반영 범위는 PARTIAL 또는 FULL이어야 합니다.");
+      }
 
-    const preview = await previewRosterImport(prisma, actor, year, scope.data, await file.arrayBuffer());
+      // 워크북 파싱 전에 실제 크기로 다시 끊는다.
+      if (file.size > limitMb * 1024 * 1024) {
+        return tooLarge(limitMb);
+      }
 
+      const preview = await previewRosterImport(prisma, actor, year, scope.data, await file.arrayBuffer());
+      return NextResponse.json({ preview });
+    });
+  } finally {
+    // 실패한 업로드도 정리의 기회다. 이 호출은 절대 응답을 바꾸지 않는다.
     await purgeExpiredRosterCopies(prisma, new Date());
-
-    return NextResponse.json({ preview });
-  });
+  }
 }
