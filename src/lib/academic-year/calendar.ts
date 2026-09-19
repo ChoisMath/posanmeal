@@ -27,3 +27,13 @@ export function nextKstMidnight(now: Date): Date {
   const nextShiftedMidnight = Math.floor(shifted / DAY_MS) * DAY_MS + DAY_MS;
   return new Date(nextShiftedMidnight - KST_OFFSET_MS);
 }
+
+/** 절대시각이 속한 KST 날짜. `nowKST()`의 재해석된 Date를 넣으면 안 된다. */
+export function kstDateKey(at: Date): string {
+  return new Date(at.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const date = dateKeyToUtcDate(dateKey);
+  return new Date(date.getTime() + days * DAY_MS).toISOString().slice(0, 10);
+}

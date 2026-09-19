@@ -3,8 +3,15 @@ import { verifyQRToken } from "@/lib/qr-token";
 import { prisma } from "@/lib/prisma";
 import { todayKST, nowKST } from "@/lib/timezone";
 import { getCachedSettings } from "@/lib/settings-cache";
-import { isStudentEligibleToday, resolveMealKind, type MealKind } from "@/lib/meal-kind";
+import { resolveMealKind, type MealKind } from "@/lib/meal-kind";
 import { MEAL_LABEL } from "@/lib/meal-plan";
+import {
+  ACCOUNT_INACTIVE_MESSAGE,
+  displayUserOf,
+  isStudentEligibleIn,
+  readCheckInUser,
+  readDisplayProfile,
+} from "@/lib/checkin-account";
 
 export async function POST(request: Request) {
   try {
@@ -39,36 +46,36 @@ export async function POST(request: Request) {
     const today = todayKST();
     const todayDate = new Date(today);
 
-    const [eligible, existing, user] = await Promise.all([
-      payload.role === "STUDENT"
-        ? isStudentEligibleToday(payload.userId, mealKind as MealKind, todayDate)
-        : Promise.resolve(true),
-      prisma.checkIn.findFirst({
-        where: {
-          userId: payload.userId,
-          date: todayDate,
-          mealKind: mealKind as MealKind,
-        },
-      }),
-      prisma.user.findUnique({
-        where: { id: payload.userId },
-        select: { id: true, name: true, role: true, grade: true, classNum: true, number: true, photoUrl: true },
-      }),
-    ]);
-
-    if (!user) {
+    const account = await readCheckInUser(prisma, payload.userId);
+    if (!account) {
       return NextResponse.json(
         { success: false, error: "사용자를 찾을 수 없습니다." },
         { status: 404 },
       );
     }
 
-    if (payload.role === "STUDENT" && !eligible) {
+    if (account.accessState !== "ACTIVE") {
       return NextResponse.json(
-        { success: false, error: "식사 신청 기간이 아닙니다.", errorCode: "NO_MEAL_PERIOD" },
+        { success: false, error: ACCOUNT_INACTIVE_MESSAGE, errorCode: "ACCOUNT_INACTIVE" },
+        { status: 403 },
+      );
+    }
+
+    // QR에 적힌 역할이 아니라 지금의 명부 행으로 판단한다. 교사였다가 학생이 된
+    // 계정의 옛 QR이 근무 식사로 통과하면 안 된다.
+    const expectedType = account.role === "STUDENT" ? "STUDENT" : payload.type;
+    if (account.role === "STUDENT" ? payload.type !== "STUDENT" : payload.type === "STUDENT") {
+      return NextResponse.json(
+        { success: false, error: "QR을 새로 발급받아 주세요.", errorCode: "ROLE_CHANGED" },
         { status: 400 },
       );
     }
+
+    const user = displayUserOf(account, await readDisplayProfile(prisma, account.id, today));
+
+    const existing = await prisma.checkIn.findFirst({
+      where: { userId: account.id, date: todayDate, mealKind: mealKind as MealKind },
+    });
 
     if (existing) {
       return NextResponse.json({
@@ -81,22 +88,48 @@ export async function POST(request: Request) {
       });
     }
 
-    const checkIn = await prisma.checkIn.create({
-      data: {
-        userId: payload.userId,
-        date: todayDate,
-        mealKind: mealKind as MealKind,
-        type: payload.type,
-        source: "QR",
-      },
+    // 삽입 직전에 같은 트랜잭션에서 이용 상태와 자격을 다시 읽는다. 명부 잠금은
+    // 잡지 않으므로 이용 중단과 수 ms 차이로 겹친 한 건은 허용하고, 중복은
+    // (userId, date, mealKind) unique가 막는다.
+    const outcome = await prisma.$transaction(async (tx) => {
+      const current = await readCheckInUser(tx, account.id);
+      if (!current || current.accessState !== "ACTIVE") return "INACTIVE" as const;
+
+      if (current.role === "STUDENT") {
+        const eligible = await isStudentEligibleIn(tx, account.id, mealKind as MealKind, todayDate);
+        if (!eligible) return "NOT_APPLICANT" as const;
+      }
+
+      return tx.checkIn.create({
+        data: {
+          userId: account.id,
+          date: todayDate,
+          mealKind: mealKind as MealKind,
+          type: expectedType,
+          source: "QR",
+        },
+      });
     });
+
+    if (outcome === "INACTIVE") {
+      return NextResponse.json(
+        { success: false, error: ACCOUNT_INACTIVE_MESSAGE, errorCode: "ACCOUNT_INACTIVE" },
+        { status: 403 },
+      );
+    }
+    if (outcome === "NOT_APPLICANT") {
+      return NextResponse.json(
+        { success: false, error: "식사 신청 기간이 아닙니다.", errorCode: "NO_MEAL_PERIOD" },
+        { status: 400 },
+      );
+    }
 
     return NextResponse.json({
       success: true,
       user,
-      type: payload.type,
+      type: expectedType,
       mealKind,
-      checkedAt: checkIn.checkedAt,
+      checkedAt: outcome.checkedAt,
     });
   } catch (err: unknown) {
     if (

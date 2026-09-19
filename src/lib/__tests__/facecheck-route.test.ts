@@ -3,36 +3,49 @@ import { FACE_EMBEDDING_DIM } from "@/lib/face-constants";
 
 const mocks = vi.hoisted(() => ({
   userFindUnique: vi.fn(),
+  userFindMany: vi.fn(),
+  recordFindMany: vi.fn(),
   checkInFindFirst: vi.fn(),
   checkInCreate: vi.fn(),
+  mealDateFindFirst: vi.fn(),
   getFaceCandidates: vi.fn(),
   getCachedSettings: vi.fn(),
-  isStudentEligibleToday: vi.fn(),
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    user: { findUnique: mocks.userFindUnique },
+vi.mock("@/lib/prisma", () => {
+  const prisma = {
+    user: { findUnique: mocks.userFindUnique, findMany: mocks.userFindMany },
+    userAcademicRecord: { findMany: mocks.recordFindMany },
     checkIn: { findFirst: mocks.checkInFindFirst, create: mocks.checkInCreate },
-  },
-}));
+    mealRegistrationMealDate: { findFirst: mocks.mealDateFindFirst },
+    $queryRaw: () => Promise.resolve([{ mode: "PREPARING" }]),
+    $transaction: (run: (tx: unknown) => Promise<unknown>) => run(prisma),
+  };
+  return { prisma };
+});
 vi.mock("@/lib/face-embedding-cache", () => ({
   getFaceCandidates: mocks.getFaceCandidates,
 }));
 vi.mock("@/lib/settings-cache", () => ({
   getCachedSettings: mocks.getCachedSettings,
 }));
-vi.mock("@/lib/meal-kind", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/meal-kind")>();
-  return { ...actual, isStudentEligibleToday: mocks.isStudentEligibleToday };
-});
-
 // 축 0 단위벡터 — 등록 임베딩과 요청 임베딩을 동일하게 두어 유사도 1
 const emb = Array.from({ length: FACE_EMBEDDING_DIM }, (_, i) => (i === 0 ? 1 : 0));
 
-const STUDENT = { id: 1, name: "김학생", role: "STUDENT", grade: 2, classNum: 3, number: 7, photoUrl: null };
+const STUDENT = {
+  id: 1, name: "김학생", role: "STUDENT", grade: 2, classNum: 3, number: 7,
+  photoUrl: null, accessState: "ACTIVE",
+};
 const confirmation = { userId: 1, mealKind: "DINNER", date: "2026-09-02" };
-const TEACHER = { id: 9, name: "박교사", role: "TEACHER", grade: null, classNum: null, number: null, photoUrl: null };
+const TEACHER = {
+  id: 9, name: "박교사", role: "TEACHER", grade: null, classNum: null, number: null,
+  photoUrl: null, accessState: "ACTIVE",
+};
+
+/** PREPARING의 표기 대체 경로가 읽는 행. 학년도 기록이 없으면 계정 값을 쓴다. */
+function profileRow(user: typeof STUDENT | typeof TEACHER) {
+  return { ...user, gender: null, subject: null, homeroom: null, position: null };
+}
 
 function request(body: unknown, headers: Record<string, string> = {}) {
   return new Request("http://localhost/api/facecheck", {
@@ -63,7 +76,9 @@ describe("/api/facecheck", () => {
       { userId: 1, embeddings: [Float32Array.from(emb)] },
     ]);
     mocks.checkInFindFirst.mockResolvedValue(null);
-    mocks.isStudentEligibleToday.mockResolvedValue(true);
+    mocks.recordFindMany.mockResolvedValue([]);
+    mocks.userFindMany.mockResolvedValue([profileRow(STUDENT), profileRow(TEACHER)]);
+    mocks.mealDateFindFirst.mockResolvedValue({ registrationId: 1 });
     mocks.checkInCreate.mockResolvedValue({ checkedAt: new Date("2026-09-02T09:00:00Z") });
   });
 
@@ -133,7 +148,7 @@ describe("/api/facecheck", () => {
 
   it("학생 미자격 → notApplicant, 체크인 없음", async () => {
     mocks.userFindUnique.mockResolvedValue(STUDENT);
-    mocks.isStudentEligibleToday.mockResolvedValue(false);
+    mocks.mealDateFindFirst.mockResolvedValue(null);
     const { POST } = await import("@/app/api/facecheck/route");
     const body = await (await POST(request({ embedding: emb, confirmation }))).json();
     expect(body.notApplicant).toBe(true);
@@ -212,13 +227,13 @@ describe("/api/facecheck", () => {
     mocks.userFindUnique.mockResolvedValue(user);
     mocks.getFaceCandidates.mockResolvedValue([{ userId: user.id, embeddings: [Float32Array.from(emb)] }]);
     mocks.checkInFindFirst.mockResolvedValue({ checkedAt: new Date() });
-    mocks.isStudentEligibleToday.mockResolvedValue(false);
+    mocks.mealDateFindFirst.mockResolvedValue(null);
     const { POST } = await import("@/app/api/facecheck/route");
     const body = await (await POST(request({ embedding: emb, type: "WORK" }))).json();
     expect(body).toMatchObject({ success: false, matched: true, needConfirmation: true,
       needType: user.role === "TEACHER", user: { id: user.id }, mealKind: "DINNER", date: "2026-09-02" });
     expect(mocks.checkInFindFirst).not.toHaveBeenCalled();
-    expect(mocks.isStudentEligibleToday).not.toHaveBeenCalled();
+    expect(mocks.mealDateFindFirst).not.toHaveBeenCalled();
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
 
@@ -249,6 +264,29 @@ describe("/api/facecheck", () => {
     const { POST } = await import("@/app/api/facecheck/route");
     const body = await (await POST(request({ embedding: emb, confirmation }))).json();
     expect(body).toMatchObject({ success: false, errorCode: "ROLE_NOT_ALLOWED" });
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+  });
+
+  it("이용이 중지된 계정은 매칭 단계에서 저장 없이 거절한다", async () => {
+    mocks.userFindUnique.mockResolvedValue({ ...STUDENT, accessState: "INACTIVE" });
+    const { POST } = await import("@/app/api/facecheck/route");
+    const res = await POST(request({ embedding: emb }));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body).toMatchObject({ success: false, errorCode: "ACCOUNT_INACTIVE" });
+    expect(mocks.checkInCreate).not.toHaveBeenCalled();
+  });
+
+  it("확인 요청 뒤 저장 직전에 이용이 중지되면 저장하지 않는다", async () => {
+    mocks.userFindUnique
+      .mockResolvedValueOnce(STUDENT)
+      .mockResolvedValueOnce({ ...STUDENT, accessState: "INACTIVE" });
+    const { POST } = await import("@/app/api/facecheck/route");
+    const res = await POST(request({ embedding: emb, confirmation }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).errorCode).toBe("ACCOUNT_INACTIVE");
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
   });
 

@@ -3,16 +3,18 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { todayKST, nowKST } from "@/lib/timezone";
 import { getCachedSettings } from "@/lib/settings-cache";
-import { isStudentEligibleToday, resolveMealKind, type MealKind } from "@/lib/meal-kind";
+import { resolveMealKind, type MealKind } from "@/lib/meal-kind";
 import { MEAL_LABEL } from "@/lib/meal-plan";
 import { getFaceCandidates } from "@/lib/face-embedding-cache";
 import { decideMatch, rankCandidates, scoreSummary } from "@/lib/face-match";
 import { faceCheckSchema } from "@/lib/schemas/face";
-
-const USER_SELECT = {
-  id: true, name: true, role: true,
-  grade: true, classNum: true, number: true, photoUrl: true,
-} as const;
+import {
+  ACCOUNT_INACTIVE_MESSAGE,
+  displayUserOf,
+  isStudentEligibleIn,
+  readCheckInUser,
+  readDisplayProfile,
+} from "@/lib/checkin-account";
 
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 120;
@@ -92,15 +94,24 @@ export async function POST(request: Request) {
 
     const date = todayKST();
     const todayDate = new Date(date);
-    const user = await prisma.user.findUnique({ where: { id: match.userId }, select: USER_SELECT });
+    const account = await readCheckInUser(prisma, match.userId);
 
-    if (!user) {
+    if (!account) {
       return NextResponse.json({ success: false, error: "사용자를 찾을 수 없습니다." }, { status: 404 });
     }
 
-    if (user.role !== "STUDENT" && user.role !== "TEACHER") {
+    if (account.role !== "STUDENT" && account.role !== "TEACHER") {
       return NextResponse.json({ success: false, error: "체크인할 수 없는 사용자입니다.", errorCode: "ROLE_NOT_ALLOWED" }, { status: 403 });
     }
+
+    if (account.accessState !== "ACTIVE") {
+      return NextResponse.json(
+        { success: false, matched: true, ...score, error: ACCOUNT_INACTIVE_MESSAGE, errorCode: "ACCOUNT_INACTIVE" },
+        { status: 403 },
+      );
+    }
+
+    const user = displayUserOf(account, await readDisplayProfile(prisma, account.id, date));
 
     if (confirmation && (confirmation.userId !== user.id || confirmation.mealKind !== mealKind || confirmation.date !== date)) {
       return NextResponse.json({
@@ -109,9 +120,9 @@ export async function POST(request: Request) {
       });
     }
 
-    if (!confirmation || (user.role === "TEACHER" && !type)) {
+    if (!confirmation || (account.role === "TEACHER" && !type)) {
       return NextResponse.json({
-        success: false, matched: true, needConfirmation: true, needType: user.role === "TEACHER",
+        success: false, matched: true, needConfirmation: true, needType: account.role === "TEACHER",
         user, mealKind, date, ...score,
       });
     }
@@ -133,35 +144,31 @@ export async function POST(request: Request) {
       });
     }
 
-    let checkInType: "STUDENT" | "WORK" | "PERSONAL";
-    if (user.role === "TEACHER") {
-      checkInType = type!;
-    } else {
-      const eligible = await isStudentEligibleToday(user.id, mealKind as MealKind, todayDate);
-      if (!eligible) {
-        return NextResponse.json({
-          success: false,
-          matched: true,
-          ...score,
-          notApplicant: true,
-          user,
-          mealKind,
-          error: `오늘 ${MEAL_LABEL[mealKind]} 신청자가 아닙니다.`,
-        });
-      }
-      checkInType = "STUDENT";
-    }
+    const checkInType: "STUDENT" | "WORK" | "PERSONAL" =
+      account.role === "TEACHER" ? type! : "STUDENT";
 
-    let checkIn;
+    // 저장 직전에 같은 트랜잭션에서 이용 상태와 자격을 다시 읽는다. 명부 잠금은
+    // 잡지 않는다 — 식당 줄이 명부 작업 뒤에 서면 안 된다.
+    let outcome: "INACTIVE" | "NOT_APPLICANT" | { checkedAt: Date };
     try {
-      checkIn = await prisma.checkIn.create({
-        data: {
-          userId: user.id,
-          date: todayDate,
-          mealKind: mealKind as MealKind,
-          type: checkInType,
-          source: "FACE",
-        },
+      outcome = await prisma.$transaction(async (tx) => {
+        const current = await readCheckInUser(tx, user.id);
+        if (!current || current.accessState !== "ACTIVE") return "INACTIVE" as const;
+
+        if (current.role === "STUDENT") {
+          const eligible = await isStudentEligibleIn(tx, user.id, mealKind as MealKind, todayDate);
+          if (!eligible) return "NOT_APPLICANT" as const;
+        }
+
+        return tx.checkIn.create({
+          data: {
+            userId: user.id,
+            date: todayDate,
+            mealKind: mealKind as MealKind,
+            type: checkInType,
+            source: "FACE",
+          },
+        });
       });
     } catch (err: unknown) {
       if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "P2002") {
@@ -182,6 +189,25 @@ export async function POST(request: Request) {
       throw err;
     }
 
+    if (outcome === "INACTIVE") {
+      return NextResponse.json(
+        { success: false, matched: true, ...score, error: ACCOUNT_INACTIVE_MESSAGE, errorCode: "ACCOUNT_INACTIVE" },
+        { status: 403 },
+      );
+    }
+
+    if (outcome === "NOT_APPLICANT") {
+      return NextResponse.json({
+        success: false,
+        matched: true,
+        ...score,
+        notApplicant: true,
+        user,
+        mealKind,
+        error: `오늘 ${MEAL_LABEL[mealKind]} 신청자가 아닙니다.`,
+      });
+    }
+
     return NextResponse.json({
       success: true,
       matched: true,
@@ -189,7 +215,7 @@ export async function POST(request: Request) {
       user,
       type: checkInType,
       mealKind,
-      checkedAt: checkIn.checkedAt,
+      checkedAt: outcome.checkedAt,
     });
   } catch (err: unknown) {
     console.error("facecheck error:", err);

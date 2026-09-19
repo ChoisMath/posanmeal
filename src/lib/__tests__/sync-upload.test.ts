@@ -3,19 +3,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
-  canWriteAdmin: vi.fn(() => true),
   userFindUnique: vi.fn(),
   checkInCreate: vi.fn(),
   mealRegistrationFindFirst: vi.fn(),
+  reviewFindUnique: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
-vi.mock("@/lib/permissions", () => ({ canWriteAdmin: mocks.canWriteAdmin }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mocks.userFindUnique },
     checkIn: { create: mocks.checkInCreate },
     mealRegistration: { findFirst: mocks.mealRegistrationFindFirst },
+    localCheckInReview: { findUnique: mocks.reviewFindUnique },
+    // Release A(PREPARING): 근거 없이 기존과 같이 삽입한다.
+    $queryRaw: () => Promise.resolve([{ mode: "PREPARING" }]),
   },
 }));
 
@@ -30,8 +32,7 @@ function buildRequest(body: unknown) {
 describe("/api/sync/upload — local-mode sync preserves IDB-saved check-ins", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.canWriteAdmin.mockReturnValue(true);
-    mocks.auth.mockResolvedValue({ user: { dbUserId: 1, adminLevel: "ADMIN" } });
+    mocks.auth.mockResolvedValue({ user: { role: "ADMIN", dbUserId: 0, adminLevel: "ADMIN" } });
   });
 
   it("inserts a student check-in without re-validating meal registration", async () => {
@@ -286,15 +287,31 @@ describe("/api/sync/upload — local-mode sync preserves IDB-saved check-ins", (
     ]);
   });
 
-  it("returns 403 for non-admin sessions without touching prisma", async () => {
-    mocks.canWriteAdmin.mockReturnValue(false);
+  it("returns 401 for signed-out sessions without touching prisma", async () => {
+    mocks.auth.mockResolvedValue(null);
     const { POST } = await import("@/app/api/sync/upload/route");
 
     const res = await POST(buildRequest({ checkins: [{ clientId: 1, userId: 1, date: "2026-05-08", mealKind: "DINNER", checkedAt: "2026-05-08T10:30:00.000Z", type: "STUDENT" }] }));
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(mocks.userFindUnique).not.toHaveBeenCalled();
     expect(mocks.checkInCreate).not.toHaveBeenCalled();
+  });
+
+  it("PREPARING에서는 검토 행을 만들지 않는다", async () => {
+    const { POST } = await import("@/app/api/sync/upload/route");
+    mocks.userFindUnique.mockResolvedValue({ id: 42 });
+    mocks.checkInCreate.mockResolvedValue({ id: 1 });
+
+    await POST(
+      buildRequest({
+        checkins: [
+          { clientId: 7, userId: 42, date: "2026-05-08", mealKind: "DINNER", checkedAt: "2026-05-08T10:30:00.000Z", type: "STUDENT" },
+        ],
+      }),
+    );
+
+    expect(mocks.reviewFindUnique).not.toHaveBeenCalled();
   });
 
   it("handles empty payload as a no-op", async () => {

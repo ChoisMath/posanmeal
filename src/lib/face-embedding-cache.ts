@@ -9,8 +9,9 @@ const CACHE_TTL = 60_000;
 export async function getFaceCandidates(): Promise<FaceCandidate[]> {
   if (cache && Date.now() - cacheTimestamp < CACHE_TTL) return cache;
 
+  // 이용 중단 시 FaceProfile을 지우지만, 남아 있더라도 후보가 되지 않게 한 번 더 막는다.
   const rows = await prisma.faceProfile.findMany({
-    where: { modelVersion: FACE_MODEL_VERSION },
+    where: { modelVersion: FACE_MODEL_VERSION, user: { accessState: "ACTIVE" } },
     select: { userId: true, embeddings: true },
   });
   cache = rows.map((row) => ({

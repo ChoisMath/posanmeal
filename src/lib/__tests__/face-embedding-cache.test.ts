@@ -26,9 +26,11 @@ describe("face-embedding-cache", () => {
     expect(candidates[0].userId).toBe(1);
     expect(candidates[0].embeddings[0]).toBeInstanceOf(Float32Array);
     expect(candidates[0].embeddings[1][1]).toBeCloseTo(0.4);
-    // 구 모델로 등록된 프로필은 후보에서 제외되도록 현재 모델 버전으로만 조회
+    // 구 모델로 등록된 프로필과 이용이 중지된 계정은 후보에서 제외한다
     expect(mocks.faceProfileFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { modelVersion: FACE_MODEL_VERSION } }),
+      expect.objectContaining({
+        where: { modelVersion: FACE_MODEL_VERSION, user: { accessState: "ACTIVE" } },
+      }),
     );
   });
 
