@@ -92,8 +92,6 @@ describe("registration excel import", () => {
     ]);
   });
 
-  // 확정 연도 기록에는 좌석 unique가 걸려 있어 후보가 둘일 수 없다. 후보가 겹칠 수
-  // 있는 자리는 좌석 제약이 없는 PREPARING의 User 표뿐이다.
   it("옛 양식에서 같은 학번 후보가 둘이면 아무것도 쓰지 않고 거절한다", async () => {
     await db.rosterControl.update({ where: { id: 1 }, data: { mode: "PREPARING" } });
     await db.user.create({
@@ -116,6 +114,78 @@ describe("registration excel import", () => {
     const response = await run(file);
     expect(response.status).toBe(409);
     expect(await confirmedDates()).toEqual(before);
+  });
+
+  async function reuseTransferredStudentNumber() {
+    await db.userAcademicRecord.update({
+      where: { year_userId: { year: 2026, userId: fx.studentId } },
+      data: { memberState: "TRANSFERRED" },
+    });
+    await db.user.update({ where: { id: fx.studentId }, data: { accessState: "INACTIVE" } });
+    return db.user.create({
+      data: {
+        email: "reused-number@example.posan.kr",
+        emailKey: "reused-number@example.posan.kr",
+        name: "새학생",
+        role: "STUDENT",
+        grade: 1,
+        classNum: 1,
+        number: 1,
+        academicRecords: { create: {
+          year: 2026,
+          name: "새학생",
+          role: "STUDENT",
+          grade: 1,
+          classNum: 1,
+          number: 1,
+          memberState: "ENROLLED",
+        } },
+      },
+    });
+  }
+
+  it("READY에서 전출자와 재학생이 같은 학번이면 구양식의 오등록을 전체 차단한다", async () => {
+    const newcomer = await reuseTransferredStudentNumber();
+    const before = {
+      registration: await db.mealRegistration.findUniqueOrThrow({
+        where: { id: fx.registrationId }, include: { meals: true, mealDates: true },
+      }),
+      events: await db.eligibilityEvent.count(),
+    };
+    const response = await run(await buildSheet(
+      ["학년", "반", "번호", "이름", ...MEAL_HEADERS],
+      [[1, 1, 1, "학생테스트", "O", ""]],
+    ));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "IDENTITY_CONFLICT" } });
+    expect(await db.mealRegistration.count({ where: { userId: newcomer.id } })).toBe(0);
+    expect(await db.mealRegistration.findUniqueOrThrow({
+      where: { id: fx.registrationId }, include: { meals: true, mealDates: true },
+    })).toEqual(before.registration);
+    expect(await db.eligibilityEvent.count()).toBe(before.events);
+  });
+
+  it("학번이 재사용되어도 이메일 양식은 전출자의 기존 신청과 재학생을 각각 처리한다", async () => {
+    const newcomer = await reuseTransferredStudentNumber();
+    const response = await run(await buildSheet(
+      [...TEMPLATE_FIXED_HEADERS, ...MEAL_HEADERS],
+      [
+        ["student-test@example.posan.kr", 1, 1, 1, "학생테스트", "O", ""],
+        [newcomer.email, 1, 1, 1, newcomer.name, "", "O"],
+      ],
+    ));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ added: 1, updated: 1, skippedNotFound: 0 });
+    const registrations = await db.mealRegistration.findMany({
+      where: { applicationId: fx.applicationId },
+      include: { mealDates: { orderBy: { date: "asc" } } },
+    });
+    expect(registrations.find((r) => r.userId === fx.studentId)?.mealDates.map((d) => d.date.toISOString().slice(0, 10)))
+      .toEqual(["2026-09-18"]);
+    expect(registrations.find((r) => r.userId === newcomer.id)?.mealDates.map((d) => d.date.toISOString().slice(0, 10)))
+      .toEqual(["2026-09-19"]);
   });
 
   it("아무도 등록되지 않으면 EligibilityEvent를 남기지 않는다", async () => {

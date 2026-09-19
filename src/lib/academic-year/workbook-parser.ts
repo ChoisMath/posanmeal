@@ -125,7 +125,7 @@ function readMeta(workbook: ExcelJSType.Workbook): { fileId: string; year: numbe
   }
 
   const values = new Map<string, string | number | boolean>();
-  const rowCount = sheet.actualRowCount;
+  const rowCount = sheet.rowCount;
   for (let r = 1; r <= rowCount; r++) {
     const row = sheet.getRow(r);
     const key = row.getCell(1).value;
@@ -187,7 +187,7 @@ function parseSheet(
   const issues: RowIssue[] = [];
   const rows: ParsedRosterRow[] = [];
 
-  const lastRow = sheet.actualRowCount;
+  const lastRow = sheet.rowCount;
   for (let r = 2; r <= lastRow; r++) {
     const excelRow = sheet.getRow(r);
     if (excelRow.cellCount === 0) continue;

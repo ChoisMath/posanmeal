@@ -375,7 +375,8 @@ async function matchByStudentNumber(
 
   if (ready) {
     const records = await prisma.userAcademicRecord.findMany({
-      where: { year, role: "STUDENT", memberState: "ENROLLED" },
+      // 전출자가 빠지면 재사용된 학번의 옛 파일이 다른 학생에게 연결된다.
+      where: { year, role: "STUDENT" },
       select: { userId: true, grade: true, classNum: true, number: true },
     });
     for (const r of records) {

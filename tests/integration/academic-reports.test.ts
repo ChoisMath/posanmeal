@@ -370,6 +370,48 @@ describe("academic year reports", () => {
     expect(body.registrations[0].academicYear).toBe(SOURCE_YEAR);
   });
 
+  it.each(["2025&month=9", "2026&month=2", "2027&month=3"])("담임은 현재 담당 학생이어도 운영 학년도 밖의 기록을 조회할 수 없다: %s", async (period) => {
+    const response = await routes.teacherStudents.GET(getRequest(`?year=${period}`));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("운영 학년도 다음 해 2월은 담임 조회에 포함된다", async () => {
+    const response = await routes.teacherStudents.GET(getRequest("?year=2027&month=2"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ academicYear: 2026, year: 2027, month: 2 });
+  });
+
+  it("조기 전환 뒤 기본 조회는 새 운영 학년도의 첫 달을 선택한다", async () => {
+    await db.academicYear.update({ where: { year: 2026 }, data: { state: "ARCHIVED" } });
+    await db.academicYear.create({ data: { year: 2027, state: "ACTIVE" } });
+    await db.userAcademicRecord.create({ data: {
+      userId: fx.teacherId, year: 2027, role: "TEACHER", name: "교사테스트", homeroom: "1-1", memberState: "EMPLOYED",
+    } });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2027-02-20T12:00:00+09:00"));
+    try {
+      const response = await routes.teacherStudents.GET(getRequest(""));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ academicYear: 2027, year: 2027, month: 3 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("담임 기본 조회는 KST 월 경계를 따른다", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-31T15:05:00Z"));
+    try {
+      const response = await routes.teacherStudents.GET(getRequest(""));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ year: 2026, month: 9 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["2026tail&month=9", "2026&month=9tail", "2026&month=0", "&month=9"])("잘못된 담임 조회 기간을 거절한다: %s", async (period) => {
+    const response = await routes.teacherStudents.GET(getRequest(`?year=${period}`));
+    expect(response.status).toBe(422);
+  });
+
   it("조기 전환 뒤에도 확정된 오늘 식사는 그대로 남는다", async () => {
     const second = await seedSecondStudent();
     const student = await db.user.findUniqueOrThrow({ where: { id: fx.studentId } });
@@ -388,6 +430,26 @@ describe("academic year reports", () => {
   // -------------------------------------------------------------------------
   // 관리자 월별 보기
   // -------------------------------------------------------------------------
+
+  it.each(["BREAKFAST", "LUNCH"] as const)("신청이 취소돼도 실제 %s 체크인은 관리자·담임 표의 식사 열에 남는다", async (mealKind) => {
+    await db.checkIn.create({ data: {
+      userId: fx.studentId, date: new Date("2026-09-18Z"), mealKind, type: "STUDENT", source: "QR",
+    } });
+    await db.mealRegistration.update({ where: { id: fx.registrationId }, data: { status: "CANCELLED" } });
+    const adminResponse = await routes.adminCheckins.GET(getRequest("?year=2026&month=9&category=1"));
+    const teacherResponse = await routes.teacherStudents.GET(getRequest("?year=2026&month=9"));
+    for (const response of [adminResponse, teacherResponse]) {
+      expect(response.status).toBe(200);
+      const result = await response.json();
+      expect(result.mealColumns).toContainEqual(expect.objectContaining({ key: `2026-09-18:${mealKind}` }));
+    }
+    const exported = await routes.adminExport.GET(getRequest("?year=2026&month=9"));
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await exported.arrayBuffer());
+    const values: string[] = [];
+    workbook.getWorksheet("1학년")!.eachRow((row) => values.push(row.getCell(19).text));
+    expect(values.some((value) => value.includes(mealKind === "BREAKFAST" ? "조" : "중"))).toBe(true);
+  });
 
   it("전환 뒤에도 2026년 9월 보기는 당시 학년·학급으로 분류한다", async () => {
     const second = await seedSecondStudent();

@@ -12,6 +12,7 @@ import {
 } from "@/lib/academic-year/registration-context";
 import { displayNameOf, getReportProfiles } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
+import { DomainError } from "@/lib/academic-year/errors";
 import { z } from "zod";
 
 const patchStatusSchema = z.object({
@@ -93,15 +94,17 @@ export async function PATCH(
 ) {
   return routeResponse(async () => {
     const actor = await requireActor("WRITE_ADMIN");
-    const registrationId = parseIdParam((await params).regId);
+    const { id, regId } = await params;
+    const applicationId = parseIdParam(id);
+    const registrationId = parseIdParam(regId);
 
     const body: unknown = await request.json().catch(() => null);
 
     const reg = await prisma.mealRegistration.findUnique({
       where: { id: registrationId },
-      select: { id: true, applicationId: true, userId: true, status: true },
+      select: { id: true, applicationId: true, userId: true },
     });
-    if (!reg) {
+    if (!reg || reg.applicationId !== applicationId) {
       return NextResponse.json({ error: "신청을 찾을 수 없습니다." }, { status: 404 });
     }
 
@@ -144,7 +147,11 @@ export async function PATCH(
       actor,
       { ...change, recorded: (result) => !("error" in result) },
       async (tx) => {
-        const intent = reg.status === "APPROVED" ? "EDIT" : "RESTORE";
+        const current = await tx.mealRegistration.findUnique({ where: { id: registrationId } });
+        if (!current || current.applicationId !== applicationId || current.userId !== reg.userId) {
+          throw new DomainError("NOT_FOUND", "신청을 찾을 수 없습니다.");
+        }
+        const intent = current.status === "APPROVED" ? "EDIT" : "RESTORE";
         const context = await getRegistrationContext(
           tx,
           actor,
@@ -213,13 +220,15 @@ export async function DELETE(
 ) {
   return routeResponse(async () => {
     const actor = await requireActor("WRITE_ADMIN");
-    const registrationId = parseIdParam((await params).regId);
+    const { id, regId } = await params;
+    const applicationId = parseIdParam(id);
+    const registrationId = parseIdParam(regId);
 
     const reg = await prisma.mealRegistration.findUnique({
       where: { id: registrationId },
       select: { id: true, applicationId: true, userId: true },
     });
-    if (!reg) {
+    if (!reg || reg.applicationId !== applicationId) {
       return NextResponse.json({ error: "신청을 찾을 수 없습니다." }, { status: 404 });
     }
 

@@ -12,9 +12,9 @@ interface Student {
   qrString: string;
 }
 
-export function useTeacherStudents(year: number, month: number) {
-  const { data, error, isLoading } = useSWR(
-    `/api/teacher/students?year=${year}&month=${month}`,
+export function useTeacherStudents(period: { year: number; month: number } | null) {
+  const { data, error, isLoading, mutate } = useSWR(
+    period ? `/api/teacher/students?year=${period.year}&month=${period.month}` : "/api/teacher/students",
     fetcher,
     { revalidateOnFocus: false }
   );
@@ -23,7 +23,11 @@ export function useTeacherStudents(year: number, month: number) {
     mealColumns: (data?.mealColumns ?? []) as MealColumn[],
     grade: data?.grade as number | undefined,
     classNum: data?.classNum as number | undefined,
+    academicYear: data?.academicYear as number | undefined,
+    year: data?.year as number | undefined,
+    month: data?.month as number | undefined,
     error,
     isLoading,
+    mutate,
   };
 }

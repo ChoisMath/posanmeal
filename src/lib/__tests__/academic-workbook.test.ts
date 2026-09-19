@@ -74,6 +74,45 @@ function manifestFor(rows: RosterRow[], year = 2026, fileId = "file-1"): Workboo
 }
 
 describe("buildRosterWorkbook / parseRosterWorkbook round trip", () => {
+  it.each(["학생", "교사"])("%s 시트의 빈 행 뒤 데이터도 실제 행 번호와 함께 읽는다", async (sheetName) => {
+    const rows = [studentRow(), teacherRow()];
+    const buffer = await buildRosterWorkbook({ year: 2026, rows, includeData: true, manifest: manifestFor(rows) });
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const sheet = book.getWorksheet(sheetName)!;
+    sheet.getRow(7).values = sheet.getRow(2).values;
+    sheet.getRow(2).values = [];
+    const parsed = await parseRosterWorkbook(Uint8Array.from(Buffer.from(await book.xlsx.writeBuffer())).buffer);
+    expect(parsed.issues).toEqual([]);
+    expect(parsed.rows).toHaveLength(2);
+    expect(parsed.rows.find((row) => row.sheet === sheetName)).toMatchObject({ row: 7 });
+    expect(parsed.coveredRoles.sort()).toEqual(["STUDENT", "TEACHER"]);
+  });
+
+  it("빈 행 뒤의 잘못된 데이터도 조용히 누락하지 않고 오류 위치를 알린다", async () => {
+    const rows = [studentRow()];
+    const buffer = await buildRosterWorkbook({ year: 2026, rows, includeData: true, manifest: manifestFor(rows) });
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const sheet = book.getWorksheet("학생")!;
+    sheet.getRow(7).values = sheet.getRow(2).values;
+    sheet.getCell("D7").value = { formula: "1+1", result: 2 };
+    const parsed = await parseRosterWorkbook(Uint8Array.from(Buffer.from(await book.xlsx.writeBuffer())).buffer);
+    expect(parsed.issues).toContainEqual(expect.objectContaining({ sheet: "학생", row: 7, column: "번호", code: "FORMULA_NOT_ALLOWED" }));
+  });
+
+  it("메타 시트에 빈 행이 있어도 파일 식별자와 학년도를 읽는다", async () => {
+    const buffer = await buildRosterWorkbook({ year: 2026, rows: [], includeData: false, manifest: manifestFor([]) });
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load(Uint8Array.from(buffer).buffer);
+    const sheet = book.getWorksheet("__meta")!;
+    const populated = Array.from({ length: sheet.rowCount }, (_, i) => sheet.getRow(i + 1).values);
+    populated.forEach((_, i) => { sheet.getRow(i + 1).values = []; });
+    populated.forEach((values, i) => { sheet.getRow((i + 1) * 3).values = values; });
+    const parsed = await parseRosterWorkbook(Uint8Array.from(Buffer.from(await book.xlsx.writeBuffer())).buffer);
+    expect(parsed).toMatchObject({ fileId: "file-1", year: 2026, templateOnly: true, issues: [] });
+  });
+
   it("빈 양식은 시트만 있고 데이터·이슈가 없다", async () => {
     const manifest: WorkbookManifest = { schemaVersion: 1, fileId: "file-1", year: 2026, version: 2, rows: {} };
     const buffer = await buildRosterWorkbook({ year: 2026, rows: [], includeData: false, manifest });

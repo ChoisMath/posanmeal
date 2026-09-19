@@ -6,26 +6,17 @@ import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
 import { getRegistrationContext } from "@/lib/academic-year/registration-context";
 import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
+import type { Tx } from "@/lib/academic-year/db";
 
 /** 접수 기간 밖이면 학생 경로에서는 신청도 취소도 받지 않는다. */
-async function assertApplyWindow(applicationId: number, message: string, errorCode?: string) {
-  const now = new Date();
-  const app = await prisma.mealApplication.findUnique({
+async function isApplyWindowOpen(tx: Tx, applicationId: number) {
+  const app = await tx.mealApplication.findUnique({
     where: { id: applicationId },
+    select: { status: true, applyStartAt: true, applyEndAt: true },
   });
-  if (
-    !app ||
-    app.status !== "OPEN" ||
-    !app.applyStartAt ||
-    !app.applyEndAt ||
-    now < app.applyStartAt ||
-    now > app.applyEndAt
-  ) {
-    return NextResponse.json(errorCode ? { error: message, errorCode } : { error: message }, {
-      status: 400,
-    });
-  }
-  return null;
+  const now = new Date();
+  return !!app && app.status === "OPEN" && !!app.applyStartAt && !!app.applyEndAt &&
+    now >= app.applyStartAt && now <= app.applyEndAt;
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -53,9 +44,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
     const input = parsed.data;
 
-    const outOfWindow = await assertApplyWindow(applicationId, "신청 기간이 아닙니다.");
-    if (outOfWindow) return outOfWindow;
-
     const written = await withEligibilityMutation<
       { registrationId: number; created: boolean } | { error: string }
     >(
@@ -68,6 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         recorded: (result) => !("error" in result),
       },
       async (tx) => {
+        if (!(await isApplyWindowOpen(tx, applicationId))) return { error: "신청 기간이 아닙니다." };
         const existing = await tx.mealRegistration.findUnique({
           where: { applicationId_userId: { applicationId, userId } },
           select: { status: true },
@@ -104,23 +93,19 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     const userId = selfUserId(actor);
     const applicationId = parseIdParam((await params).id);
 
-    const outOfWindow = await assertApplyWindow(
-      applicationId,
-      "신청 취소 기간이 아닙니다.",
-      "OUT_OF_APPLY_WINDOW",
-    );
-    if (outOfWindow) return outOfWindow;
-
-    const cancelled = await withEligibilityMutation<boolean>(
+    const cancelled = await withEligibilityMutation<boolean | { error: string; errorCode: string }>(
       prisma,
       actor,
       {
         scope: "REGISTRATION",
         applicationId,
         userId,
-        recorded: (done) => done,
+        recorded: (done) => done === true,
       },
       async (tx) => {
+        if (!(await isApplyWindowOpen(tx, applicationId))) {
+          return { error: "신청 취소 기간이 아닙니다.", errorCode: "OUT_OF_APPLY_WINDOW" };
+        }
         const reg = await tx.mealRegistration.findUnique({
           where: { applicationId_userId: { applicationId, userId } },
         });
@@ -139,6 +124,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       },
     );
 
+    if (typeof cancelled === "object") return NextResponse.json(cancelled, { status: 400 });
     if (!cancelled) {
       return NextResponse.json({ error: "신청 내역이 없습니다." }, { status: 404 });
     }

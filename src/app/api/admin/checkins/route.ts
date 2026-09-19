@@ -93,9 +93,10 @@ export async function GET(request: Request) {
         };
       });
 
+    const visibleMeals = [...activeRows, ...checkIns];
     const mealColumns = buildMonthlyMealColumns(year, month, {
-      BREAKFAST: activeRows.filter((r) => r.mealKind === "BREAKFAST").map((r) => r.date),
-      LUNCH: activeRows.filter((r) => r.mealKind === "LUNCH").map((r) => r.date),
+      BREAKFAST: visibleMeals.filter((r) => r.mealKind === "BREAKFAST").map((r) => r.date),
+      LUNCH: visibleMeals.filter((r) => r.mealKind === "LUNCH").map((r) => r.date),
     });
 
     return NextResponse.json({ users, year, month, category, academicYear, mealColumns });

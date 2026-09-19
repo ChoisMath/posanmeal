@@ -6,13 +6,16 @@ import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
 import { useTeacherStudents } from "@/hooks/useTeacherStudents";
 import { buildMonthlyMealColumns, getDateDayKey, type MealColumn } from "@/lib/meal-columns";
 import { StudentQRPrintDialog, type PrintStudent } from "@/components/StudentQRPrintDialog";
+import { kstDateKey } from "@/lib/academic-year/calendar";
+import { errorTextOf } from "@/lib/fetcher";
 
 export function StudentTable() {
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-  const { students, mealColumns: fetchedColumns, grade = 0, classNum = 0, error } =
-    useTeacherStudents(year, month);
+  const [period, setPeriod] = useState<{ year: number; month: number } | null>(null);
+  const { students, mealColumns: fetchedColumns, grade = 0, classNum = 0, academicYear,
+    year: fetchedYear, month: fetchedMonth, error, isLoading, mutate } = useTeacherStudents(period);
+  const today = kstDateKey(new Date());
+  const year = period?.year ?? fetchedYear ?? Number(today.slice(0, 4));
+  const month = period?.month ?? fetchedMonth ?? Number(today.slice(5, 7));
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [printOpen, setPrintOpen] = useState(false);
@@ -42,12 +45,10 @@ export function StudentTable() {
     .map((s) => ({ id: s.id, name: s.name, number: s.number, qrString: s.qrString }));
 
   const prevMonth = () => {
-    if (month === 1) { setMonth(12); setYear(year - 1); }
-    else setMonth(month - 1);
+    setPeriod(month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 });
   };
   const nextMonth = () => {
-    if (month === 12) { setMonth(1); setYear(year + 1); }
-    else setMonth(month + 1);
+    setPeriod(month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 });
   };
 
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -80,34 +81,43 @@ export function StudentTable() {
 
   if (error) {
     return (
-      <div className="text-center py-8">
-        <p className="text-muted-foreground text-sm mb-2">데이터를 불러올 수 없습니다.</p>
+      <div className="space-y-2 overflow-x-auto py-8 text-center whitespace-nowrap">
+        <p className="text-muted-foreground text-sm">{errorTextOf(error.info, "데이터를 불러올 수 없습니다.")}</p>
+        <Button className="min-h-11 whitespace-nowrap" variant="outline" onClick={() => {
+          if (period) setPeriod(null);
+          else void mutate();
+        }}>운영 학년도 다시 조회</Button>
       </div>
     );
   }
 
+  if (isLoading) return <p className="py-8 text-center text-sm text-muted-foreground whitespace-nowrap">담당 학급을 불러오는 중...</p>;
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <Button variant="ghost" size="icon" onClick={prevMonth}>
+    <div className="min-w-0">
+      <p className="mb-2 overflow-x-auto text-sm text-muted-foreground whitespace-nowrap">{academicYear}학년도 담당 학급 · 3월부터 다음 해 2월까지 조회</p>
+      <div className="flex min-w-0 items-center justify-between gap-2 mb-4">
+        <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label="이전 달" onClick={prevMonth}
+          disabled={academicYear === undefined || (year === academicYear && month === 3)}>
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <h3 className="font-semibold text-fit-base">
+        <h3 className="truncate whitespace-nowrap font-semibold text-fit-base" title={`${grade}학년 ${classNum}반 — ${year}년 ${month}월`}>
           {grade}학년 {classNum}반 — {year}년 {month}월
         </h3>
-        <Button variant="ghost" size="icon" onClick={nextMonth}>
+        <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label="다음 달" onClick={nextMonth}
+          disabled={academicYear === undefined || (year === academicYear + 1 && month === 2)}>
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="text-sm text-muted-foreground whitespace-nowrap">
-          {selectedIds.size}명 선택
+          {selectedPrintStudents.length}명 선택
         </span>
         <Button
           size="sm"
-          className="rounded-xl whitespace-nowrap"
-          disabled={selectedIds.size === 0}
+          className="min-h-11 rounded-xl whitespace-nowrap"
+          disabled={selectedPrintStudents.length === 0}
           onClick={() => setPrintOpen(true)}
         >
           <Printer className="mr-1 h-4 w-4" />
@@ -115,12 +125,12 @@ export function StudentTable() {
         </Button>
       </div>
 
-      <div className="overflow-auto max-h-[70vh] border rounded-lg">
+      <div className="overflow-auto max-h-[70dvh] border rounded-lg">
         <table className="text-xs border-collapse w-full whitespace-nowrap">
           <thead className="sticky top-0 z-20">
             <tr>
               <th className="sticky left-0 z-30 bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">
-                <label className="flex cursor-pointer items-center gap-1.5">
+                <label className="flex min-h-11 cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
                     aria-label="전체 선택"
@@ -145,7 +155,7 @@ export function StudentTable() {
                 return (
                   <th
                     key={column.key}
-                    className={`px-1 py-2 text-center font-medium border-b min-w-[28px] ${
+                    className={`sticky top-0 px-1 py-2 text-center font-medium border-b min-w-[28px] ${
                       weekend
                         ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                         : mealHeaderClass
@@ -171,7 +181,7 @@ export function StudentTable() {
               return (
                 <tr key={student.id} className="hover:bg-muted/50">
                   <td className="sticky left-0 z-10 bg-background px-2 py-1.5 border-b border-r">
-                    <label className="flex min-h-9 cursor-pointer items-center gap-1.5 text-fit-sm">
+                    <label className="flex min-h-11 cursor-pointer items-center gap-2 text-fit-sm">
                       <input
                         type="checkbox"
                         className="h-4 w-4 shrink-0 accent-amber-600"
@@ -179,7 +189,7 @@ export function StudentTable() {
                         onChange={() => toggleOne(student.id)}
                       />
                       <span className="font-semibold">{student.number}</span>
-                      <span>{student.name}</span>
+                      <span className="max-w-32 truncate" title={student.name}>{student.name}</span>
                     </label>
                   </td>
                   {mealColumns.map((column) => {
@@ -201,7 +211,7 @@ export function StudentTable() {
                         className={`text-center border-b px-0.5 py-1.5 ${cellClass}`}
                         title={
                           checkIn
-                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`
+                            ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })}`
                             : applied
                               ? `${column.label} 신청`
                               : `${column.label} 미신청`
