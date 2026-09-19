@@ -4,12 +4,15 @@ import {
   DEFAULT_FACE_MATCH_MARGIN,
   DEFAULT_FACE_MATCH_THRESHOLD,
 } from "@/lib/face-constants";
+import { getCachedRosterMode } from "@/lib/academic-year/roster-mode-cache";
+import { activeYear } from "@/lib/academic-year/roster-service";
 
 let cache: {
   operationMode: string;
   qrGeneration: string;
   mealWindows: MealWindows;
   faceMatch: { threshold: number; margin: number };
+  activeAcademicYear: number | null;
 } | null = null;
 let cacheTimestamp = 0;
 const CACHE_TTL = 30_000; // 30 seconds
@@ -17,7 +20,10 @@ const CACHE_TTL = 30_000; // 30 seconds
 export async function getCachedSettings() {
   if (cache && Date.now() - cacheTimestamp < CACHE_TTL) return cache;
 
-  const settings = await prisma.systemSetting.findMany();
+  const [settings, activeAcademicYear] = await Promise.all([
+    prisma.systemSetting.findMany(),
+    readActiveAcademicYear(),
+  ]);
   const map: Record<string, string> = {};
   for (const s of settings) map[s.key] = s.value;
 
@@ -42,9 +48,20 @@ export async function getCachedSettings() {
       threshold: parseSetting(map.face_match_threshold, DEFAULT_FACE_MATCH_THRESHOLD),
       margin: parseSetting(map.face_match_margin, DEFAULT_FACE_MATCH_MARGIN),
     },
+    activeAcademicYear,
   };
   cacheTimestamp = Date.now();
   return cache;
+}
+
+/** 공개 응답이므로 연도 숫자만. 명부가 준비 중이거나 확정할 수 없으면 null이다. */
+async function readActiveAcademicYear(): Promise<number | null> {
+  try {
+    if ((await getCachedRosterMode(prisma)) !== "READY") return null;
+    return await activeYear(prisma);
+  } catch {
+    return null;
+  }
 }
 
 export function invalidateSettingsCache() {

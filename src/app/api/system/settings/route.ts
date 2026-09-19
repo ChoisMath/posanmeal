@@ -12,6 +12,7 @@ export async function GET() {
       qrGeneration: parseInt(settings.qrGeneration, 10),
       mealWindows: settings.mealWindows,
       faceMatch: settings.faceMatch,
+      activeAcademicYear: settings.activeAcademicYear,
     },
     {
       headers: {
@@ -172,5 +173,6 @@ export async function PUT(request: Request) {
     qrGeneration: parseInt(settings.qrGeneration, 10),
     mealWindows: settings.mealWindows,
     faceMatch: settings.faceMatch,
+    activeAcademicYear: settings.activeAcademicYear,
   });
 }

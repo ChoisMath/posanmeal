@@ -4,6 +4,8 @@ export interface CheckInResult {
   success: boolean;
   duplicate?: boolean;
   notApplicant?: boolean;
+  /** 유효기간이 지난 명부로 저장됨 — 저장은 되었고 재동기화가 필요하다. */
+  stale?: boolean;
   error?: string;
   user?: {
     id: number;

@@ -3,6 +3,12 @@ import { MEAL_LABEL } from "@/lib/meal-plan";
 import { localDateKey } from "@/lib/facecheck-local";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
 import type { CheckInResult } from "@/lib/checkin-client";
+import {
+  LocalSnapshotError,
+  guardLocalCheckIn,
+  type LocalSnapshotState,
+  type SnapshotFreshness,
+} from "@/lib/academic-year/local-snapshot";
 
 const LOCAL_QR_PREFIX = "posanmeal:";
 
@@ -33,6 +39,9 @@ export interface LocalQrRepo {
   isEligible(userId: number, date: string, mealKind: MealKind): Promise<boolean>;
   getCheckIn(userId: number, date: string, mealKind: MealKind): Promise<LocalCheckIn | undefined>;
   addCheckIn(checkin: Omit<LocalCheckIn, "id">): Promise<void>;
+  /** 기기의 명부 근거 상태. 근거를 받은 적이 없으면 판정하지 않는다. */
+  getSnapshotState(): Promise<LocalSnapshotState>;
+  getDeviceId(): Promise<string>;
 }
 
 export interface LocalQrInput {
@@ -46,8 +55,12 @@ const VALID_TYPES: Record<string, string[]> = {
   TEACHER: ["WORK", "PERSONAL"],
 };
 
-// 판정 순서: 형식 → 세대 → 명단 → 유형 → 식사 시간 → 학생 자격 → 중복 → 저장 (`/check`·`/facecheck` 공용)
-export async function runLocalQrCheckIn(input: LocalQrInput, repo: LocalQrRepo): Promise<CheckInResult> {
+// 판정 순서: 형식 → 세대 → 명단 → 유형 → 식사 시간 → 학생 자격 → 중복 → 근거 → 저장 (`/check`·`/facecheck` 공용)
+export async function runLocalQrCheckIn(
+  input: LocalQrInput,
+  repo: LocalQrRepo,
+  now: () => Date = () => new Date(),
+): Promise<CheckInResult> {
   const parsed = parseLocalQR(input.data);
   if (!parsed) return { success: false, error: "잘못된 QR코드입니다." };
 
@@ -88,8 +101,30 @@ export async function runLocalQrCheckIn(input: LocalQrInput, repo: LocalQrRepo):
     };
   }
 
+  const state = await repo.getSnapshotState();
+  let freshness: SnapshotFreshness | null;
+  try {
+    freshness = guardLocalCheckIn(state, { now: now(), userId: user.id, dateKey: date });
+  } catch (error) {
+    if (error instanceof LocalSnapshotError) {
+      return { success: false, user: resultUser, mealKind, error: error.message };
+    }
+    throw error;
+  }
+
   const checkedAt = input.now.toISOString();
   const type = parsed.type as LocalCheckIn["type"];
-  await repo.addCheckIn({ userId: user.id, date, mealKind, checkedAt, type, synced: 0 });
-  return { success: true, user: resultUser, type, mealKind, checkedAt };
+  const stale = freshness === "STALE";
+  await repo.addCheckIn({
+    userId: user.id,
+    date,
+    mealKind,
+    checkedAt,
+    type,
+    synced: 0,
+    deviceId: await repo.getDeviceId(),
+    ...(state.snapshot ? { snapshotId: state.snapshot.id } : {}),
+    ...(stale ? { stale: true } : {}),
+  });
+  return { success: true, user: resultUser, type, mealKind, checkedAt, ...(stale ? { stale: true } : {}) };
 }

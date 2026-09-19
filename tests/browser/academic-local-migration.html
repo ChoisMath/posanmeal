@@ -1,0 +1,113 @@
+<!doctype html>
+<!--
+  제품 IndexedDB 이전(v4·v5 → v6)을 실브라우저에서 확인한다. 앱 origin에서 열지 않는다.
+
+    DIR=$(mktemp -d)
+    npx esbuild src/lib/local-db.ts --bundle --format=esm \
+      --outfile=$DIR/local-db.js --alias:@=$PWD/src
+    cp tests/browser/academic-local-migration.html $DIR/index.html
+    python3 -m http.server 53461 --bind 127.0.0.1 --directory "$DIR"
+    # 127.0.0.1:53461/index.html 을 Chrome에서 열어 마지막 줄이 ALL PASS인지 본다.
+
+  제품 DB 이름(posanmeal-local)은 쓰지 않는다.
+-->
+<html lang="ko"><head><meta charset="utf-8"><title>academic local migration</title></head>
+<body><pre id="out">running…</pre>
+<script type="module">
+import { openDB, DB_NAME } from "./local-db.js";
+
+const log = [];
+const say = (m) => { log.push(m); document.getElementById("out").textContent = log.join("\n"); };
+
+function seedOld(name, version, withMealKind) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, version);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      db.createObjectStore("settings");
+      const users = db.createObjectStore("users", { keyPath: "id" });
+      users.createIndex("byRoleGrade", ["role", "grade", "classNum", "number"]);
+      db.createObjectStore("eligibleEntries", { keyPath: ["userId", "date", "mealKind"] });
+      const ci = db.createObjectStore("checkins", { keyPath: "id", autoIncrement: true });
+      if (withMealKind) ci.createIndex("byUserDateMealKind", ["userId","date","mealKind"], { unique: true });
+      else ci.createIndex("byUserDate", ["userId", "date"], { unique: true });
+      ci.createIndex("bySynced", "synced");
+      if (version >= 5) db.createObjectStore("faceProfiles", { keyPath: "userId" });
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(["checkins", "users", "settings"], "readwrite");
+      const ci = tx.objectStore("checkins");
+      const meal = withMealKind ? { mealKind: "DINNER" } : {};
+      ci.put({ id: 11, userId: 1, date: "2026-09-01", checkedAt: "2026-09-01T09:00:00.000Z", type: "STUDENT", synced: false, ...meal });
+      ci.put({ id: 12, userId: 2, date: "2026-09-02", checkedAt: "2026-09-02T09:00:00.000Z", type: "WORK", synced: 0, ...(withMealKind ? { mealKind: "BREAKFAST" } : {}) });
+      ci.put({ id: 13, userId: 3, date: "2026-09-03", checkedAt: "2026-09-03T09:00:00.000Z", type: "STUDENT", synced: true, ...meal });
+      tx.objectStore("users").put({ id: 1, name: "예전", role: "STUDENT" });
+      tx.objectStore("settings").put("keep-me", "operationMode");
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function readAll(db, store) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(store, "readonly").objectStore(store).getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function run(name, version, withMealKind) {
+  await new Promise((r) => { const d = indexedDB.deleteDatabase(name); d.onsuccess = d.onerror = d.onblocked = () => r(); });
+  await seedOld(name, version, withMealKind);
+  const db = await openDB(name);
+  say(`${name}: version=${db.version}`);
+  const rows = await readAll(db, "checkins");
+  say(`${name}: rows=${JSON.stringify(rows)}`);
+  const users = await readAll(db, "users");
+  say(`${name}: users=${JSON.stringify(users)}`);
+
+  // 명부 교체 도중 abort — 이전 users/settings와 모든 checkins가 남아야 한다
+  await new Promise((resolve) => {
+    const tx = db.transaction(["users", "eligibleEntries", "faceProfiles", "settings"], "readwrite");
+    tx.objectStore("users").clear();
+    tx.objectStore("users").put({ id: 99, name: "새명부", role: "STUDENT" });
+    tx.objectStore("settings").put("replaced", "operationMode");
+    tx.abort();
+    tx.onabort = () => resolve();
+  });
+  const usersAfter = await readAll(db, "users");
+  const rowsAfter = await readAll(db, "checkins");
+  const settingsAfter = await new Promise((resolve) => {
+    const r = db.transaction("settings", "readonly").objectStore("settings").get("operationMode");
+    r.onsuccess = () => resolve(r.result);
+  });
+  say(`${name}: afterAbort users=${JSON.stringify(usersAfter)} setting=${settingsAfter} checkins=${rowsAfter.length}`);
+  db.close();
+  return { rows, usersAfter, settingsAfter, rowsAfter };
+}
+
+try {
+  say(`product DB name is ${DB_NAME} — 사용하지 않음`);
+  const v5 = await run("posanmeal-academic-test-v5", 5, true);
+  const v4 = await run("posanmeal-academic-test-v4", 4, true);
+  const checks = [];
+  for (const [label, res] of [["v5", v5], ["v4", v4]]) {
+    const ids = res.rows.map((r) => r.id).sort();
+    checks.push([`${label} 기록 3건 보존`, res.rows.length === 3 && JSON.stringify(ids) === "[11,12,13]"]);
+    checks.push([`${label} synced 정규화`, res.rows.every((r) => r.synced === 0 || r.synced === 1)]);
+    checks.push([`${label} 미전송 2건`, res.rows.filter((r) => r.synced === 0).length === 2]);
+    checks.push([`${label} 전송 기록은 rawLegacy 없음`, res.rows.find((r) => r.id === 13).rawLegacy === undefined]);
+    checks.push([`${label} 미전송 기록에 rawLegacy/사유`, res.rows.filter((r) => r.synced === 0).every((r) => r.rawLegacy && r.reviewReason === "이전 버전 기록 확인 필요")]);
+    checks.push([`${label} checkedAt 보존`, res.rows.find((r) => r.id === 11).checkedAt === "2026-09-01T09:00:00.000Z"]);
+    checks.push([`${label} abort 후 옛 명부 유지`, res.usersAfter.length === 1 && res.usersAfter[0].id === 1 && res.settingsAfter === "keep-me"]);
+    checks.push([`${label} abort 후 기록 3건`, res.rowsAfter.length === 3]);
+  }
+  say(checks.map(([n, ok]) => `${ok ? "PASS" : "FAIL"} ${n}`).join("\n"));
+  say(checks.every(([, ok]) => ok) ? "ALL PASS" : "SOME FAILED");
+} catch (err) {
+  say("ERROR " + (err && err.message ? err.message : String(err)));
+}
+</script></body></html>

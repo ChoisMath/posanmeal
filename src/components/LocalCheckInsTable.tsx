@@ -11,7 +11,8 @@ export interface LocalCheckInRow {
   userLabel: string;
   name: string;
   date: string;
-  mealKind: "BREAKFAST" | "LUNCH" | "DINNER";
+  /** v6 이전 기록에는 식사 구분이 없을 수 있다. 지어내지 않고 그대로 비워 둔다. */
+  mealKind?: "BREAKFAST" | "LUNCH" | "DINNER";
   type: "STUDENT" | "WORK" | "PERSONAL";
   checkedAt: string;
 }
@@ -77,7 +78,7 @@ export function LocalCheckInsTable({ rows, loading, errorMessage }: LocalCheckIn
                 <td className="sticky left-0 z-[1] bg-background px-3 py-2">{r.userLabel}</td>
                 <td className="px-3 py-2">{r.name}</td>
                 <td className="px-3 py-2">{r.date}</td>
-                <td className="px-3 py-2">{r.mealKind === "BREAKFAST" ? "조" : "석"}</td>
+                <td className="px-3 py-2">{r.mealKind === undefined ? "-" : r.mealKind === "BREAKFAST" ? "조" : "석"}</td>
                 <td className="px-3 py-2">{r.type}</td>
                 <td className="px-3 py-2">{formatDateTimeSecondsKST(new Date(r.checkedAt)).slice(11)}</td>
                 <td className="px-3 py-2 text-muted-foreground">{r.id}</td>

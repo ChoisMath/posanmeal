@@ -6,20 +6,20 @@ import { BrandMark } from "@/components/BrandMark";
 import { KioskViewport } from "@/components/KioskViewport";
 import {
   getSetting,
-  setSetting,
   getUser,
   isEligible,
   getCheckIn,
   addCheckIn,
-  getUnsyncedCheckIns,
+  getDeviceId,
+  getLocalSnapshotState,
   getUnsyncedCount,
-  markCheckInsSynced,
-  replaceAllUsers,
-  replaceAllEligibleUsers,
-  replaceAllEligibleEntries,
+  getPendingCheckInCounts,
   clearSyncedCheckIns,
   clearAllData,
+  decideResetGuard,
+  type PendingCheckInCounts,
 } from "@/lib/local-db";
+import { ForceResetDialog } from "@/components/ForceResetDialog";
 import { RefreshCw, QrCode, ScanFace, Wifi, WifiOff, Trash2 } from "lucide-react";
 import { DEFAULT_MEAL_WINDOWS, type MealWindows } from "@/lib/meal-kind-local";
 import { MEAL_LABEL } from "@/lib/meal-plan";
@@ -27,9 +27,12 @@ import { postCheckInWithRetry, type CheckInResult } from "@/lib/checkin-client";
 import { playDenied, playDuplicate, playError, playLockClick, playSuccess } from "@/lib/checkin-sounds";
 import { RESULT_BORDER_CLASS, RESULT_TEXT_CLASS, resultCategory } from "@/lib/checkin-result-style";
 import { isLocalQR, runLocalQrCheckIn } from "@/lib/qr-checkin-local";
-import { fetchKioskSettings, loadSavedKioskSettings } from "@/lib/kiosk-sync";
+import { fetchKioskSettings, loadSavedKioskSettings, performKioskSync } from "@/lib/kiosk-sync";
 
-const localQrRepo = { getSetting, getUser, isEligible, getCheckIn, addCheckIn };
+const localQrRepo = {
+  getSetting, getUser, isEligible, getCheckIn, addCheckIn,
+  getSnapshotState: getLocalSnapshotState, getDeviceId,
+};
 
 export default function CheckPage() {
   const [result, setResult] = useState<CheckInResult | null>(null);
@@ -43,6 +46,8 @@ export default function CheckPage() {
   const [syncRejectedCount, setSyncRejectedCount] = useState(0);
   const [modeLoaded, setModeLoaded] = useState(false);
   const [mealWindows, setMealWindows] = useState<MealWindows>(DEFAULT_MEAL_WINDOWS);
+  const [staleRoster, setStaleRoster] = useState(false);
+  const [resetPending, setResetPending] = useState<PendingCheckInCounts | null>(null);
   const prevModeRef = useRef<"online" | "local">("online");
 
   // Service Worker registration is handled globally in <SwUpdater /> (layout).
@@ -52,104 +57,21 @@ export default function CheckPage() {
     if (!navigator.onLine) return;
     setSyncing(true);
     setSyncMessage(null);
-
     try {
-      // 1. Upload unsynced check-ins
-      const unsynced = await getUnsyncedCheckIns();
-      if (unsynced.length > 0) {
-        const payload = unsynced
-          .filter((ci) => typeof ci.id === "number")
-          .map((ci) => ({
-            clientId: ci.id!,
-            userId: ci.userId,
-            date: ci.date,
-            mealKind: ci.mealKind,
-            checkedAt: ci.checkedAt,
-            type: ci.type,
-          }));
-
-        const upRes = await fetch("/api/sync/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ checkins: payload }),
-        });
-
-        if (upRes.ok) {
-          const upData = await upRes.json();
-          const syncedIds: number[] = Array.isArray(upData.syncedClientIds)
-            ? upData.syncedClientIds.filter((id: unknown): id is number => typeof id === "number")
-            : [];
-          if (syncedIds.length > 0) {
-            await markCheckInsSynced(syncedIds);
-          }
-          const accepted = upData.acceptedCount ?? 0;
-          const duplicates = upData.duplicatesCount ?? 0;
-          const rejectedCount = upData.rejectedCount ?? 0;
-          setSyncRejectedCount(rejectedCount);
-          let msg = `업로드: ${accepted}건 전송, ${duplicates}건 중복`;
-          if (rejectedCount > 0) msg += `, 미반영 ${rejectedCount}건 (재시도 대기)`;
-          setSyncMessage(msg);
-        } else if (upRes.status === 403) {
-          setSyncMessage("업로드 실패: 관리자 로그인이 필요합니다. /admin/login에서 먼저 로그인하세요.");
-          setSyncing(false);
-          return;
-        } else {
-          const errData = await upRes.json().catch(() => ({}));
-          setSyncMessage(`업로드 실패 (${upRes.status}): ${errData.error || "알 수 없는 오류"}`);
-          setSyncing(false);
-          return;
-        }
-      }
-
-      // 2. Download latest data
-      const downRes = await fetch("/api/sync/download");
-      if (downRes.ok) {
-        const data = await downRes.json();
-
-        await setSetting("operationMode", data.operationMode);
-        await setSetting("qrGeneration", data.qrGeneration.toString());
-        await setSetting("mealWindows", JSON.stringify(data.mealWindows || DEFAULT_MEAL_WINDOWS));
-        await replaceAllUsers(data.users);
-        if (Array.isArray(data.eligibleEntries)) {
-          await replaceAllEligibleEntries(data.eligibleEntries);
-        } else {
-          await replaceAllEligibleUsers(data.eligibleUserIds);
-        }
-
-        const now = new Date().toISOString();
-        await setSetting("lastSyncAt", now);
-
-        setOperationMode(data.operationMode);
-        setMealWindows(data.mealWindows || DEFAULT_MEAL_WINDOWS);
-        setLastSyncAt(now);
-
-        // Check server time drift
-        const serverTime = new Date(data.serverTime).getTime();
-        const localTime = Date.now();
-        if (Math.abs(serverTime - localTime) > 30 * 60 * 1000) {
-          setSyncMessage((prev) =>
-            (prev ? prev + " | " : "") + "경고: 태블릿 시계를 확인하세요 (서버와 30분 이상 차이)"
-          );
-        }
-
-        setSyncMessage((prev) =>
-          (prev ? prev + " | " : "") + "다운로드 완료"
-        );
-      } else if (downRes.status === 403) {
-        setSyncMessage((prev) =>
-          (prev ? prev + " | " : "") + "관리자 재로그인이 필요합니다"
-        );
-      } else {
-        setSyncMessage((prev) =>
-          (prev ? prev + " | " : "") + "다운로드 실패"
-        );
+      const outcome = await performKioskSync();
+      setSyncMessage(outcome.message);
+      setSyncRejectedCount(outcome.rejectedCount + outcome.reviewCount);
+      if (outcome.ok) {
+        const saved = await loadSavedKioskSettings();
+        setOperationMode(saved.operationMode);
+        setMealWindows(saved.mealWindows);
+        setLastSyncAt((await getSetting("lastSyncAt")) ?? null);
+        setStaleRoster(false);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
       console.error("Sync error:", err);
-      setSyncMessage(`동기화 오류: ${msg}`);
+      setSyncMessage("동기화 오류가 발생했습니다.");
     }
-
     await getUnsyncedCount().then(setUnsyncedCount);
     setSyncing(false);
   }, []);
@@ -268,6 +190,7 @@ export default function CheckPage() {
     try {
       const json = await runLocalQrCheckIn({ data, now: new Date(), mealWindows }, localQrRepo);
       setResult(json);
+      if (json.stale) setStaleRoster(true);
       const category = resultCategory(json);
       if (category === "success") playSuccess();
       else if (category === "duplicate") playDuplicate();
@@ -308,14 +231,25 @@ export default function CheckPage() {
     setSyncMessage(`${count}건의 동기화된 기록을 정리했습니다.`);
   }
 
-  async function handleClearAll() {
-    if (!confirm("모든 로컬 데이터를 삭제하시겠습니까? 미전송 체크인도 삭제됩니다.")) return;
-    if (!confirm("정말 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) return;
-    await clearAllData();
+  function afterReset() {
     setOperationMode("online");
     setUnsyncedCount(0);
     setLastSyncAt(null);
+    setStaleRoster(false);
+    setResetPending(null);
     setSyncMessage("모든 로컬 데이터가 삭제되었습니다.");
+  }
+
+  async function handleClearAll() {
+    const counts = await getPendingCheckInCounts();
+    // 서버가 아직 받지 못한 기록은 초기화로 사라지면 복구할 길이 없다.
+    if (decideResetGuard(counts) === "NEEDS_FORCED") {
+      setResetPending(counts);
+      return;
+    }
+    if (!confirm("모든 로컬 데이터를 삭제하시겠습니까?")) return;
+    await clearAllData();
+    afterReset();
   }
 
   const formatCheckedAt = (checkedAt: string) => {
@@ -460,10 +394,25 @@ export default function CheckPage() {
                 서버 미반영 {syncRejectedCount}건 — 재시도 대기
               </span>
             )}
+            {staleRoster && (
+              <span className="rounded bg-amber-500 px-2 font-semibold whitespace-nowrap text-slate-900">재동기화 필요</span>
+            )}
             {syncMessage && <span className="text-amber-300 whitespace-nowrap" title={syncMessage}>{syncMessage}</span>}
           </div>
         )}
       </footer>
+
+      {resetPending && (
+        <ForceResetDialog
+          counts={resetPending}
+          onClose={() => setResetPending(null)}
+          onSync={() => {
+            setResetPending(null);
+            performSync();
+          }}
+          onCleared={afterReset}
+        />
+      )}
     </KioskViewport>
   );
 }

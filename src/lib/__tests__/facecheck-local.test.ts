@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { localDateKey, runLocalFaceCheckIn, toFaceCandidates, type LocalFaceRepo } from "@/lib/facecheck-local";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
+import { LEGACY_SNAPSHOT_STATE, type LocalSnapshotState } from "@/lib/academic-year/local-snapshot";
 
 const WINDOWS = {
   breakfast: { start: "00:00", end: "00:00" },
@@ -22,7 +23,11 @@ const CANDIDATES = toFaceCandidates([
   { userId: 9, embeddings: [axis(1)] },
 ]);
 
-function makeRepo(users: LocalUser[], eligible = new Set<string>()) {
+function makeRepo(
+  users: LocalUser[],
+  eligible = new Set<string>(),
+  snapshotState: LocalSnapshotState = LEGACY_SNAPSHOT_STATE,
+) {
   const checkins: LocalCheckIn[] = [];
   const repo: LocalFaceRepo = {
     getUser: async (id) => users.find((u) => u.id === id),
@@ -32,6 +37,8 @@ function makeRepo(users: LocalUser[], eligible = new Set<string>()) {
     addCheckIn: async (c) => {
       checkins.push({ ...c, id: checkins.length + 1 });
     },
+    getSnapshotState: async () => snapshotState,
+    getDeviceId: async () => "device-1",
   };
   return { repo, checkins };
 }
@@ -178,5 +185,62 @@ describe("runLocalFaceCheckIn", () => {
     );
     expect(r).toMatchObject({ success: false, matched: false });
     expect(r.error).toContain("동기화");
+  });
+});
+
+describe("runLocalFaceCheckIn — 명부 근거", () => {
+  const snapshot = {
+    id: "snap-1",
+    version: 1,
+    lastEligibilityEventId: 1,
+    activeYear: 2026,
+    issuedAt: "2026-09-05T00:00:00Z",
+    freshUntil: "2026-09-05T15:00:00Z",
+    coversUntil: "2026-09-18",
+    users: [{ userId: 1, role: "STUDENT" as const, accessState: "ACTIVE" as const, accessEventId: 1 }],
+    eligible: [],
+    profiles: [],
+  };
+  const state = { snapshotMode: true, snapshot, serverActiveYear: 2026 };
+  const base = { embedding: axis(0), candidates: CANDIDATES, faceMatch: FACE_MATCH, now: NOW, mealWindows: WINDOWS };
+
+  it("최초 인식은 FRESH, 확인 처리 때 STALE이어도 저장하고 stale을 알린다", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), state);
+    const first = await runLocalFaceCheckIn(base, ctx.repo, () => new Date("2026-09-05T10:00:00Z"));
+    expect(first).toMatchObject({ needConfirmation: true });
+    expect(ctx.checkins).toHaveLength(0);
+
+    const saved = await runLocalFaceCheckIn(
+      { ...base, confirmation },
+      ctx.repo,
+      () => new Date("2026-09-05T16:00:00Z"),
+    );
+    expect(saved).toMatchObject({ success: true, stale: true });
+    expect(ctx.checkins).toHaveLength(1);
+    expect(ctx.checkins[0]).toMatchObject({ stale: true, snapshotId: "snap-1", deviceId: "device-1" });
+  });
+
+  it("확인 대기 중 학년도 전환이 확인되면 저장하지 않는다", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), state);
+    const first = await runLocalFaceCheckIn(base, ctx.repo, () => new Date("2026-09-05T10:00:00Z"));
+    expect(first).toMatchObject({ needConfirmation: true });
+
+    const rolled = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), { ...state, serverActiveYear: 2027 });
+    const blocked = await runLocalFaceCheckIn(
+      { ...base, confirmation },
+      rolled.repo,
+      () => new Date("2026-09-05T10:01:00Z"),
+    );
+    expect(blocked).toMatchObject({ success: false, error: "학년도 전환 후 동기화가 필요합니다" });
+    expect(rolled.checkins).toHaveLength(0);
+    expect(ctx.checkins).toHaveLength(0);
+  });
+
+  it("근거 모드가 아니면 판정 없이 기존과 같이 저장한다", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]));
+    const saved = await runLocalFaceCheckIn({ ...base, confirmation }, ctx.repo, () => new Date("2030-01-01T00:00:00Z"));
+    expect(saved).toMatchObject({ success: true });
+    expect(saved.stale).toBeUndefined();
+    expect(ctx.checkins[0].snapshotId).toBeUndefined();
   });
 });

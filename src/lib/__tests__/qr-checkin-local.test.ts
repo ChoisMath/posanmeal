@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { isLocalQR, parseLocalQR, runLocalQrCheckIn, type LocalQrRepo } from "@/lib/qr-checkin-local";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
+import { LEGACY_SNAPSHOT_STATE, type LocalSnapshotState } from "@/lib/academic-year/local-snapshot";
 
 const OPEN = {
   breakfast: { start: "00:00", end: "00:00" },
@@ -17,7 +18,12 @@ const NOW = new Date(2026, 8, 5, 17, 30); // 로컬 2026-09-05 17:30
 const STUDENT: LocalUser = { id: 1, name: "김학생", role: "STUDENT", grade: 2, classNum: 3, number: 7 };
 const TEACHER: LocalUser = { id: 9, name: "박교사", role: "TEACHER" };
 
-function makeRepo(users: LocalUser[], eligible = new Set<string>(), settings: Record<string, string> = {}) {
+function makeRepo(
+  users: LocalUser[],
+  eligible = new Set<string>(),
+  settings: Record<string, string> = {},
+  snapshotState: LocalSnapshotState = LEGACY_SNAPSHOT_STATE,
+) {
   const checkins: LocalCheckIn[] = [];
   const repo: LocalQrRepo = {
     getSetting: async (key) => settings[key],
@@ -28,6 +34,8 @@ function makeRepo(users: LocalUser[], eligible = new Set<string>(), settings: Re
     addCheckIn: async (c) => {
       checkins.push({ ...c, id: checkins.length + 1 });
     },
+    getSnapshotState: async () => snapshotState,
+    getDeviceId: async () => "device-1",
   };
   return { repo, checkins };
 }
@@ -129,5 +137,64 @@ describe("runLocalQrCheckIn", () => {
     const r = await run("posanmeal:9:3:WORK");
     expect(r).toMatchObject({ success: true, type: "WORK", user: { id: 9, role: "TEACHER" } });
     expect(ctx.checkins[0]).toMatchObject({ userId: 9, type: "WORK", synced: 0 });
+  });
+});
+
+describe("runLocalQrCheckIn — 명부 근거", () => {
+  const snapshot = {
+    id: "snap-1",
+    version: 1,
+    lastEligibilityEventId: 1,
+    activeYear: 2026,
+    issuedAt: "2026-09-05T00:00:00Z",
+    freshUntil: "2026-09-06T00:00:00Z",
+    coversUntil: "2026-09-18",
+    users: [{ userId: 1, role: "STUDENT" as const, accessState: "ACTIVE" as const, accessEventId: 1 }],
+    eligible: [],
+    profiles: [],
+  };
+  const state = { snapshotMode: true, snapshot, serverActiveYear: 2026 };
+
+  it("근거 모드가 아니면 기존과 똑같이 저장한다 (PREPARING 서버)", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), { qrGeneration: "3" });
+    const r = await runLocalQrCheckIn({ data: "posanmeal:1:3:STUDENT", now: NOW, mealWindows: OPEN }, ctx.repo);
+    expect(r.success).toBe(true);
+    expect(r.stale).toBeUndefined();
+    expect(ctx.checkins[0]).toMatchObject({ deviceId: "device-1" });
+    expect(ctx.checkins[0].snapshotId).toBeUndefined();
+  });
+
+  it("근거 모드면 snapshotId를 함께 저장한다", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), { qrGeneration: "3" }, state);
+    const r = await runLocalQrCheckIn(
+      { data: "posanmeal:1:3:STUDENT", now: NOW, mealWindows: OPEN },
+      ctx.repo,
+      () => new Date("2026-09-05T08:00:00Z"),
+    );
+    expect(r).toMatchObject({ success: true });
+    expect(ctx.checkins[0]).toMatchObject({ snapshotId: "snap-1", deviceId: "device-1" });
+  });
+
+  it("freshUntil이 지나도 저장하고 stale을 알린다", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), { qrGeneration: "3" }, state);
+    const r = await runLocalQrCheckIn(
+      { data: "posanmeal:1:3:STUDENT", now: NOW, mealWindows: OPEN },
+      ctx.repo,
+      () => new Date("2026-09-10T08:00:00Z"),
+    );
+    expect(r).toMatchObject({ success: true, stale: true });
+    expect(ctx.checkins).toHaveLength(1);
+    expect(ctx.checkins[0].stale).toBe(true);
+  });
+
+  it("학년도가 바뀌었으면 저장하지 않는다", async () => {
+    const ctx = makeRepo([STUDENT], new Set(["1:2026-09-05:DINNER"]), { qrGeneration: "3" }, { ...state, serverActiveYear: 2027 });
+    const r = await runLocalQrCheckIn(
+      { data: "posanmeal:1:3:STUDENT", now: NOW, mealWindows: OPEN },
+      ctx.repo,
+      () => new Date("2026-09-05T08:00:00Z"),
+    );
+    expect(r).toMatchObject({ success: false, error: "학년도 전환 후 동기화가 필요합니다" });
+    expect(ctx.checkins).toHaveLength(0);
   });
 });

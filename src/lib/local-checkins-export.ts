@@ -24,7 +24,7 @@ export async function exportLocalCheckInsXlsx(rows: LocalCheckInRow[]): Promise<
       r.userLabel,
       r.name,
       r.date,
-      r.mealKind === "BREAKFAST" ? "조" : "석",
+      r.mealKind === undefined ? "-" : r.mealKind === "BREAKFAST" ? "조" : "석",
       r.type,
       formatDateTimeSecondsKST(new Date(r.checkedAt)),
     ]);

@@ -33,6 +33,8 @@ import {
   addCheckIn,
   getAllFaceProfiles,
   getCheckIn,
+  getDeviceId,
+  getLocalSnapshotState,
   getSetting,
   getUnsyncedCount,
   getUser,
@@ -96,8 +98,9 @@ const CANCEL_SUPPRESS_MS = 15_000;
 const BUSY_POLL_MS = 100;
 const PERF_UPDATE_MS = 500;
 
-const localRepo = { getUser, getCheckIn, isEligible, addCheckIn };
-const localQrRepo = { getSetting, getUser, isEligible, getCheckIn, addCheckIn };
+const snapshotRepo = { getSnapshotState: getLocalSnapshotState, getDeviceId };
+const localRepo = { getUser, getCheckIn, isEligible, addCheckIn, ...snapshotRepo };
+const localQrRepo = { getSetting, getUser, isEligible, getCheckIn, addCheckIn, ...snapshotRepo };
 
 function formatSyncTime(iso: string | null): string {
   if (!iso) return "없음";
@@ -118,6 +121,7 @@ export default function FaceCheckPage() {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [staleRoster, setStaleRoster] = useState(false);
   const [perf, setPerf] = useState<{ backend: string | null; detectMs: number | null }>({ backend: null, detectMs: null });
   // 직전 판정의 1·2위 유사도 — 현장에서 임계값을 조정할 때 참고한다
   const [lastScore, setLastScore] = useState<MatchScore | null>(null);
@@ -259,6 +263,7 @@ export default function FaceCheckPage() {
       const outcome = await performKioskSync();
       setSyncMessage(outcome.message);
       if (outcome.ok) {
+        setStaleRoster(false);
         applySettings(await loadSavedKioskSettings());
         await loadCandidates();
         setLastSyncAt((await getSetting("lastSyncAt")) ?? null);
@@ -357,6 +362,7 @@ export default function FaceCheckPage() {
     }
     const gen = ++resultGenRef.current;
     setResult(json);
+    if (json.stale) setStaleRoster(true);
     // 같은 사람이 프레임에 남아 결과/경고음이 반복되는 것을 막는다.
     if (json.user?.id) suppressRef.current.set(json.user.id, Date.now() + RESULT_SUPPRESS_MS);
     const category = resultCategory(json);
@@ -942,6 +948,9 @@ export default function FaceCheckPage() {
         {isLocal && (
           <div className="kiosk-sync-details flex min-w-0 items-center gap-2 overflow-x-auto text-xs leading-5">
             <span className="whitespace-nowrap text-white/80">마지막 동기화: {formatSyncTime(lastSyncAt)}</span>
+            {staleRoster && (
+              <span className="rounded bg-amber-500 px-2 font-semibold whitespace-nowrap text-slate-900">재동기화 필요</span>
+            )}
             {syncMessage && <span className="whitespace-nowrap text-amber-300" title={syncMessage}>{syncMessage}</span>}
           </div>
         )}

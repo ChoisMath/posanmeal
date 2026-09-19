@@ -4,6 +4,12 @@ import { MEAL_LABEL } from "@/lib/meal-plan";
 import type { LocalCheckIn, LocalUser } from "@/lib/local-db";
 import type { FaceConfirmation } from "@/lib/schemas/face";
 import { TIMEZONE } from "@/lib/timezone";
+import {
+  LocalSnapshotError,
+  guardLocalCheckIn,
+  type LocalSnapshotState,
+  type SnapshotFreshness,
+} from "@/lib/academic-year/local-snapshot";
 
 export interface FaceCheckUser {
   id: number;
@@ -23,6 +29,8 @@ export interface FaceCheckResult extends MatchScore {
   notApplicant?: boolean;
   needType?: boolean;
   needConfirmation?: boolean;
+  /** 유효기간이 지난 명부로 저장됨 — 저장은 되었고 재동기화가 필요하다. */
+  stale?: boolean;
   date?: string;
   error?: string;
   errorCode?: string;
@@ -37,6 +45,8 @@ export interface LocalFaceRepo {
   getCheckIn(userId: number, date: string, mealKind: MealKind): Promise<LocalCheckIn | undefined>;
   isEligible(userId: number, date: string, mealKind: MealKind): Promise<boolean>;
   addCheckIn(checkin: Omit<LocalCheckIn, "id">): Promise<void>;
+  getSnapshotState(): Promise<LocalSnapshotState>;
+  getDeviceId(): Promise<string>;
 }
 
 export interface LocalFaceInput {
@@ -61,7 +71,11 @@ function toFaceUser(user: LocalUser): FaceCheckUser {
   return { id: user.id, name: user.name, role: user.role, grade: user.grade, classNum: user.classNum, number: user.number };
 }
 
-export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFaceRepo): Promise<FaceCheckResult> {
+export async function runLocalFaceCheckIn(
+  input: LocalFaceInput,
+  repo: LocalFaceRepo,
+  now: () => Date = () => new Date(),
+): Promise<FaceCheckResult> {
   const kstNow = new Date(input.now.toLocaleString("en-US", { timeZone: TIMEZONE }));
   const mealKind = resolveMealKindLocal(kstNow, input.mealWindows);
   if (!mealKind) {
@@ -87,6 +101,19 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
       success: false, matched: true, ...score,
       error: "확인 대상이 변경되었습니다. 얼굴을 다시 인식해 주세요.", errorCode: "CONFIRMATION_CHANGED",
     };
+  }
+
+  // 확인 창을 띄우기 전에 한 번, 저장 직전에 다시 판정한다. 확인창이 떠 있는 동안
+  // 자정이 지나거나 학년도가 바뀔 수 있다.
+  let freshness: SnapshotFreshness | null;
+  const state = await repo.getSnapshotState();
+  try {
+    freshness = guardLocalCheckIn(state, { now: now(), userId: user.id, dateKey: date });
+  } catch (error) {
+    if (error instanceof LocalSnapshotError) {
+      return { success: false, matched: true, ...score, user: faceUser, mealKind, error: error.message };
+    }
+    throw error;
   }
 
   if (!confirmation || (user.role === "TEACHER" && !input.type)) {
@@ -130,6 +157,17 @@ export async function runLocalFaceCheckIn(input: LocalFaceInput, repo: LocalFace
   }
 
   const checkedAt = input.now.toISOString();
-  await repo.addCheckIn({ userId: user.id, date, mealKind, checkedAt, type, synced: 0 });
-  return { success: true, matched: true, user: faceUser, type, mealKind, checkedAt, ...score };
+  const stale = freshness === "STALE";
+  await repo.addCheckIn({
+    userId: user.id,
+    date,
+    mealKind,
+    checkedAt,
+    type,
+    synced: 0,
+    deviceId: await repo.getDeviceId(),
+    ...(state.snapshot ? { snapshotId: state.snapshot.id } : {}),
+    ...(stale ? { stale: true } : {}),
+  });
+  return { success: true, matched: true, user: faceUser, type, mealKind, checkedAt, ...score, ...(stale ? { stale: true } : {}) };
 }
