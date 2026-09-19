@@ -2,54 +2,110 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { formatDateTimeKST } from "@/lib/timezone";
 import { sourceLabel } from "@/lib/checkin-source";
-import { buildMonthDateRange, dateKeyToUtcDate } from "@/lib/date-range";
+import { buildMonthDateRange, dateKeyToUtcDate, formatMonthDateKey } from "@/lib/date-range";
 import { MEAL_LABEL } from "@/lib/meal-plan";
+import { academicYearOfDate } from "@/lib/academic-year/calendar";
+import { errorResponse } from "@/lib/academic-year/api";
+import { DomainError } from "@/lib/academic-year/errors";
+import {
+  compareByProfile,
+  currentClassLabelOf,
+  getReportProfiles,
+  listYearMemberIds,
+  MISSING_PROFILE_WARNING,
+  type ReportProfile,
+} from "@/lib/academic-year/report-profile";
+import { requireActor } from "@/lib/academic-year/request-actor";
+
+type ExportCheckIn = { date: Date; type?: string; mealKind?: string | null };
+
+type ExportUser = {
+  name: string;
+  subject: string | null;
+  classNum: number | null;
+  number: number | null;
+  currentClass: string | null;
+  checkIns: ExportCheckIn[];
+};
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const dateParam = searchParams.get("date");
+  try {
+    await requireActor("READ_ADMIN");
 
-  if (dateParam) {
-    return exportDaily(dateParam);
+    const { searchParams } = new URL(request.url);
+    const dateParam = searchParams.get("date");
+    const includeCurrent = searchParams.get("includeCurrent") === "1";
+
+    if (dateParam) {
+      return await exportDaily(dateParam, includeCurrent);
+    }
+
+    return await exportMonthly(searchParams, includeCurrent);
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+async function exportMonthly(
+  searchParams: URLSearchParams,
+  includeCurrent: boolean,
+): Promise<NextResponse> {
+  const now = new Date();
+  const year = Number.parseInt(searchParams.get("year") ?? String(now.getFullYear()), 10);
+  const month = Number.parseInt(searchParams.get("month") ?? String(now.getMonth() + 1), 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new DomainError("INVALID_INPUT", "조회 기간을 확인하세요.");
   }
 
-  const year = parseInt(searchParams.get("year") || new Date().getFullYear().toString());
-  const month = parseInt(searchParams.get("month") || (new Date().getMonth() + 1).toString());
-
   const { startDate, endDate, daysInMonth } = buildMonthDateRange(year, month);
+  const academicYear = academicYearOfDate(formatMonthDateKey(year, month, 1));
 
-  // 4개 카테고리 데이터를 병렬 쿼리
+  async function loadCategory(
+    filter: { role: "STUDENT" | "TEACHER"; grade?: number },
+  ): Promise<ExportUser[]> {
+    const ids = await listYearMemberIds(prisma, academicYear, filter);
+    const [profiles, checkIns] = await Promise.all([
+      getReportProfiles(prisma, ids, academicYear, includeCurrent),
+      prisma.checkIn.findMany({
+        where: { userId: { in: ids }, date: { gte: startDate, lte: endDate } },
+        select: { userId: true, date: true, type: true, mealKind: true },
+        orderBy: [{ date: "asc" }, { mealKind: "asc" }],
+      }),
+    ]);
+
+    const byUser = new Map<number, ExportCheckIn[]>();
+    for (const { userId, ...rest } of checkIns) {
+      const list = byUser.get(userId);
+      if (list) list.push(rest);
+      else byUser.set(userId, [rest]);
+    }
+
+    const mode = filter.role === "TEACHER" ? "TEACHER" : "STUDENT";
+    return ids
+      .slice()
+      .sort((a, b) => compareByProfile(profiles.get(a), profiles.get(b), mode))
+      .map((id) => {
+        const report: ReportProfile | undefined = profiles.get(id);
+        const profile = report?.historical;
+        return {
+          name: profile?.name ?? MISSING_PROFILE_WARNING,
+          subject: profile?.subject ?? null,
+          classNum: profile?.classNum ?? null,
+          number: profile?.number ?? null,
+          currentClass: includeCurrent ? currentClassLabelOf(report) : null,
+          checkIns: byUser.get(id) ?? [],
+        };
+      });
+  }
+
   const [teachers, grade1, grade2, grade3] = await Promise.all([
-    prisma.user.findMany({
-      where: { role: "TEACHER" },
-      select: {
-        name: true, subject: true,
-        checkIns: {
-          where: { date: { gte: startDate, lte: endDate } },
-          select: { date: true, type: true, mealKind: true },
-          orderBy: [{ date: "asc" }, { mealKind: "asc" }],
-        },
-      },
-      orderBy: { name: "asc" },
-    }),
-    ...([1, 2, 3] as const).map((grade) =>
-      prisma.user.findMany({
-        where: { role: "STUDENT", grade },
-        select: {
-          name: true, number: true, classNum: true,
-          checkIns: {
-            where: { date: { gte: startDate, lte: endDate } },
-            select: { date: true, mealKind: true },
-            orderBy: [{ date: "asc" }, { mealKind: "asc" }],
-          },
-        },
-        orderBy: [{ classNum: "asc" }, { number: "asc" }],
-      })
-    ),
+    loadCategory({ role: "TEACHER" }),
+    ...([1, 2, 3] as const).map((grade) => loadCategory({ role: "STUDENT", grade })),
   ]);
 
   const ExcelJS = await import("exceljs");
   const workbook = new ExcelJS.default.Workbook();
+  workbook.title = `${academicYear}학년도 ${year}년 ${month}월 급식 현황`;
 
   const categories = [
     { title: `포산고등학교 ${month}월 교사`, label: "이름", users: teachers, isTeacher: true },
@@ -89,6 +145,11 @@ export async function GET(request: Request) {
       headerRow.getCell(workCol).value = "근무";
     }
     headerRow.getCell(totalCol).value = "합계";
+    const currentCol = includeCurrent ? lastCol + 1 : 0;
+    if (includeCurrent) {
+      headerRow.getCell(currentCol).value = "현재 학급";
+      sheet.getColumn(currentCol).width = 12;
+    }
     headerRow.font = { bold: true };
     headerRow.alignment = { horizontal: "center" };
     headerRow.getCell(1).alignment = { horizontal: "left" };
@@ -110,14 +171,14 @@ export async function GET(request: Request) {
     const dailyTotal = new Array(daysInMonth + 1).fill(0);
 
     type DaySlot = {
-      dinner?: { type?: string; mealKind?: string | null };
-      breakfast?: { type?: string; mealKind?: string | null };
-      lunch?: { type?: string; mealKind?: string | null };
+      dinner?: ExportCheckIn;
+      breakfast?: ExportCheckIn;
+      lunch?: ExportCheckIn;
     };
     for (const user of users) {
       const row = sheet.addRow([]);
       const slotMap = new Map<number, DaySlot>();
-      for (const c of user.checkIns as { date: Date; type?: string; mealKind?: string | null }[]) {
+      for (const c of user.checkIns) {
         const day = new Date(c.date).getDate();
         const slot = slotMap.get(day) ?? {};
         if (c.mealKind === "BREAKFAST") slot.breakfast = c;
@@ -126,11 +187,12 @@ export async function GET(request: Request) {
         slotMap.set(day, slot);
       }
 
-      if (isTeacher) {
-        row.getCell(1).value = (user as { name: string }).name;
-      } else {
-        const s = user as { classNum: number; number: number; name: string };
-        row.getCell(1).value = `${s.classNum}-${s.number} ${s.name}`;
+      row.getCell(1).value = isTeacher
+        ? user.name
+        : `${user.classNum ?? ""}-${user.number ?? ""} ${user.name}`;
+      if (includeCurrent) {
+        row.getCell(currentCol).value = user.currentClass ?? "";
+        row.getCell(currentCol).alignment = { horizontal: "center" };
       }
 
       let count = 0;
@@ -239,36 +301,35 @@ export async function GET(request: Request) {
   });
 }
 
-async function exportDaily(dateParam: string) {
+async function exportDaily(dateParam: string, includeCurrent: boolean): Promise<NextResponse> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
-    return NextResponse.json({ error: "잘못된 날짜 형식입니다." }, { status: 400 });
+    throw new DomainError("INVALID_INPUT", "잘못된 날짜 형식입니다.");
   }
   let targetDate: Date;
   try {
     targetDate = dateKeyToUtcDate(dateParam);
   } catch {
-    return NextResponse.json({ error: "잘못된 날짜입니다." }, { status: 400 });
+    throw new DomainError("INVALID_INPUT", "잘못된 날짜입니다.");
   }
+  const academicYear = academicYearOfDate(dateParam);
 
   const checkIns = await prisma.checkIn.findMany({
     where: { date: targetDate },
     select: {
+      userId: true,
       type: true,
       mealKind: true,
       source: true,
       checkedAt: true,
-      user: {
-        select: {
-          name: true,
-          role: true,
-          grade: true,
-          classNum: true,
-          number: true,
-          subject: true,
-        },
-      },
     },
   });
+
+  const profiles = await getReportProfiles(
+    prisma,
+    checkIns.map((c) => c.userId),
+    academicYear,
+    includeCurrent,
+  );
 
   type Row = {
     category: "1학년" | "2학년" | "3학년" | "교사 근무" | "교사 개인";
@@ -277,6 +338,7 @@ async function exportDaily(dateParam: string) {
     number: number | null;
     name: string;
     subject: string | null;
+    currentClass: string | null;
     mealKind: "BREAKFAST" | "LUNCH" | "DINNER";
     checkedAt: Date;
     source: "QR" | "ADMIN_MANUAL" | "LOCAL_SYNC" | "FACE" | null;
@@ -287,19 +349,22 @@ async function exportDaily(dateParam: string) {
   };
 
   const rows: Row[] = checkIns.map((c) => {
+    const report = profiles.get(c.userId);
+    const profile = report?.historical;
     let category: Row["category"];
-    if (c.user.role === "STUDENT") {
-      category = (c.user.grade === 1 ? "1학년" : c.user.grade === 2 ? "2학년" : "3학년");
+    if (profile?.role === "STUDENT") {
+      category = profile.grade === 1 ? "1학년" : profile.grade === 2 ? "2학년" : "3학년";
     } else {
       category = c.type === "WORK" ? "교사 근무" : "교사 개인";
     }
     return {
       category,
-      grade: c.user.grade,
-      classNum: c.user.classNum,
-      number: c.user.number,
-      name: c.user.name,
-      subject: c.user.subject,
+      grade: profile?.grade ?? null,
+      classNum: profile?.classNum ?? null,
+      number: profile?.number ?? null,
+      name: profile?.name ?? MISSING_PROFILE_WARNING,
+      subject: profile?.subject ?? null,
+      currentClass: includeCurrent ? currentClassLabelOf(report) : null,
       mealKind: c.mealKind ?? "DINNER",
       checkedAt: c.checkedAt,
       source: c.source,
@@ -328,7 +393,10 @@ async function exportDaily(dateParam: string) {
   const workbook = new ExcelJS.default.Workbook();
   const sheet = workbook.addWorksheet(dateParam);
 
-  const headers = ["구분", "학년", "반", "번호", "이름", "교과", "식사", "체크인 시각", "출처"];
+  const headers = [
+    "구분", "학년", "반", "번호", "이름", "교과", "식사", "체크인 시각", "출처",
+    ...(includeCurrent ? ["현재 학급"] : []),
+  ];
   const lastCol = headers.length;
 
   const dow = ["일", "월", "화", "수", "목", "금", "토"][targetDate.getDay()];
@@ -351,7 +419,7 @@ async function exportDaily(dateParam: string) {
   headerRow.font = { bold: true };
   headerRow.alignment = { horizontal: "center" };
 
-  const widths = [10, 6, 6, 6, 12, 14, 8, 18, 8];
+  const widths = [10, 6, 6, 6, 12, 14, 8, 18, 8, ...(includeCurrent ? [12] : [])];
   widths.forEach((w, i) => { sheet.getColumn(i + 1).width = w; });
 
   for (const r of rows) {
@@ -366,6 +434,7 @@ async function exportDaily(dateParam: string) {
       MEAL_LABEL[r.mealKind],
       formatDateTimeKST(r.checkedAt),
       sourceLabel(r.source),
+      ...(includeCurrent ? [r.currentClass ?? ""] : []),
     ]);
     for (let c = 1; c <= lastCol; c++) {
       row.getCell(c).alignment = { horizontal: c === 5 || c === 6 ? "left" : "center" };

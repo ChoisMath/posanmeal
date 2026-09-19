@@ -1,64 +1,67 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { buildMonthDateRange } from "@/lib/date-range";
 import { buildMonthlyMealColumns, getDateDayKey, type MealKind } from "@/lib/meal-columns";
 import { getCachedSettings } from "@/lib/settings-cache";
 import { buildCardQrString } from "@/lib/qr-card";
+import { routeResponse } from "@/lib/academic-year/api";
+import { DomainError } from "@/lib/academic-year/errors";
+import { compareByProfile, getReportProfiles } from "@/lib/academic-year/report-profile";
+import { requireActor } from "@/lib/academic-year/request-actor";
+import { getTeacherScope, listScopeStudentIds } from "@/lib/academic-year/teacher-scope";
 
 export async function GET(request: Request) {
-  const session = await auth();
-  if (!session?.user?.dbUserId || session.user.role !== "TEACHER") {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return routeResponse(() => listStudents(request));
+}
+
+async function listStudents(request: Request): Promise<NextResponse> {
+  const actor = await requireActor("TEACHER");
+
+  // 요청이 보낸 연도·학년·반은 보지 않는다. 담당 학급은 운영 연도 기록에서만 나온다.
+  const scope = await getTeacherScope(prisma, actor);
+  if (!scope) {
+    throw new DomainError("FORBIDDEN", "담임 교사가 아닙니다.");
   }
-
-  const teacher = await prisma.user.findUnique({
-    where: { id: session.user.dbUserId },
-    select: { homeroom: true },
-  });
-
-  if (!teacher?.homeroom) {
-    return NextResponse.json({ error: "담임 교사가 아닙니다." }, { status: 403 });
-  }
-
-  const [gradeStr, classStr] = teacher.homeroom.split("-");
-  const grade = parseInt(gradeStr);
-  const classNum = parseInt(classStr);
 
   const { searchParams } = new URL(request.url);
-  const year = parseInt(searchParams.get("year") || new Date().getFullYear().toString());
-  const month = parseInt(searchParams.get("month") || (new Date().getMonth() + 1).toString());
+  const now = new Date();
+  const year = Number.parseInt(searchParams.get("year") ?? String(now.getFullYear()), 10);
+  const month = Number.parseInt(searchParams.get("month") ?? String(now.getMonth() + 1), 10);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new DomainError("INVALID_INPUT", "조회 기간을 확인하세요.");
+  }
 
   const { startDate, endDate } = buildMonthDateRange(year, month);
+  const studentIds = await listScopeStudentIds(prisma, scope);
 
-  const [students, appliedRows] = await Promise.all([
+  const [profiles, photos, checkIns, appliedRows] = await Promise.all([
+    getReportProfiles(prisma, studentIds, scope.year, false),
     prisma.user.findMany({
-      where: { role: "STUDENT", grade, classNum },
-      select: {
-        id: true, name: true, number: true, photoUrl: true,
-        checkIns: {
-          where: { date: { gte: startDate, lte: endDate } },
-          select: { date: true, checkedAt: true, type: true, mealKind: true },
-          orderBy: [{ date: "asc" }, { mealKind: "asc" }],
-        },
-      },
-      orderBy: { number: "asc" },
+      where: { id: { in: studentIds } },
+      select: { id: true, photoUrl: true },
+    }),
+    prisma.checkIn.findMany({
+      where: { userId: { in: studentIds }, date: { gte: startDate, lte: endDate } },
+      select: { userId: true, date: true, checkedAt: true, type: true, mealKind: true },
+      orderBy: [{ date: "asc" }, { mealKind: "asc" }],
     }),
     prisma.mealRegistrationMealDate.findMany({
       where: {
         date: { gte: startDate, lte: endDate },
-        registration: {
-          status: "APPROVED",
-          user: { role: "STUDENT", grade, classNum },
-        },
+        registration: { status: "APPROVED", userId: { in: studentIds } },
       },
-      select: {
-        date: true,
-        mealKind: true,
-        registration: { select: { userId: true } },
-      },
+      select: { date: true, mealKind: true, registration: { select: { userId: true } } },
     }),
   ]);
+
+  const photoByUser = new Map(photos.map((row) => [row.id, row.photoUrl]));
+
+  const checkInsByUser = new Map<number, Array<Omit<(typeof checkIns)[number], "userId">>>();
+  for (const { userId, ...rest } of checkIns) {
+    const list = checkInsByUser.get(userId);
+    if (list) list.push(rest);
+    else checkInsByUser.set(userId, [rest]);
+  }
 
   const appliedByUser = new Map<number, { date: string; mealKind: MealKind }[]>();
   for (const row of appliedRows) {
@@ -75,15 +78,28 @@ export async function GET(request: Request) {
 
   const settings = await getCachedSettings();
 
-  const studentsOut = students.map((s) => ({
-    id: s.id,
-    name: s.name,
-    number: s.number,
-    photoUrl: s.photoUrl,
-    checkIns: s.checkIns,
-    appliedDates: appliedByUser.get(s.id) ?? [],
-    qrString: buildCardQrString(s.id, settings.qrGeneration),
-  }));
+  const students = studentIds
+    .slice()
+    .sort((a, b) => compareByProfile(profiles.get(a), profiles.get(b), "STUDENT"))
+    .map((id) => {
+      const report = profiles.get(id);
+      return {
+        id,
+        name: report?.historical?.name ?? "",
+        number: report?.historical?.number ?? null,
+        photoUrl: photoByUser.get(id) ?? null,
+        checkIns: checkInsByUser.get(id) ?? [],
+        appliedDates: appliedByUser.get(id) ?? [],
+        qrString: buildCardQrString(id, settings.qrGeneration),
+        ...(report?.warning ? { profileWarning: report.warning } : {}),
+      };
+    });
 
-  return NextResponse.json({ students: studentsOut, grade, classNum, mealColumns });
+  return NextResponse.json({
+    students,
+    grade: scope.grade,
+    classNum: scope.classNum,
+    academicYear: scope.year,
+    mealColumns,
+  });
 }

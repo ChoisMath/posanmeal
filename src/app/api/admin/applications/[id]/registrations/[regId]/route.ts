@@ -5,7 +5,12 @@ import { resolveRegistrationSelections, toDateKey } from "@/lib/meal-plan-server
 import { dateKeyToUtcDate } from "@/lib/date-range";
 import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
-import { getRegistrationContext } from "@/lib/academic-year/registration-context";
+import {
+  getRegistrationContext,
+  resolveApplicationYear,
+  rosterMode,
+} from "@/lib/academic-year/registration-context";
+import { getReportProfiles } from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { z } from "zod";
 
@@ -36,15 +41,7 @@ async function readRegistration(
   const reg = await prisma.mealRegistration.findUnique({
     where: { id: registrationId },
     include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          grade: true,
-          classNum: true,
-          number: true,
-        },
-      },
+      application: { select: { academicYear: true } },
       meals: true,
       mealDates: { orderBy: { date: "asc" } },
     },
@@ -54,14 +51,27 @@ async function readRegistration(
     return NextResponse.json({ error: "신청을 찾을 수 없습니다." }, { status: 404 });
   }
 
+  const mode = await rosterMode(prisma);
+  const academicYear = await resolveApplicationYear(prisma, mode, reg.application.academicYear);
+  const report = (await getReportProfiles(prisma, [reg.userId], academicYear, false)).get(reg.userId);
+  const profile = report?.historical;
+
   return NextResponse.json({
+    academicYear,
     registration: {
       id: reg.id,
       status: reg.status,
       addedBy: reg.addedBy,
       createdAt: reg.createdAt,
       updatedAt: reg.updatedAt,
-      user: reg.user,
+      user: {
+        id: reg.userId,
+        name: profile?.name ?? "",
+        grade: profile?.grade ?? null,
+        classNum: profile?.classNum ?? null,
+        number: profile?.number ?? null,
+      },
+      ...(report?.warning ? { profileWarning: report.warning } : {}),
       meals: reg.meals.map((rm) => ({
         mealKind: rm.mealKind,
         applied: rm.applied,

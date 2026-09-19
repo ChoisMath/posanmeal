@@ -4,7 +4,16 @@ import { studentRegisterSchema } from "@/lib/schemas/meal-plan";
 import { resolveRegistrationSelections, writeRegistration } from "@/lib/meal-plan-server";
 import { parseIdParam, routeResponse } from "@/lib/academic-year/api";
 import { withEligibilityMutation } from "@/lib/academic-year/eligibility-mutation";
-import { getRegistrationContext } from "@/lib/academic-year/registration-context";
+import {
+  getRegistrationContext,
+  resolveApplicationYear,
+  rosterMode,
+} from "@/lib/academic-year/registration-context";
+import {
+  compareByProfile,
+  currentClassLabelOf,
+  getReportProfiles,
+} from "@/lib/academic-year/report-profile";
 import { requireActor } from "@/lib/academic-year/request-actor";
 import { z } from "zod";
 
@@ -14,11 +23,15 @@ const adminRegisterSchema = z.object({
   meals: studentRegisterSchema.shape.meals,
 });
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  return routeResponse(() => listRegistrations(params));
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const includeCurrent = new URL(request.url).searchParams.get("includeCurrent") === "1";
+  return routeResponse(() => listRegistrations(params, includeCurrent));
 }
 
-async function listRegistrations(params: Promise<{ id: string }>): Promise<NextResponse> {
+async function listRegistrations(
+  params: Promise<{ id: string }>,
+  includeCurrent: boolean,
+): Promise<NextResponse> {
   await requireActor("READ_ADMIN");
   const applicationId = parseIdParam((await params).id);
 
@@ -27,6 +40,7 @@ async function listRegistrations(params: Promise<{ id: string }>): Promise<NextR
     select: {
       id: true,
       title: true,
+      academicYear: true,
       startYear: true,
       startMonth: true,
       monthCount: true,
@@ -47,6 +61,9 @@ async function listRegistrations(params: Promise<{ id: string }>): Promise<NextR
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const mode = await rosterMode(prisma);
+  const academicYear = await resolveApplicationYear(prisma, mode, application.academicYear);
+
   const registrationRows = await prisma.mealRegistration.findMany({
     where: { applicationId },
     select: {
@@ -54,27 +71,20 @@ async function listRegistrations(params: Promise<{ id: string }>): Promise<NextR
       createdAt: true,
       status: true,
       addedBy: true,
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          grade: true,
-          classNum: true,
-          number: true,
-          gender: true,
-        },
-      },
+      userId: true,
+      user: { select: { id: true, email: true } },
       meals: {
         select: { mealKind: true, applied: true, exempt: true },
       },
     },
-    orderBy: [
-      { user: { grade: "asc" } },
-      { user: { classNum: "asc" } },
-      { user: { number: "asc" } },
-    ],
   });
+
+  const profiles = await getReportProfiles(
+    prisma,
+    registrationRows.map((r) => r.userId),
+    academicYear,
+    includeCurrent,
+  );
 
   // Aggregate dayCount per (registrationId, mealKind) using groupBy
   const regIds = registrationRows.map((r) => r.id);
@@ -93,21 +103,44 @@ async function listRegistrations(params: Promise<{ id: string }>): Promise<NextR
     dayCountMap.set(`${row.registrationId}:${row.mealKind}`, row._count.date);
   }
 
-  const registrations = registrationRows.map((r) => ({
-    id: r.id,
-    createdAt: r.createdAt,
-    status: r.status,
-    addedBy: r.addedBy,
-    user: r.user,
-    meals: r.meals.map((m) => ({
-      mealKind: m.mealKind,
-      applied: m.applied,
-      exempt: m.exempt,
-      dayCount: dayCountMap.get(`${r.id}:${m.mealKind}`) ?? 0,
-    })),
-  }));
+  const registrations = registrationRows
+    .slice()
+    .sort((a, b) => {
+      const left = profiles.get(a.userId)?.historical;
+      const right = profiles.get(b.userId)?.historical;
+      const gradeDiff = (left?.grade ?? 0) - (right?.grade ?? 0);
+      if (gradeDiff !== 0) return gradeDiff;
+      return compareByProfile(profiles.get(a.userId), profiles.get(b.userId), "STUDENT");
+    })
+    .map((r) => {
+      const report = profiles.get(r.userId);
+      const profile = report?.historical;
+      return {
+        id: r.id,
+        createdAt: r.createdAt,
+        status: r.status,
+        addedBy: r.addedBy,
+        user: {
+          id: r.user.id,
+          email: r.user.email,
+          name: profile?.name ?? "",
+          grade: profile?.grade ?? null,
+          classNum: profile?.classNum ?? null,
+          number: profile?.number ?? null,
+          gender: profile?.gender ?? null,
+        },
+        ...(report?.warning ? { profileWarning: report.warning } : {}),
+        ...(includeCurrent ? { currentClass: currentClassLabelOf(report) } : {}),
+        meals: r.meals.map((m) => ({
+          mealKind: m.mealKind,
+          applied: m.applied,
+          exempt: m.exempt,
+          dayCount: dayCountMap.get(`${r.id}:${m.mealKind}`) ?? 0,
+        })),
+      };
+    });
 
-  return NextResponse.json({ application, registrations });
+  return NextResponse.json({ application, academicYear, registrations });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {

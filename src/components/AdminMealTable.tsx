@@ -2,7 +2,7 @@
 
 import { useState, useMemo, type CSSProperties } from "react";
 import useSWR from "swr";
-import { fetcher } from "@/lib/fetcher";
+import { errorTextOf, fetcher } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -107,7 +107,7 @@ function MealGrid({ category, year, month, readonly = false }: { category: Categ
         mutateGrid();
       } else {
         const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "체크인 변경에 실패했습니다.");
+        toast.error(errorTextOf(data, "체크인 변경에 실패했습니다."));
       }
     } catch {
       toast.error("네트워크 오류가 발생했습니다.");

@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/auth";
-import { canWriteAdmin } from "@/lib/permissions";
+import { errorResponse, parseIdParam } from "@/lib/academic-year/api";
+import {
+  resolveApplicationYear,
+  rosterMode,
+} from "@/lib/academic-year/registration-context";
+import {
+  compareByProfile,
+  currentClassLabelOf,
+  getReportProfiles,
+  listYearMemberIds,
+  MISSING_PROFILE_WARNING,
+} from "@/lib/academic-year/report-profile";
+import { requireActor } from "@/lib/academic-year/request-actor";
 import { studentNumberOf } from "@/lib/meal-plan";
 import { buildStatsWorkbook, type MealKind } from "@/lib/meal-stats-excel";
 import { toDateKey } from "@/lib/meal-plan-server";
@@ -16,19 +27,13 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!canWriteAdmin(session)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
   try {
-    const { id } = await params;
-    const appId = parseInt(id);
-    if (isNaN(appId)) {
-      return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
-    }
+    await requireActor("WRITE_ADMIN");
+    const appId = parseIdParam((await params).id);
 
     const { searchParams } = new URL(request.url);
     const isTemplate = searchParams.get("template") === "true";
+    const includeCurrent = searchParams.get("includeCurrent") === "1";
 
     const application = await prisma.mealApplication.findUnique({
       where: { id: appId },
@@ -38,20 +43,29 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
+    const mode = await rosterMode(prisma);
+    const academicYear = await resolveApplicationYear(prisma, mode, application.academicYear);
+
     const ExcelJS = (await import("exceljs")).default;
 
     // ── Template mode: 일괄신청 양식 (YN=단일 / DATE=날짜별 / WEEKDAY=요일별 컬럼) ──
     if (isTemplate) {
-      const [appMealsConfig, openDateRows, allStudents, approvedRegs] = await Promise.all([
+      // 양식은 공고 학년도의 재학생 명단이다. 진급한 뒤 뽑아도 그 해 학급이 나온다.
+      const studentIds = await listYearMemberIds(prisma, academicYear, {
+        role: "STUDENT",
+        enrolledOnly: true,
+      });
+
+      const [appMealsConfig, openDateRows, studentProfiles, studentEmails, approvedRegs] = await Promise.all([
         prisma.mealApplicationMeal.findMany({ where: { applicationId: appId } }),
         prisma.mealApplicationMealDate.findMany({
           where: { applicationId: appId },
           select: { mealKind: true, date: true },
         }),
+        getReportProfiles(prisma, studentIds, academicYear, false),
         prisma.user.findMany({
-          where: { role: "STUDENT" },
-          select: { id: true, name: true, email: true, grade: true, classNum: true, number: true },
-          orderBy: [{ grade: "asc" }, { classNum: "asc" }, { number: "asc" }],
+          where: { id: { in: studentIds } },
+          select: { id: true, email: true },
         }),
         prisma.mealRegistration.findMany({
           where: { applicationId: appId, status: "APPROVED" },
@@ -141,7 +155,7 @@ export async function GET(
       // 2행: 안내문
       sheet.mergeCells(2, 1, 2, Math.max(totalCols, 7));
       const guideCell = sheet.getCell(2, 1);
-      const yearLabel = application.academicYear != null ? `${application.academicYear}학년도 ` : "";
+      const yearLabel = `${academicYear}학년도 `;
       guideCell.value =
         `${yearLabel}신청할 날짜/요일에 O 표시. 이메일 열은 지우거나 바꾸지 마세요. ` +
         "O를 모두 지워도 기존 신청은 취소되지 않습니다 (취소는 신청 명단에서).";
@@ -155,15 +169,27 @@ export async function GET(
       });
 
       // 3행~: 학생 목록 + 프리필
+      const emailById = new Map(studentEmails.map((row) => [row.id, row.email]));
+      const orderedStudentIds = studentIds
+        .slice()
+        .sort((a, b) => {
+          const left = studentProfiles.get(a)?.historical;
+          const right = studentProfiles.get(b)?.historical;
+          const gradeDiff = (left?.grade ?? 0) - (right?.grade ?? 0);
+          if (gradeDiff !== 0) return gradeDiff;
+          return compareByProfile(studentProfiles.get(a), studentProfiles.get(b), "STUDENT");
+        });
+
       let rowIdx = 3;
-      for (const s of allStudents) {
+      for (const studentId of orderedStudentIds) {
+        const profile = studentProfiles.get(studentId)?.historical;
         const r = sheet.getRow(rowIdx++);
-        r.getCell(1).value = s.email;
-        r.getCell(2).value = s.grade;
-        r.getCell(3).value = s.classNum;
-        r.getCell(4).value = s.number;
-        r.getCell(5).value = s.name;
-        const p = prefillByUser.get(s.id);
+        r.getCell(1).value = emailById.get(studentId) ?? "";
+        r.getCell(2).value = profile?.grade ?? null;
+        r.getCell(3).value = profile?.classNum ?? null;
+        r.getCell(4).value = profile?.number ?? null;
+        r.getCell(5).value = profile?.name ?? MISSING_PROFILE_WARNING;
+        const p = prefillByUser.get(studentId);
         columns.forEach((col, i) => {
           const cell = r.getCell(firstMealCol + i);
           let marked = false;
@@ -212,20 +238,10 @@ export async function GET(
     }
 
     // APPROVED registrations with meal and date details, sorted grade→class→number
-    const registrations = await prisma.mealRegistration.findMany({
+    const registrationRows = await prisma.mealRegistration.findMany({
       where: { applicationId: appId, status: "APPROVED" },
       include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            grade: true,
-            classNum: true,
-            number: true,
-            gender: true,
-          },
-        },
+        user: { select: { id: true, email: true } },
         meals: {
           select: { mealKind: true, exempt: true },
         },
@@ -233,20 +249,31 @@ export async function GET(
           select: { mealKind: true, date: true },
         },
       },
-      orderBy: [
-        { user: { grade: "asc" } },
-        { user: { classNum: "asc" } },
-        { user: { number: "asc" } },
-      ],
+    });
+
+    const statsProfiles = await getReportProfiles(
+      prisma,
+      registrationRows.map((reg) => reg.userId),
+      academicYear,
+      includeCurrent,
+    );
+
+    const registrations = registrationRows.slice().sort((a, b) => {
+      const left = statsProfiles.get(a.userId)?.historical;
+      const right = statsProfiles.get(b.userId)?.historical;
+      const gradeDiff = (left?.grade ?? 0) - (right?.grade ?? 0);
+      if (gradeDiff !== 0) return gradeDiff;
+      return compareByProfile(statsProfiles.get(a.userId), statsProfiles.get(b.userId), "STUDENT");
     });
 
     // Build rows for buildStatsWorkbook
     const rows = registrations.map((reg, idx) => {
-      const u = reg.user;
-      const loginId = u.email.split("@")[0] ?? u.email;
-      const grade = u.grade ?? 0;
-      const classNum = u.classNum ?? 0;
-      const number = u.number ?? 0;
+      const report = statsProfiles.get(reg.userId);
+      const profile = report?.historical;
+      const loginId = reg.user.email.split("@")[0] ?? reg.user.email;
+      const grade = profile?.grade ?? 0;
+      const classNum = profile?.classNum ?? 0;
+      const number = profile?.number ?? 0;
       const studentNo =
         grade && classNum && number ? studentNumberOf(grade, classNum, number) : 0;
 
@@ -275,11 +302,12 @@ export async function GET(
         createdAt,
         loginId,
         studentNo,
-        name: u.name,
-        grade: u.grade ?? undefined,
-        classNum: u.classNum ?? undefined,
-        number: u.number ?? undefined,
-        gender: u.gender,
+        name: profile?.name ?? MISSING_PROFILE_WARNING,
+        grade: profile?.grade ?? undefined,
+        classNum: profile?.classNum ?? undefined,
+        number: profile?.number ?? undefined,
+        gender: profile?.gender ?? null,
+        ...(includeCurrent ? { currentClass: currentClassLabelOf(report) } : {}),
         exempt,
         dates,
       };
@@ -301,6 +329,8 @@ export async function GET(
 
     const workbook = await buildStatsWorkbook({
       title: application.title,
+      academicYear,
+      includeCurrent,
       months,
       meals,
       openDates,
@@ -321,10 +351,6 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error("Export error:", err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
-    );
+    return errorResponse(err);
   }
 }

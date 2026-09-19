@@ -58,6 +58,36 @@ describe("buildStatsWorkbook — 전체신청내역 헤더", () => {
   });
 });
 
+describe("buildStatsWorkbook — 학년도와 현재 소속 병기", () => {
+  it("학년도를 주면 머리말에 적는다", async () => {
+    const wb = await buildStatsWorkbook({ ...baseInput, academicYear: 2026 });
+    expect(wb.title).toContain("2026학년도");
+    expect(wb.getWorksheet("요일별")!.getCell("A1").value).toContain("2026학년도");
+  });
+
+  it("기본 출력에는 현재 학급 열이 없다", async () => {
+    const wb = await buildStatsWorkbook(baseInput);
+    const ws = wb.getWorksheet("전체신청내역")!;
+    const headers: unknown[] = [];
+    ws.getRow(1).eachCell({ includeEmpty: true }, (cell) => headers.push(cell.value));
+    expect(headers).not.toContain("현재 학급");
+  });
+
+  it("선택하면 날짜 열 뒤에 현재 학급 열이 붙고 합계 수식은 그대로다", async () => {
+    const wb = await buildStatsWorkbook({
+      ...baseInput,
+      includeCurrent: true,
+      rows: [{ ...baseInput.rows[0], currentClass: "졸업" }],
+    });
+    const ws = wb.getWorksheet("전체신청내역")!;
+    // 고정 16열 + 날짜 2개 × 3열 = 22열, 병기 열은 23열(W)
+    expect(ws.getCell("W1").value).toBe("현재 학급");
+    expect(ws.getCell("W4").value).toBe("졸업");
+    expect(ws.getCell("G4").value).toMatchObject({ formula: "SUM(K4:M4)" });
+    expect(ws.getCell("W5").value == null || ws.getCell("W5").value === "").toBe(true);
+  });
+});
+
 describe("buildStatsWorkbook — 날짜 컬럼 배치", () => {
   it("석식 첫 날짜(2026-07-21) 셀 = 1, 미선택 날짜 셀 = null", async () => {
     const wb = await buildStatsWorkbook(baseInput);

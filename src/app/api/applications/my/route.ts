@@ -1,22 +1,27 @@
-import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { calcMealFee } from "@/lib/meal-plan";
 import type { MealKind } from "@/lib/meal-plan";
+import { routeResponse } from "@/lib/academic-year/api";
+import { resolveApplicationYear, rosterMode } from "@/lib/academic-year/registration-context";
+import { requireActor, selfUserId } from "@/lib/academic-year/request-actor";
 
+// 본인 이력은 졸업·전출 여부와 무관하게 계속 보여 준다.
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  return routeResponse(readMyRegistrations);
+}
+
+async function readMyRegistrations(): Promise<NextResponse> {
+  const userId = selfUserId(await requireActor("SIGNED_IN"));
 
   const registrations = await prisma.mealRegistration.findMany({
-    where: { userId: session.user.dbUserId },
+    where: { userId },
     include: {
       application: {
         select: {
           id: true,
           title: true,
+          academicYear: true,
           applyStartAt: true,
           applyEndAt: true,
           meals: true,
@@ -27,6 +32,16 @@ export async function GET() {
     },
     orderBy: { createdAt: "desc" },
   });
+
+  const mode = await rosterMode(prisma);
+  const yearByApplication = new Map<number, number>();
+  for (const reg of registrations) {
+    if (yearByApplication.has(reg.application.id)) continue;
+    yearByApplication.set(
+      reg.application.id,
+      await resolveApplicationYear(prisma, mode, reg.application.academicYear),
+    );
+  }
 
   const result = registrations.map((reg) => {
     const mealDateCountByKind = new Map<MealKind, number>();
@@ -57,6 +72,7 @@ export async function GET() {
       id: reg.id,
       status: reg.status,
       createdAt: reg.createdAt,
+      academicYear: yearByApplication.get(reg.application.id) ?? null,
       application: {
         id: reg.application.id,
         title: reg.application.title,
@@ -69,3 +85,4 @@ export async function GET() {
 
   return NextResponse.json({ registrations: result });
 }
+

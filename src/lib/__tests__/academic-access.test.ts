@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   userFindUnique: vi.fn(),
   userUpdate: vi.fn(),
+  recordFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
@@ -11,6 +12,11 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mocks.userFindUnique, update: mocks.userUpdate },
     mealRegistrationMealDate: { findMany: vi.fn().mockResolvedValue([]) },
+    userAcademicRecord: { findMany: mocks.recordFindMany },
+    $queryRaw: (strings: TemplateStringsArray) =>
+      Promise.resolve(
+        strings.join("").includes("RosterControl") ? [{ mode: "READY" }] : [{ year: 2026 }],
+      ),
   },
 }));
 
@@ -228,15 +234,33 @@ describe("/api/users/me", () => {
     mocks.userFindUnique.mockResolvedValueOnce(ACTIVE_TEACHER).mockResolvedValueOnce({
       id: 7,
       email: "teacher@example.posan.kr",
-      name: "교사",
       role: "TEACHER",
-      homeroom: "1-1",
       photoUrl: null,
     });
+    mocks.recordFindMany.mockResolvedValue([
+      {
+        year: 2026,
+        userId: 7,
+        role: "TEACHER",
+        name: "교사",
+        grade: null,
+        classNum: null,
+        number: null,
+        gender: null,
+        subject: null,
+        homeroom: "1-1",
+        position: null,
+        memberState: "EMPLOYED",
+        version: 0,
+        needsReview: false,
+      },
+    ]);
     const { GET } = await import("@/app/api/users/me/route");
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ user: { id: 7, todayMeals: [] } });
+    expect(await res.json()).toMatchObject({
+      user: { id: 7, todayMeals: [], homeroom: "1-1", academicYear: 2026 },
+    });
   });
 
   it("GET refuses an unauthenticated request", async () => {

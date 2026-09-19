@@ -5,6 +5,10 @@ export type MealKind = "BREAKFAST" | "LUNCH" | "DINNER";
 
 export interface StatsExcelInput {
   title: string;
+  /** 공고가 속한 학년도. 표지 성격의 머리말에만 쓰고 계산에는 관여하지 않는다. */
+  academicYear?: number;
+  /** 현재 소속 병기. 기본 출력은 신청 당시 학급만 담는다. */
+  includeCurrent?: boolean;
   months: Array<{ year: number; month: number }>;
   meals: Array<{ mealKind: MealKind; price: number }>;
   openDates: Partial<Record<MealKind, string[]>>;
@@ -18,6 +22,8 @@ export interface StatsExcelInput {
     classNum?: number;
     number?: number;
     gender?: string | null;
+    /** 졸업·전출이면 학급이 아니라 그 상태를 담는다. */
+    currentClass?: string;
     exempt: Partial<Record<MealKind, boolean>>;
     dates: Partial<Record<MealKind, string[]>>;
   }>;
@@ -273,6 +279,21 @@ function buildSheet1(
   for (let c = FIXED_COLS + 1; c <= totalCols; c++) {
     ws.getColumn(c).width = 5;
   }
+
+  // 현재 소속 병기는 합계 수식 범위 밖(마지막 날짜 열 뒤)에 따로 붙인다.
+  if (input.includeCurrent) {
+    const col = totalCols + 1;
+    ws.mergeCells(1, col, 3, col);
+    const header = ws.getCell(1, col);
+    header.value = "현재 학급";
+    styleHeader(header);
+    for (let ri = 0; ri < input.rows.length; ri++) {
+      const cell = ws.getCell(DATA_START + ri, col);
+      cell.value = input.rows[ri].currentClass ?? "";
+      cell.alignment = { horizontal: "center" };
+    }
+    ws.getColumn(col).width = 12;
+  }
 }
 
 function buildSheet2(
@@ -284,7 +305,9 @@ function buildSheet2(
   // A1:H1 merged title
   ws.mergeCells(1, 1, 1, 8);
   const titleCell = ws.getCell(1, 1);
-  titleCell.value = "요일별 식수(첫주 기준)";
+  titleCell.value = input.academicYear === undefined
+    ? "요일별 식수(첫주 기준)"
+    : `${input.academicYear}학년도 요일별 식수(첫주 기준)`;
   titleCell.font = { bold: true };
   titleCell.alignment = { horizontal: "center" };
 
@@ -510,6 +533,9 @@ export async function buildStatsWorkbook(
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "PosanMeal";
   workbook.created = new Date();
+  workbook.title = input.academicYear === undefined
+    ? input.title
+    : `${input.academicYear}학년도 ${input.title}`;
 
   const allDates = buildAllDates(input.openDates);
   const priceMap = buildPriceMap(input.meals);

@@ -11,19 +11,23 @@ const mocks = vi.hoisted(() => ({
   checkInCreate: vi.fn(),
   checkInUpdate: vi.fn(),
   checkInDelete: vi.fn(),
+  checkInFindMany: vi.fn(),
+  recordFindMany: vi.fn(),
   mealRegistrationMealDateFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/permissions", () => ({ canWriteAdmin: () => true }));
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/prisma", () => {
+  const prisma = {
     user: {
       findMany: mocks.userFindMany,
       findUnique: mocks.userFindUnique,
     },
+    userAcademicRecord: { findMany: mocks.recordFindMany },
     checkIn: {
       findUnique: mocks.checkInFindUnique,
+      findMany: mocks.checkInFindMany,
       create: mocks.checkInCreate,
       update: mocks.checkInUpdate,
       delete: mocks.checkInDelete,
@@ -31,8 +35,11 @@ vi.mock("@/lib/prisma", () => ({
     mealRegistrationMealDate: {
       findMany: mocks.mealRegistrationMealDateFindMany,
     },
-  },
-}));
+    $queryRaw: () => Promise.resolve([{ mode: "READY" }]),
+    $transaction: (run: (tx: unknown) => Promise<unknown>) => run(prisma),
+  };
+  return { prisma };
+});
 
 function readProjectFile(path: string) {
   return readFileSync(join(process.cwd(), path), "utf8");
@@ -41,7 +48,9 @@ function readProjectFile(path: string) {
 describe("CheckIn mealKind split", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.auth.mockResolvedValue({ user: { dbUserId: 1, adminLevel: "ADMIN" } });
+    mocks.auth.mockResolvedValue({ user: { dbUserId: 0, role: "ADMIN", adminLevel: "ADMIN" } });
+    mocks.recordFindMany.mockResolvedValue([]);
+    mocks.checkInFindMany.mockResolvedValue([]);
   });
 
   it("makes CheckIn mealKind required and unique per user/date/mealKind", () => {
@@ -83,7 +92,6 @@ describe("CheckIn mealKind split", () => {
 
   it("returns meal columns for admin monthly check-in rows", async () => {
     const { GET } = await import("@/app/api/admin/checkins/route");
-    mocks.userFindMany.mockResolvedValue([]);
     mocks.mealRegistrationMealDateFindMany.mockResolvedValue([
       { date: new Date("2026-05-30T00:00:00.000Z"), mealKind: "BREAKFAST" },
     ]);
@@ -91,15 +99,9 @@ describe("CheckIn mealKind split", () => {
     const response = await GET(new Request("http://localhost/api/admin/checkins?year=2026&month=5&category=teacher"));
     const body = await response.json();
 
-    expect(mocks.userFindMany).toHaveBeenCalledWith(
+    expect(mocks.checkInFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        select: expect.objectContaining({
-          checkIns: expect.objectContaining({
-            where: expect.objectContaining({
-              date: expect.any(Object),
-            }),
-          }),
-        }),
+        where: expect.objectContaining({ date: expect.any(Object) }),
       }),
     );
     expect(body.mealColumns.filter((column: { date: string }) => column.date === "2026-05-30")).toEqual([
@@ -110,7 +112,14 @@ describe("CheckIn mealKind split", () => {
 
   it("looks up admin toggle rows by user/date/mealKind", async () => {
     const { POST } = await import("@/app/api/admin/checkins/toggle/route");
-    mocks.userFindUnique.mockResolvedValue({ id: 7, role: "TEACHER" });
+    mocks.recordFindMany.mockResolvedValue([
+      {
+        year: 2026, userId: 7, role: "TEACHER", name: "교사",
+        grade: null, classNum: null, number: null, gender: null,
+        subject: null, homeroom: "1-1", position: null,
+        memberState: "EMPLOYED", version: 0, needsReview: false,
+      },
+    ]);
     mocks.checkInFindUnique.mockResolvedValue(null);
     mocks.checkInCreate.mockResolvedValue({ id: 10 });
 
