@@ -6,7 +6,10 @@ import { ExternalLink, Play } from "lucide-react";
 
 type VideoChapter = { title: string; startSeconds: number };
 
-export function GuideVideo({ videoId, videoUrl, chapters }: {
+export function GuideVideo({ videoId, videoUrl, chapters, audience = "학생", poster = "/guide/student/00-intro.webp", durationLabel = "약 6분 30초" }: {
+  audience?: string;
+  poster?: string;
+  durationLabel?: string;
   videoId: string;
   videoUrl: string;
   chapters: VideoChapter[];
@@ -18,14 +21,14 @@ export function GuideVideo({ videoId, videoUrl, chapters }: {
   }));
 
   return (
-    <section id="guide-video" aria-label="학생 안내 영상" className="min-w-0 scroll-mt-4">
+    <section id="guide-video" aria-label={`${audience} 안내 영상`} className="min-w-0 scroll-mt-4">
       <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
         <div className="relative aspect-video bg-slate-900">
           {playback ? (
             <iframe
               key={playback.revision}
               src={`https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&playsinline=1&rel=0&start=${playback.start}`}
-              title="포산밀 학생 사용 안내 영상"
+              title={`포산밀 ${audience} 사용 안내 영상`}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
               referrerPolicy="strict-origin-when-cross-origin"
@@ -35,12 +38,12 @@ export function GuideVideo({ videoId, videoUrl, chapters }: {
             <button
               type="button"
               onClick={() => playFrom(0)}
-              aria-label="학생 안내 영상 재생"
+              aria-label={`${audience} 안내 영상 재생`}
               className="group absolute inset-0 min-h-11 min-w-11 cursor-pointer focus-visible:outline-4 focus-visible:outline-offset-[-4px] focus-visible:outline-orange-600"
             >
               <Image
-                src="/guide/student/00-intro.webp"
-                alt="포산밀 학생 사용안내 영상 표지"
+                src={poster}
+                alt={`포산밀 ${audience} 사용안내 영상 표지`}
                 fill
                 sizes="(min-width: 1024px) 720px, 100vw"
                 unoptimized
@@ -56,14 +59,14 @@ export function GuideVideo({ videoId, videoUrl, chapters }: {
           )}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
-          <span className="whitespace-nowrap text-sm font-medium">영상으로 먼저 보기 · 약 6분 30초</span>
+          <span className="whitespace-nowrap text-sm font-medium">영상으로 먼저 보기 · {durationLabel}</span>
           <a href={videoUrl} target="_blank" rel="noopener noreferrer"
             className="inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-sm text-orange-800 hover:bg-orange-50 focus-visible:outline-2 focus-visible:outline-orange-600">
             YouTube에서 보기 <ExternalLink className="h-4 w-4" aria-hidden="true" />
           </a>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="영상 구간 선택">
+      <div className="mt-3 grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 md:grid-cols-4" aria-label="영상 구간 선택">
         {chapters.map((chapter) => (
           <button key={chapter.title} type="button" onClick={() => playFrom(chapter.startSeconds)}
             aria-label={`${chapter.title} 영상 재생`}

@@ -133,3 +133,21 @@ node scripts/guide-stills.mjs --page setup-check --out out/guide-stills-check
 앱 `/help/student`는 `https://youtu.be/rOww_TPHGR0`와 이 영상에서 추출한 목업을 사용한다. `/help`는 학생 안내로 이동한다. 앱 `src/app/help/student/content.ts`에서 영상 주소·4목차·9단계·영상 시작 초·이미지 목록을 관리한다. `public/guide/student/`에는 본문 이미지 16장과 `00-intro.webp`를 배치했다. 영상을 교체하면 해당 파일의 주소·구간 시각과 이미지도 함께 맞춘다.
 
 로그인 전 접근, 새 탭 도움말, 영상 재생·구간 이동, 원본 이미지 확대, 320/375/640/768/1024/1280px 화면을 로컬에서 확인했다. 운영 사이트 배포는 수행하지 않았다.
+
+## 교사 · 담임교사 안내
+
+`src/teacher/`의 14장면·48문장과 `TeacherGuide`를 사용한다. 학생 안내의 접속·Android/iPhone 설치 목업을 재사용하며, 교사 QR 개인정산/근무, 본인 이력, 담임 학생관리·선택 QR출력·신청현황, 개인정보·얼굴 체크인, 물음표 도움말을 안내한다. 원고와 실제 화면 근거는 `../docs/video/teacher-guide-storyboard.md`에 있다.
+
+문장 끝에는 마침표 뒤 공백 3칸을 둔다. 교사 음성 설정은 `TRAILING_SILENCE_SECONDS = 1`, `FADE_OUT_SECONDS = 0.5`, `LINE_GAP_SECONDS = 0.2`다. 기존 학생 음성과 설정은 변경하지 않는다.
+
+```bash
+node scripts/narrate.mjs --guide teacher
+node scripts/teacher-deliverables.mjs
+mkdir -p render-tmp.noindex
+TMPDIR="$PWD/render-tmp.noindex" npx remotion render TeacherGuide out/PosanMeal-teacher-guide.raw.mp4 --codec h264 --crf 18 --concurrency 3 --x264-preset veryfast
+ffmpeg -y -i out/PosanMeal-teacher-guide.raw.mp4 -i out/teacher-chapters.ffmetadata -map 0 -map_chapters 1 -map_metadata 1 -c copy -movflags +faststart out/PosanMeal-teacher-guide.mp4
+node scripts/teacher-previews.mjs
+node scripts/guide-stills.mjs --page teacher
+```
+
+`teacher-deliverables.mjs`는 실측 타이밍으로 SRT·VTT·챕터·검수 타임라인을 작성한다. `teacher-previews.mjs`는 최종 MP4에서 14장면 프레임과 동일한 가이드 이미지를 추출한다. 최종 영상 원본은 `out/`에 보존하며 `/help/teacher`는 사용자가 등록한 `https://youtu.be/t1ujLxBVelA`를 재생한다. 공용 `GuideVideo`의 교사 표지·길이·접근성 라벨과 구간 선택을 사용한다. 웹페이지는 4목차·9단계이며 교사 헤더의 `?`에서 새 탭으로 열린다. 외부 업로드·운영 배포는 별도다. 실제 완료·검증 상태는 프로젝트 `.codex/memory/` 인계를 따른다.

@@ -9,6 +9,8 @@ import { SETUP_CHECK_CONFIG, SetupCheckVideo } from "./setup-check/SetupCheckVid
 import { SETUP_CHECK_SCENES } from "./setup-check/scenes";
 import { STUDENT_CONFIG, StudentGuideVideo } from "./student/StudentGuideVideo";
 import { STUDENT_SCENES } from "./student/scenes";
+import { TEACHER_CONFIG, TeacherGuideVideo } from "./teacher/TeacherGuideVideo";
+import { TEACHER_SCENES } from "./teacher/scenes";
 // 단일 장면 컴포지션도 본편과 같은 오디오 경로·자막 설정으로 감싼다.
 const withConfig = (Component: React.FC<DemoProps>, config: GuideConfig): React.FC<DemoProps> => {
   const Wrapped: React.FC<DemoProps> = (props) => (
@@ -40,6 +42,8 @@ const SceneCompositions: React.FC<{ scenes: SceneDef[]; prefix: string; config: 
 
 export const RemotionRoot: React.FC = () => (
   <>
+    <Composition id="TeacherGuide" component={TeacherGuideVideo} durationInFrames={totalFrames(TEACHER_SCENES)} fps={FPS} width={WIDTH} height={HEIGHT} schema={demoPropsSchema} defaultProps={defaultDemoProps} />
+    <Folder name="Teacher"><SceneCompositions scenes={TEACHER_SCENES} prefix="Teacher" config={TEACHER_CONFIG} /></Folder>
     <Composition
       id="StudentGuide"
       component={StudentGuideVideo}

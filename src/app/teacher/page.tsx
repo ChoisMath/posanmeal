@@ -6,6 +6,7 @@ import { clearClientStateAndSignOut } from "@/lib/clearClientState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { HelpButton } from "@/components/guide/HelpButton";
 import { BrandMark } from "@/components/BrandMark";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
@@ -30,9 +31,10 @@ export default function TeacherPage() {
 
   return (
     <div className="min-h-screen bg-warm-subtle">
-      <header className="header-gradient px-4 py-3 flex items-center justify-between">
+      <header className="header-gradient px-2 py-2 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-2">
         <BrandMark variant="header" label="PosanMeal" />
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
+          <HelpButton role="teacher" className="text-white/80 hover:text-white hover:bg-white/10" />
           {canRead && isTeacher && (
             <Link href="/admin">
               <Button variant="outline" size="sm" className="rounded-xl bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white">

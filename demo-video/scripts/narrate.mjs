@@ -14,6 +14,7 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const GUIDES = {
+  teacher: { module: "src/teacher/narration.ts", outDir: "public/narration/teacher", json: "src/teacher/narration-durations.json", engine: "mlx" },
   student: { module: "src/student/narration.ts", outDir: "public/narration/student", json: "src/student/narration-durations.json", engine: "mlx" },
   "setup-check": { module: "src/setup-check/narration.ts", outDir: "public/narration/setup-check", json: "src/setup-check/narration-durations.json", engine: "mlx" },
 };

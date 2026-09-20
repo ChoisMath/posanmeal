@@ -3,12 +3,12 @@ import { Expand } from "lucide-react";
 
 type GuideImage = { file: string; alt: string; caption: string; width: number; height: number };
 
-export function GuideGallery({ images }: { images: GuideImage[] }) {
+export function GuideGallery({ images, basePath = "/guide/student" }: { images: GuideImage[]; basePath?: string }) {
   return (
     <div className="flex min-w-0 snap-x snap-proximity gap-3 overflow-x-auto rounded-xl pb-2" aria-label="안내 화면 예시">
       {images.map((image) => {
         const portrait = image.height > image.width;
-        const src = `/guide/student/${image.file}`;
+        const src = `${basePath}/${image.file}`;
         return (
           <a key={image.file} href={src} target="_blank" rel="noopener noreferrer" aria-label={`${image.caption} 크게 보기 (새 탭)`}
             className={`group min-h-11 min-w-11 shrink-0 snap-start overflow-hidden rounded-xl border bg-stone-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-orange-600 ${portrait ? "w-[200px] sm:w-[220px]" : "w-[min(82vw,520px)]"}`}>
