@@ -6,7 +6,7 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-20 (`main` 통합 준비로 기존 미커밋 학생 안내·영상·프로젝트 스킬의 실제 파일 구조를 대조하고 음성 제작 테스트 경로를 보완. 이 구조 확인은 통합 검증·원격 푸시·운영 배포 완료를 의미하지 않음)
+> 마지막 업데이트: 2026-09-20 (모든 브랜치·검토한 미커밋 작업을 main에 통합·배포하고 운영 학년도 명부를 READY로 전환. 실행 증거·잔여 검증 범위는 최신 인계 참조)
 >
 > 이전 업데이트: 2026-09-19 (공개 학생 안내 `/help/student`와 `/help` 리다이렉트, 공용 가이드 컴포넌트 3종, 로그인·학생 화면 도움말 링크 추가. YouTube 영상·4개 목차·9단계 설명과 기존 목업 WebP를 연결. §3·4·7·9·14 참조)
 >
@@ -432,18 +432,18 @@ public/
 
 > `AUTH_URL`, `DATABASE_PUBLIC_URL`, `RAILWAY_VOLUME_MOUNT_PATH` 는 Railway 서비스 환경에서 추가 설정.
 
-## §11 브랜치 / 배포 (2026-06-16 단일 서비스)
+## §11 브랜치 / 배포 (2026-09-20 live 확인)
 
-> 2026-09-20 배포 준비 당시 기록: 준비 브랜치 3개 푸시 완료, 당시 운영 `main`은 `68e81d0` 유지이며 배포 미실행. DB·사진 백업과 분리 복원, 11개 테이블 원본 비교·사진 8개 해시·복원본 추가 migration 검증 완료. 과거 공고의 날짜 없는 신청 120건·귀속 불명 1건은 사용자 처리 기준 확인 대기이며 기존 사진 파일 결측 6개도 기록했다. 상세는 `docs/operations/academic-year-deployment-2026-09-20.md`, 당시 다음 작업 인계는 `.codex/memory/2026-09-20-academic-deploy-preflight.md`를 참조한다. 현재 병합·푸시·배포 상태는 후속 실행 기록을 확인한다. 아래는 당시 구성 기록이다.
+> main `67848d0`의 dinner 배포와 운영 DB 백필·VERIFIED·READY 전환을 완료했다. 기존 11개 테이블 원본은 보존했고 User/학년도 기록/명부는 각각 622건이다. 날짜 없는 희망조사는 승인 120건을 포함한 전체 125건·급식일 0건을 유지했다. 최신 실행 상태와 검증 범위는 `.codex/memory/2026-09-20-main-merge-and-activation.md`를 따른다. `docs/operations/academic-year-deployment-2026-09-20.md` 본문은 최초 준비 시점의 이력이다.
 
 | 브랜치 | 환경 | 도메인 | Railway 서비스 |
 |--------|------|--------|----------------|
 | `main` | production | `meal.posan.kr` (+ `dinner-posan.up.railway.app`) | `dinner` (watch=main) |
+| `feat/academic-year-roster` | production | `posanmeal.up.railway.app` | `posanmeal` (사용자가 삭제 예정, 이번 작업에서 삭제하지 않음) |
 
-- **단일 환경(production) + 단일 서비스(`dinner`)** 만 존재. test/staging 서비스·`posanmeal.up.railway.app` 도메인 **없음** (옛 2-서비스 정책 폐기).
-- 검증은 **로컬**(`npm run build` + `npm test`)에서. `main` push가 유일한 배포 트리거. `feat/*` push는 배포 안 됨.
-- 워크플로: feature 브랜치 작업 → 로컬 검증 → `main` 머지/push → `meal.posan.kr` 배포.
-- DB(PostgreSQL) + Volume(`posanmeal-volumn` → `/app/uploads`, `UPLOAD_DIR` 일치)은 이 서비스 단일 귀속. 마이그레이션은 additive 우선(운영 단일 DB 즉시 반영).
+- 두 앱이 같은 PostgreSQL을 사용한다. feature 서비스가 존재하므로 과거의 “feature push는 배포되지 않음”을 적용하지 않는다. 작업 때 실제 연결을 다시 확인한다.
+- 사진 Volume `posanmeal-volumn`은 dinner의 `/app/uploads`에 마운트되며 `UPLOAD_DIR`와 일치한다. 추가 서비스에는 해당 사진 Volume이 없다.
+- 검증은 로컬 build·test와 격리 복원 리허설 후 수행한다. main push가 dinner 배포를 트리거하며 시작 명령은 운영 DB에 migration을 적용할 수 있다.
 - 빌드: `npx prisma generate && npm run build`
 - 시작: `npx prisma migrate deploy && next start`
 
