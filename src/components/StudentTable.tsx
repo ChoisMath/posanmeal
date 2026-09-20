@@ -123,8 +123,8 @@ export function StudentTable() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
-        <table className="text-xs border-collapse w-full whitespace-nowrap">
+      <div className="flex-1 min-h-0 overflow-auto border border-stone-400 dark:border-zinc-600 rounded-lg">
+        <table className="text-xs border-collapse w-full whitespace-nowrap [&_th]:border-stone-400 [&_td]:border-stone-400 dark:[&_th]:border-zinc-600 dark:[&_td]:border-zinc-600 [&_th]:border-r [&_td]:border-r">
           <thead className="sticky top-0 z-20">
             <tr>
               <th className="sticky left-0 z-30 bg-muted px-2 py-1 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">

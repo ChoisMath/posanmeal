@@ -114,8 +114,7 @@ export default function TeacherPage() {
           <TabsContent value="history" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
             <Card className="w-full max-w-md mx-auto rounded-none border-0 shadow-none ring-0 py-3">
               <CardContent className="pt-0">
-                <h3 className="font-semibold mb-4">석식 이력</h3>
-                <MonthlyCalendar showType />
+                <MonthlyCalendar showType teacherCalendar />
               </CardContent>
             </Card>
           </TabsContent>

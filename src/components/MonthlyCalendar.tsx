@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, type TouchEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCheckins } from "@/hooks/useCheckins";
@@ -15,9 +15,12 @@ interface CheckInRecord {
 
 interface MonthlyCalendarProps {
   showType?: boolean;
+  teacherCalendar?: boolean;
 }
 
-export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
+export function MonthlyCalendar({ showType = false, teacherCalendar = false }: MonthlyCalendarProps) {
+  const swipeStart = useRef<{ id: number; x: number; y: number } | null>(null);
+  const [showWeekends, setShowWeekends] = useState(!teacherCalendar);
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -33,9 +36,62 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
     else setMonth(month + 1);
   };
 
+  const cancelSwipe = () => { swipeStart.current = null; };
+
+  const handleTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      cancelSwipe();
+      return;
+    }
+    const touch = event.touches[0];
+    swipeStart.current = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+  };
+
+  const handleTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    const start = swipeStart.current;
+    if (!start) return;
+    if (event.touches.length !== 1) {
+      cancelSwipe();
+      return;
+    }
+    const touch = event.touches[0];
+    const dx = Math.abs(touch.clientX - start.x);
+    const dy = Math.abs(touch.clientY - start.y);
+    if (dy > 10 && dy >= dx) cancelSwipe();
+  };
+
+  const handleTouchEnd = (event: TouchEvent<HTMLDivElement>) => {
+    const start = swipeStart.current;
+    cancelSwipe();
+    if (!start || event.touches.length > 0) return;
+    const touch = Array.from(event.changedTouches).find((item) => item.identifier === start.id);
+    if (!touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+    if (dx < 0) nextMonth();
+    else prevMonth();
+  };
+
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstDayOfWeek = new Date(year, month - 1, 1).getDay();
-  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
+  const hideWeekends = teacherCalendar && !showWeekends;
+  const dayNames = hideWeekends ? ["월", "화", "수", "목", "금"] : ["일", "월", "화", "수", "목", "금", "토"];
+  const weekCount = Math.ceil((firstDayOfWeek + daysInMonth) / 7);
+  const calendarDays = Array.from({ length: weekCount }, (_, week) => {
+    const days = Array.from({ length: 7 }, (_, weekday) => {
+      const day = week * 7 + weekday - firstDayOfWeek + 1;
+      return day >= 1 && day <= daysInMonth ? day : null;
+    });
+    const visibleDays = hideWeekends ? days.slice(1, 6) : days;
+    return visibleDays.some((day) => day !== null) ? visibleDays : [];
+  }).flat();
+  const displayedDays = teacherCalendar
+    ? calendarDays
+    : [...Array<null>(firstDayOfWeek).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const weekendText = (weekday: number) => !teacherCalendar ? "" : weekday === 0
+    ? "text-red-600 dark:text-red-400"
+    : weekday === 6 ? "text-blue-600 dark:text-blue-400" : "";
 
   interface DaySlot { breakfast?: CheckInRecord; lunch?: CheckInRecord; dinner?: CheckInRecord }
   const checkInMap = useMemo(() => {
@@ -71,22 +127,34 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <Button variant="ghost" size="icon" onClick={prevMonth}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <h3 className="font-semibold">{year}년 {month}월</h3>
-        <Button variant="ghost" size="icon" onClick={nextMonth}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+      <div className={teacherCalendar ? "mb-2 overflow-x-auto" : "mb-4"}>
+        <div className={teacherCalendar ? "flex min-w-max items-center gap-2" : "flex items-center justify-between"}>
+          <Button variant="ghost" size="icon" className={teacherCalendar ? "min-h-11 min-w-11 shrink-0" : undefined} aria-label="이전 달" onClick={prevMonth}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <h3 className="font-semibold whitespace-nowrap">{year}년 {month}월</h3>
+          <Button variant="ghost" size="icon" className={teacherCalendar ? "min-h-11 min-w-11 shrink-0" : undefined} aria-label="다음 달" onClick={nextMonth}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          {teacherCalendar && (
+            <Button variant={showWeekends ? "default" : "outline"} size="sm" className="ml-auto min-h-11 min-w-11 shrink-0 whitespace-nowrap px-2" aria-pressed={showWeekends} title={showWeekends ? "주말 숨기기" : "주말 표시"} onClick={() => setShowWeekends((visible) => !visible)}>
+              주말
+            </Button>
+          )}
+        </div>
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-xs">
-        {dayNames.map((d) => (
-          <div key={d} className="font-semibold py-1 text-muted-foreground">{d}</div>
+      <div
+        onTouchStart={teacherCalendar ? handleTouchStart : undefined}
+        onTouchMove={teacherCalendar ? handleTouchMove : undefined}
+        onTouchEnd={teacherCalendar ? handleTouchEnd : undefined}
+        onTouchCancel={teacherCalendar ? cancelSwipe : undefined}
+        className={`grid text-center text-xs ${hideWeekends ? "grid-cols-5" : "grid-cols-7"} ${teacherCalendar ? "touch-pan-y touch-pinch-zoom border-l border-t border-stone-200 dark:border-zinc-700" : "gap-1"}`}
+      >
+        {dayNames.map((d, i) => (
+          <div key={d} className={`font-semibold py-1 ${teacherCalendar ? "border-r border-b border-stone-200 dark:border-zinc-700" : ""} ${weekendText(hideWeekends ? i + 1 : i) || "text-muted-foreground"}`}>{d}</div>
         ))}
-        {Array.from({ length: firstDayOfWeek }, (_, i) => <div key={`empty-${i}`} />)}
-        {Array.from({ length: daysInMonth }, (_, i) => {
-          const day = i + 1;
+        {displayedDays.map((day, i) => {
+          if (day === null) return <div key={`empty-${i}`} aria-hidden="true" className={teacherCalendar ? "border-r border-b border-stone-200 dark:border-zinc-700" : undefined} />;
           const slot = getDaySlot(day);
           const dinner = slot?.dinner;
           const lunch = slot?.lunch;
@@ -98,21 +166,21 @@ export function MonthlyCalendar({ showType = false }: MonthlyCalendarProps) {
               ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
               : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200";
           return (
-            <div key={day} className={`py-2 rounded-md text-sm ${cellBg}`}>
-              <div>{day}</div>
+            <div key={day} data-calendar-day={day} className={`py-2 text-sm ${teacherCalendar ? "min-w-0 border-r border-b border-stone-200 dark:border-zinc-700" : "rounded-md"} ${cellBg}`}>
+              <div className={weekendText(new Date(year, month - 1, day).getDay())}>{day}</div>
               {breakfast && (
                 <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                  {showType ? "조식 " : ""}{formatTime(breakfast.checkedAt)}
+                  {showType && <span className={teacherCalendar && showWeekends ? "block" : undefined}>조식 </span>}<span className="whitespace-nowrap">{formatTime(breakfast.checkedAt)}</span>
                 </div>
               )}
               {lunch && (
                 <div className="text-[10px] font-medium text-orange-600 dark:text-orange-400">
-                  {showType ? "중식 " : ""}{formatTime(lunch.checkedAt)}
+                  {showType && <span className={teacherCalendar && showWeekends ? "block" : undefined}>중식 </span>}<span className="whitespace-nowrap">{formatTime(lunch.checkedAt)}</span>
                 </div>
               )}
               {dinner && (
                 <div className={`text-[10px] font-medium ${dinner.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-emerald-700 dark:text-emerald-300"}`}>
-                  {showType ? `${dinner.type === "WORK" ? "근무" : "석식"} ` : ""}{formatTime(dinner.checkedAt)}
+                  {showType && <span className={teacherCalendar && showWeekends ? "block" : undefined}>{dinner.type === "WORK" ? "근무 " : "석식 "}</span>}<span className="whitespace-nowrap">{formatTime(dinner.checkedAt)}</span>
                 </div>
               )}
             </div>
