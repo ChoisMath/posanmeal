@@ -1,7 +1,8 @@
 // 초기 이전 CLI. 기본은 읽기 전용 inspect이며, 쓰기는 승인된 대상 설정과
 // 보호된 출력 경로를 모두 명시해야 한다. 출력에는 차이의 종류와 건수만 담고
 // 이름·이메일·학번·연결 URL은 어떤 경우에도 내보내지 않는다.
-import { backfill2026, runPreflight, verifyBackfill } from "../../src/lib/academic-year/backfill";
+import fs from "node:fs";
+import { backfill2026, parseDateLessSurveyConfirmations, runPreflight, verifyBackfill } from "../../src/lib/academic-year/backfill";
 import { captureLegacyFingerprint } from "./fingerprint";
 import { createMigrationReport } from "./report";
 import {
@@ -14,13 +15,16 @@ import {
 } from "./db-target";
 
 async function main(): Promise<void> {
-  const options = parseCliArgs(process.argv.slice(2));
+  const options = parseCliArgs(process.argv.slice(2), true);
   if (!options.targetConfigPath) {
     throw new Error("--target-config를 지정하세요");
   }
 
   const config = readMigrationTargetConfig(options.targetConfigPath);
   assertApplyAllowed(options, config);
+  const surveyConfirmations = options.surveyConfirmationsPath
+    ? parseDateLessSurveyConfirmations(JSON.parse(fs.readFileSync(options.surveyConfirmationsPath, "utf8")))
+    : [];
   const evidence = options.mode === "apply" ? createMigrationReport(options.reportDir!) : null;
 
   const target = await openMigrationTarget(options.targetConfigPath);
@@ -40,7 +44,8 @@ async function main(): Promise<void> {
       const before = await captureLegacyFingerprint(pgClient);
       evidence!.write("before.json", before);
       console.info(`report=${evidence!.directory}`);
-      const result = await backfill2026(db, before);
+      if (surveyConfirmations.length > 0) evidence!.write("survey-confirmations.json", surveyConfirmations);
+      const result = await backfill2026(db, before, surveyConfirmations);
       const after = await captureLegacyFingerprint(pgClient);
       evidence!.write("after.json", after);
       const verified = await verifyBackfill(db, before, after);

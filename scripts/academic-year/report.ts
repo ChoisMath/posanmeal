@@ -18,7 +18,7 @@ export function createMigrationReport(reportDir: string) {
 
   return {
     directory,
-    write(name: "before.json" | "after.json" | "result.json", value: unknown): void {
+    write(name: "before.json" | "after.json" | "result.json" | "survey-confirmations.json", value: unknown): void {
       const fd = fs.openSync(path.join(directory, name), "wx", 0o600);
       try {
         fs.writeFileSync(fd, JSON.stringify(value, null, 2));

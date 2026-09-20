@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { z } from "zod";
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 import type { LegacyFingerprint } from "../../../scripts/academic-year/fingerprint";
 import { compareLegacyFingerprints } from "../../../scripts/academic-year/fingerprint";
@@ -11,6 +13,104 @@ import { CONFLICT_GROUPS_CTE, NEEDS_REVIEW_EXPR } from "./roster-sql";
 export const INITIAL_ACADEMIC_YEAR = 2026;
 
 export const ACADEMIC_BACKFILL_KEY = String(INITIAL_ACADEMIC_YEAR);
+
+const surveyConfirmationSchema = z.object({
+  applicationId: z.number().int().positive(),
+  academicYear: z.literal(INITIAL_ACADEMIC_YEAR),
+  kind: z.literal("DATELESS_INTENT_SURVEY"),
+  expectedApprovedRegistrationCount: z.number().int().nonnegative(),
+  expectedTotalRegistrationCount: z.number().int().nonnegative(),
+  expectedSourceRowHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
+const surveyResolutionSchema = surveyConfirmationSchema.omit({ expectedSourceRowHash: true }).extend({
+  sourceRowHash: z.string().regex(/^[a-f0-9]{64}$/),
+  sourceFormat: z.literal("posanmeal-dateless-survey-v1"),
+  reason: z.literal("USER_CONFIRMED_DATELESS_INTENT_SURVEY"),
+  confirmedAt: z.iso.datetime(),
+  registrations: z.array(z.object({ id: z.number().int().positive(), status: z.string() }).strict()),
+}).strict();
+
+export type DateLessSurveyConfirmation = z.infer<typeof surveyConfirmationSchema>;
+type DateLessSurveyResolution = z.infer<typeof surveyResolutionSchema>;
+
+export function parseDateLessSurveyConfirmations(raw: unknown): DateLessSurveyConfirmation[] {
+  const parsed = z.array(surveyConfirmationSchema).min(1).safeParse(raw);
+  if (!parsed.success || new Set(parsed.data.map((entry) => entry.applicationId)).size !== parsed.data.length) {
+    throw new DomainError("NOT_READY", "희망조사 확인 자료의 형식과 중복 여부를 확인하세요.");
+  }
+  return parsed.data;
+}
+
+type SurveySource = {
+  academicYear: number | null;
+  applicationDateCount: number;
+  registrationDateCount: number;
+  registrations: { id: number; status: string }[];
+  sourceRowHash: string;
+};
+
+export async function captureDateLessSurveySource(db: Db, applicationId: number): Promise<SurveySource | null> {
+  const rows = await db.$queryRaw<(Omit<SurveySource, "sourceRowHash"> & { sourceText: string })[]>`
+    SELECT a."academicYear",
+      (SELECT count(*)::int FROM "MealApplicationMealDate" d WHERE d."applicationId" = a.id) AS "applicationDateCount",
+      (SELECT count(*)::int FROM "MealRegistrationMealDate" d
+        JOIN "MealRegistration" r ON r.id = d."registrationId" WHERE r."applicationId" = a.id) AS "registrationDateCount",
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id', r.id, 'status', r.status) ORDER BY r.id)
+        FROM "MealRegistration" r WHERE r."applicationId" = a.id), '[]'::jsonb) AS registrations,
+      jsonb_build_array(
+        to_jsonb(a) - 'academicYear',
+        COALESCE((SELECT jsonb_agg(to_jsonb(m) ORDER BY m."mealKind")
+          FROM "MealApplicationMeal" m WHERE m."applicationId" = a.id), '[]'::jsonb),
+        COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.id)
+          FROM "MealRegistration" r WHERE r."applicationId" = a.id), '[]'::jsonb),
+        COALESCE((SELECT jsonb_agg(to_jsonb(m) ORDER BY m."registrationId", m."mealKind")
+          FROM "MealRegistrationMeal" m JOIN "MealRegistration" r ON r.id = m."registrationId"
+          WHERE r."applicationId" = a.id), '[]'::jsonb)
+      )::text AS "sourceText"
+    FROM "MealApplication" a WHERE a.id = ${applicationId}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  const { sourceText, ...source } = row;
+  // PostgreSQL 문자열을 직접 해시해 JS Date 변환의 마이크로초 손실을 피한다.
+  return { ...source, sourceRowHash: createHash("sha256").update(sourceText, "utf8").digest("hex") };
+}
+
+function storedSurveyResolutions(manifest: Prisma.JsonValue | undefined): Prisma.JsonValue | undefined {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return undefined;
+  return manifest.dateLessSurveyResolutions;
+}
+
+function matchesSurveySource(source: SurveySource | null, confirmation: DateLessSurveyConfirmation): source is SurveySource {
+  return source !== null
+    && (source.academicYear === null || source.academicYear === confirmation.academicYear)
+    && source.applicationDateCount === 0 && source.registrationDateCount === 0
+    && source.registrations.length === confirmation.expectedTotalRegistrationCount
+    && source.registrations.filter((entry) => entry.status === "APPROVED").length === confirmation.expectedApprovedRegistrationCount
+    && source.sourceRowHash === confirmation.expectedSourceRowHash;
+}
+
+async function validateSurveyResolutions(db: Db, stored: Prisma.JsonValue | undefined) {
+  if (stored === undefined) return { accepted: [] as DateLessSurveyResolution[], issues: [] as string[] };
+  const parsed = z.array(surveyResolutionSchema).safeParse(stored);
+  if (!parsed.success || new Set(parsed.data.map((entry) => entry.applicationId)).size !== parsed.data.length) {
+    return { accepted: [], issues: ["DATELESS_SURVEY_EVIDENCE_INVALID:1"] };
+  }
+  const accepted: DateLessSurveyResolution[] = [];
+  let invalid = 0;
+  for (const resolution of parsed.data) {
+    const source = await captureDateLessSurveySource(db, resolution.applicationId);
+    if (matchesSurveySource(source, { ...resolution, expectedSourceRowHash: resolution.sourceRowHash })
+      && source.academicYear === resolution.academicYear
+      && JSON.stringify(source.registrations) === JSON.stringify(resolution.registrations)) {
+      accepted.push(resolution);
+    } else {
+      invalid += 1;
+    }
+  }
+  return { accepted, issues: invalid > 0 ? [issue("DATELESS_SURVEY_EVIDENCE_INVALID", invalid)] : [] };
+}
 
 export interface BackfillResult {
   /** 이번 실행이 새로 만든 UserAcademicRecord 행 수. */
@@ -193,8 +293,16 @@ interface ConflictCounts {
  * 충돌만 종류와 건수로 보고한다. 복사와 같은 트랜잭션에서 호출하면 보고한
  * 건수와 실제로 복사된 내용이 같은 스냅샷을 본다.
  */
-export async function runPreflight(db: Db, year: number = INITIAL_ACADEMIC_YEAR): Promise<PreflightReport> {
+export async function runPreflight(
+  db: Db,
+  year: number = INITIAL_ACADEMIC_YEAR,
+  surveyEvidence?: Prisma.JsonValue,
+): Promise<PreflightReport> {
   const bounds = academicYearBounds(year);
+  const stored = surveyEvidence === undefined
+    ? storedSurveyResolutions((await db.academicBackfill.findUnique({ where: { key: ACADEMIC_BACKFILL_KEY } }))?.sourceManifest)
+    : surveyEvidence;
+  const surveys = await validateSurveyResolutions(db, stored);
 
   const conflictRows = await db.$queryRawUnsafe<ConflictCounts[]>(COUNT_CONFLICTS_SQL);
   const conflicts = conflictRows[0];
@@ -207,18 +315,23 @@ export async function runPreflight(db: Db, year: number = INITIAL_ACADEMIC_YEAR)
   );
   const scope = scopeRows[0] ?? { total: 0, unknown: 0, outOfYear: 0 };
 
-  const issues: string[] = [];
+  const issues: string[] = [...surveys.issues];
   if (conflicts.emailGroups > 0) issues.push(issue("EMAIL_COLLISION", conflicts.emailGroups));
   if (conflicts.seatGroups > 0) issues.push(issue("DUPLICATE_SEAT", conflicts.seatGroups));
   if (conflicts.missingSeat > 0) issues.push(issue("MISSING_SEAT", conflicts.missingSeat));
   if (scope.outOfYear > 0) issues.push(issue("APPLICATION_OUT_OF_YEAR", scope.outOfYear));
-  if (scope.unknown > 0) issues.push(issue("APPLICATION_YEAR_UNKNOWN", scope.unknown));
-  if (conflicts.orphanRegistrations > 0) {
-    issues.push(issue("REGISTRATION_WITHOUT_DATES", conflicts.orphanRegistrations));
+  const unresolvedApplications = scope.unknown - surveys.accepted.length;
+  const surveyRegistrations = surveys.accepted.reduce((sum, entry) => sum + entry.expectedApprovedRegistrationCount, 0);
+  const unresolvedRegistrations = conflicts.orphanRegistrations - surveyRegistrations;
+  if (unresolvedApplications > 0) issues.push(issue("APPLICATION_YEAR_UNKNOWN", unresolvedApplications));
+  if (unresolvedRegistrations > 0) {
+    issues.push(issue("REGISTRATION_WITHOUT_DATES", unresolvedRegistrations));
   }
 
   const notes: string[] = [];
   if (conflicts.missingGender > 0) notes.push(issue("MISSING_GENDER", conflicts.missingGender));
+  if (surveys.accepted.length > 0) notes.push(issue("CONFIRMED_DATELESS_SURVEY_APPLICATION", surveys.accepted.length));
+  if (surveyRegistrations > 0) notes.push(issue("CONFIRMED_DATELESS_SURVEY_REGISTRATION", surveyRegistrations));
 
   return {
     counts: {
@@ -257,6 +370,7 @@ function buildManifest(
   source: LegacyFingerprint,
   report: PreflightReport,
   issues: string[],
+  surveyEvidence?: Prisma.JsonValue,
 ): Prisma.InputJsonObject {
   return {
     year: INITIAL_ACADEMIC_YEAR,
@@ -267,6 +381,7 @@ function buildManifest(
     notes: report.notes,
     // 해시와 건수만 담는다. 이름·이메일·학번은 어떤 형태로도 남기지 않는다.
     source: source.tables as unknown as Prisma.InputJsonObject,
+    ...(surveyEvidence !== undefined ? { dateLessSurveyResolutions: surveyEvidence } : {}),
   };
 }
 
@@ -275,7 +390,12 @@ function buildManifest(
  * control 행을 배타 잠금해 호환 쓰기와 줄을 세우고, 점검·복사·상태 기록을 한
  * 트랜잭션에서 끝낸다. 이미 COPIED 이후라면 다시 복사하지 않는다.
  */
-export async function backfill2026(db: PrismaClient, source: LegacyFingerprint): Promise<BackfillResult> {
+export async function backfill2026(
+  db: PrismaClient,
+  source: LegacyFingerprint,
+  surveyConfirmations: DateLessSurveyConfirmation[] = [],
+): Promise<BackfillResult> {
+  const confirmations = surveyConfirmations.length > 0 ? parseDateLessSurveyConfirmations(surveyConfirmations) : [];
   return db.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "RosterControl" WHERE id = 1 FOR UPDATE`;
 
@@ -287,7 +407,37 @@ export async function backfill2026(db: PrismaClient, source: LegacyFingerprint):
     // 복사할 때만 활성 연도가 정말 2026인지를 엄격히 확인한다.
     const year = alreadyCopied ? await requireSingleActiveYear(tx) : await activeYear(tx);
 
-    const report = await runPreflight(tx, year);
+    let surveyEvidence = storedSurveyResolutions(existing?.sourceManifest);
+    if (confirmations.length > 0) {
+      const control = await tx.rosterControl.findUniqueOrThrow({ where: { id: 1 } });
+      if (alreadyCopied || control.mode !== "PREPARING" || surveyEvidence !== undefined) {
+        throw new DomainError("NOT_READY", "희망조사 확인은 최초 이전에만 추가할 수 있습니다.");
+      }
+      await lockBackfillVerificationSources(tx);
+      const resolutions: DateLessSurveyResolution[] = [];
+      for (const confirmation of confirmations) {
+        const surveySource = await captureDateLessSurveySource(tx, confirmation.applicationId);
+        if (!matchesSurveySource(surveySource, confirmation)) {
+          throw new DomainError("NOT_READY", "희망조사 확인 자료와 현재 신청 원본이 일치하지 않습니다.");
+        }
+        const { expectedSourceRowHash, ...confirmed } = confirmation;
+        resolutions.push({
+          ...confirmed,
+          sourceRowHash: expectedSourceRowHash,
+          sourceFormat: "posanmeal-dateless-survey-v1",
+          reason: "USER_CONFIRMED_DATELESS_INTENT_SURVEY",
+          confirmedAt: new Date().toISOString(),
+          registrations: surveySource.registrations,
+        });
+        await tx.$executeRaw`UPDATE "MealApplication" SET "academicYear" = ${year}
+          WHERE id = ${confirmation.applicationId} AND "academicYear" IS NULL`;
+      }
+      surveyEvidence = resolutions;
+    } else if (surveyEvidence !== undefined) {
+      await lockBackfillVerificationSources(tx);
+    }
+
+    const report = await runPreflight(tx, year, surveyEvidence);
     const inserted = alreadyCopied ? 0 : await copyAcademicRecords(tx, year);
 
     const issues = [...report.issues];
@@ -295,7 +445,7 @@ export async function backfill2026(db: PrismaClient, source: LegacyFingerprint):
     if (mismatch > 0) issues.push(issue("RECORD_MISMATCH", mismatch));
     issues.sort();
 
-    const manifest = buildManifest(source, report, issues);
+    const manifest = buildManifest(source, report, issues, surveyEvidence);
     if (alreadyCopied) {
       await tx.academicBackfill.update({
         where: { key: ACADEMIC_BACKFILL_KEY },
@@ -326,7 +476,7 @@ export async function checkCurrentBackfill(db: Db) {
     issues.push("BACKFILL_NOT_COPIED:1");
   }
 
-  const report = await runPreflight(db, year);
+  const report = await runPreflight(db, year, storedSurveyResolutions(backfill?.sourceManifest));
   issues.push(...report.issues);
 
   const mismatch = await countRecordMismatch(db, year);
@@ -362,7 +512,7 @@ export async function inspectBackfill(db: PrismaClient, before: LegacyFingerprin
 
 /** 신청 쓰기는 control 잠금을 쓰지 않으므로 최종 검증 중에만 대상 테이블 쓰기를 잠깐 기다린다. */
 export async function lockBackfillVerificationSources(tx: Tx): Promise<void> {
-  await tx.$executeRaw`LOCK TABLE "MealApplication", "MealApplicationMealDate", "MealRegistration", "MealRegistrationMealDate" IN SHARE MODE`;
+  await tx.$executeRaw`LOCK TABLE "MealApplication", "MealApplicationMealDate", "MealRegistration", "MealRegistrationMealDate", "MealApplicationMeal", "MealRegistrationMeal" IN SHARE MODE`;
 }
 
 export async function verifyBackfill(db: PrismaClient, before: LegacyFingerprint, after: LegacyFingerprint): Promise<VerifyResult> {
@@ -380,7 +530,7 @@ export async function verifyBackfill(db: PrismaClient, before: LegacyFingerprint
         data: {
           state: result.canEnable ? "VERIFIED" : "COPIED",
           verifiedAt: result.canEnable ? new Date() : null,
-          sourceManifest: buildManifest(before, report, result.issues),
+          sourceManifest: buildManifest(before, report, result.issues, storedSurveyResolutions(backfill.sourceManifest)),
         },
       });
     }

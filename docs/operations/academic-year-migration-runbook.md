@@ -107,6 +107,22 @@ node --import tsx scripts/academic-year/enable.ts --mode inspect --target-config
 
 `backfill apply`는 변경 전에 before를 저장하고 복사 뒤 비교·검증 확정까지 수행한다. `ACADEMIC_BEFORE_FILE`은 검증하려는 해당 copy 구간이 출력한 bundle의 원래 before다. 별도 `verify apply`는 그 구간의 예외 정리 후 명시적으로 재확정할 때 사용하며 새 기준을 임의로 만들지 않는다. A 공개 뒤 정상 쓰기가 진행된 B 단계에는 A의 최초 before를 무조건 재비교하지 않는다. A에서 승인한 원본 보존 증거와 B의 새로운 배포 구간 증거를 분리한다. 실패한 재검증은 기존 VERIFIED를 COPIED로 낮추고 verifiedAt을 지운다. `verify inspect`는 `canEnable=true`여도 stamp를 쓰지 않는다.
 
+### 확인된 날짜 없는 희망조사
+
+운영자가 특정 과거 공고를 **날짜 없는 희망조사**로 명시 확인한 경우에만 최초 `backfill apply`에 `--survey-confirmations <보호된 JSON 경로>`를 추가한다. 단순히 날짜가 없거나 제목이 비슷하다는 이유로 이 경로를 사용하지 않는다. 일반 inspect·verify·enable에는 이 인자를 전달할 수 없다.
+
+확인 파일은 다음 필드를 갖는 객체의 배열이다. 실제 공고 ID와 근거 파일은 git 밖 0700 디렉터리·0600 파일에 보관한다.
+
+- `applicationId`: 이전 감사와 대조한 특정 공고 ID.
+- `academicYear`: 확인한 귀속 연도 `2026`.
+- `kind`: `DATELESS_INTENT_SURVEY`.
+- `expectedApprovedRegistrationCount`, `expectedTotalRegistrationCount`: 승인 신청과 취소 등을 포함한 전체 신청의 각각의 기대 건수.
+- `expectedSourceRowHash`: 읽기 전용 `captureDateLessSurveySource`로 캡처한 원본 해시. 공고의 신규 `academicYear`를 제외한 기존 공고·전체 신청·식사 설정을 포함한다.
+
+원본 캡처와 실제 적용 사이 내용·신청 집합·상태·날짜가 바뀌면 중단한다. 적용은 신규 `MealApplication.academicYear`만 채우며 기존 `updatedAt`, 신청 상태, 서명, 식사 설정을 바꾸거나 급식일·급식 자격을 만들지 않는다. 승인한 공고에 한해서 두 날짜 관련 차단 사유를 확인된 기록으로 분류하고, 원본 해시·신청 집합·확인 시각을 `AcademicBackfill.sourceManifest.dateLessSurveyResolutions`에 보존한다. 복사 재실행·verify·READY는 저장된 증거를 다시 검사한다. 전체 legacy v2 before/after 비교와 다른 미확정 자료의 차단은 그대로 유지한다.
+
+2026-09-20 사용자 확인 대상은 승인 120건·전체 125건인 희망조사다. 의미 확인과 키오스크 미전송 0건·스캔 중지는 새로 확인받았으며, 실제 적용·검증 완료 여부는 [현재 통합·이전 인계](../../.codex/memory/2026-09-20-main-merge-and-activation.md)를 따른다.
+
 Release B 공개 승인 단계에서만 다음을 실행한다. Release A에는 이 CLI가 포함돼도 READY를 열지 않는다.
 
 ```sh

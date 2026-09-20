@@ -34,6 +34,7 @@ export interface CliOptions {
   targetConfigPath: string | null;
   reportDir: string | null;
   beforePath: string | null;
+  surveyConfirmationsPath: string | null;
 }
 
 function requiredString(source: Record<string, unknown>, key: string): string {
@@ -92,8 +93,10 @@ export function assertUrlMatchesTarget(rawUrl: string, config: MigrationTargetCo
   return url;
 }
 
-export function parseCliArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { mode: "inspect", targetConfigPath: null, reportDir: null, beforePath: null };
+export function parseCliArgs(argv: string[], allowSurveyConfirmations = false): CliOptions {
+  const options: CliOptions = {
+    mode: "inspect", targetConfigPath: null, reportDir: null, beforePath: null, surveyConfirmationsPath: null,
+  };
 
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
@@ -114,6 +117,12 @@ export function parseCliArgs(argv: string[]): CliOptions {
       case "--before":
         options.beforePath = value;
         break;
+      case "--survey-confirmations":
+        if (!allowSurveyConfirmations || options.surveyConfirmationsPath !== null) {
+          throw new Error("희망조사 확인 인자는 backfill apply에서 한 번만 지정할 수 있습니다");
+        }
+        options.surveyConfirmationsPath = value;
+        break;
       default:
         throw new Error(`알 수 없는 인자: ${flag}`);
     }
@@ -121,6 +130,9 @@ export function parseCliArgs(argv: string[]): CliOptions {
 
   if (options.mode === "apply" && (!options.targetConfigPath || !options.reportDir)) {
     throw new Error("--mode apply는 --target-config와 --report-dir를 모두 요구합니다");
+  }
+  if (options.surveyConfirmationsPath !== null && options.mode !== "apply") {
+    throw new Error("희망조사 확인 인자는 backfill apply에서만 허용됩니다");
   }
 
   return options;

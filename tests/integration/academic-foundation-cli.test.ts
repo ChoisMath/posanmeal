@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import type { Client } from "pg";
-import { ACADEMIC_BACKFILL_KEY, backfill2026, verifyBackfill } from "@/lib/academic-year/backfill";
+import { ACADEMIC_BACKFILL_KEY, backfill2026, captureDateLessSurveySource, verifyBackfill } from "@/lib/academic-year/backfill";
 import { ACADEMIC_TEST_DATABASE_URL, ACADEMIC_TEST_IDENTITY_MARKER } from "@/lib/academic-year/test-target";
 import { captureLegacyFingerprint } from "../../scripts/academic-year/fingerprint";
 import { openAcademicTestDb, openAcademicTestPgClient, resetAcademicTestDb } from "./support/db";
@@ -68,6 +68,36 @@ describe("guarded foundation CLI", () => {
       markerScope: "test", marker: ACADEMIC_TEST_IDENTITY_MARKER, restoreReportId: "synthetic-restore" }));
     fs.writeFileSync(beforePath, JSON.stringify(await captureLegacyFingerprint(pgClient)));
   });
+
+  it("only explicit backfill apply accepts a survey confirmation file and preserves its evidence", async () => {
+    await db.mealApplicationMealDate.deleteMany();
+    await db.mealRegistrationMealDate.deleteMany();
+    const application = await db.mealApplication.findFirstOrThrow();
+    const source = (await captureDateLessSurveySource(db, application.id))!;
+    const confirmationPath = path.join(path.dirname(configPath), "surveys.json");
+    fs.writeFileSync(confirmationPath, JSON.stringify([{
+      applicationId: application.id, academicYear: 2026, kind: "DATELESS_INTENT_SURVEY",
+      expectedApprovedRegistrationCount: 1, expectedTotalRegistrationCount: 1,
+      expectedSourceRowHash: source.sourceRowHash,
+    }]));
+    const args = ["--target-config", configPath, "--report-dir", reportDir,
+      "--survey-confirmations", confirmationPath];
+    expect((await runCli("backfill", args)).code).not.toBe(0);
+    expect((await runCli("verify", ["--mode", "apply", ...args])).code).not.toBe(0);
+    expect((await runCli("enable", ["--mode", "apply", ...args])).code).not.toBe(0);
+    expect(await db.academicBackfill.count()).toBe(0);
+
+    const result = await runCli("backfill", ["--mode", "apply", ...args]);
+    expect(result).toMatchObject({ code: 0 });
+    expect(result.output).toContain("canEnable=true");
+    expect((await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } })).state).toBe("VERIFIED");
+    const savedBefore = filesUnder(reportDir).find((filename) => path.basename(filename) === "before.json")!;
+    const inspected = await runCli("verify", ["--target-config", configPath, "--before", savedBefore]);
+    expect(inspected.code).toBe(0);
+    expect(inspected.output).toContain("canEnable=true");
+    const serialized = filesUnder(reportDir).map((filename) => fs.readFileSync(filename, "utf8")).join("");
+    expect(serialized).not.toContain("학생테스트");
+  }, 20_000);
 
   it.each([{ mode: [] }, { mode: ["--mode", "inspect"] }])("verify $mode never promotes COPIED or rewrites its manifest", async ({ mode }) => {
     const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));

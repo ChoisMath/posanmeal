@@ -1,6 +1,6 @@
 # Project Map — PosanMeal
 
-> 학년도 명부 최신 구조: 2026-09-20, Task 5~14와 Task 15 회귀 보완. 코드 검증은 `docs/operations/academic-year-validation-report.md`, 운영 준비의 최신 실행 상태는 `docs/operations/academic-year-deployment-2026-09-20.md`를 참조한다.
+> 학년도 명부 최신 구조: 2026-09-20, Task 5~14와 Task 15 회귀 및 확인된 날짜 없는 희망조사 보존 보완. 기존 코드 검증은 `docs/operations/academic-year-validation-report.md`, main 통합·운영 DB 이전의 최신 실행 상태는 `.codex/memory/2026-09-20-main-merge-and-activation.md`를 참조한다.
 
 > 2026-09-18 `.claude/PROJECT_MAP.md`에서 이관. §11 배포 설명은 과거 기록이며 9월 테스트 서비스 기록과 충돌한다. 현재 연결은 배포 작업 시 확인하고 `.codex/rules/railway-stack.md`를 따른다.
 
@@ -363,6 +363,8 @@ public/
 | `db.ts` | 타입 `Db`(PrismaClient \| TransactionClient), `Tx` |
 | `mutation.ts` | 멱등 변경 wrapper. `withAcademicMutation`(전환·Excel 확정 등 전역 변경: RosterControl `FOR UPDATE` + control version 낙관 충돌), `withUserMutation`(사용자 한 행: RosterControl `FOR SHARE` → User 행 `FOR UPDATE`, `profileVersion`으로 충돌 판정·증가), `withRosterRowMutation`은 User→Record 잠금. 행 잠금 대기 뒤 receipt 재조회. `RosterMutation`에 requestId 영수증 저장, 같은 actor·kind·payloadHash만 재전송으로 인정(아니면 REQUEST_REUSED). 트랜잭션 옵션 `ROSTER_TX`(timeout 60s)/`USER_TX`(15s) |
 | `backfill.ts` | 초기 이전: `INITIAL_ACADEMIC_YEAR`(2026), `runPreflight`(읽기 전용 충돌 보고), `copyAcademicRecords`, `backfill2026`(RosterControl `FOR UPDATE`, 점검·복사·상태 기록 한 트랜잭션, COPIED 이후 재복사 안 함, 기존 행 미덮어쓰기), `inspectBackfill`(READ ONLY), `verifyBackfill`(명시 확정; 실패 시 COPIED/verifiedAt 취소), 최신 미러·미귀속 공고 검사 |
+
+`backfill.ts`의 `captureDateLessSurveySource`·`parseDateLessSurveyConfirmations`는 사람이 확인한 특정 희망조사의 원본 해시·승인/전체 신청 건수·날짜 부재를 검사한다. 확인 증거는 `AcademicBackfill.sourceManifest.dateLessSurveyResolutions`에 보존하며 신규 `academicYear`만 채운다. 재실행·verify·READY도 증거를 다시 검사하고 기존 신청·서명·식사일과 legacy v2 원본 비교를 보존한다.
 | `readiness.ts` | `requireAcademicReady(db)` — 새 학년도 기능 API 전용 가드(PREPARING이면 NOT_READY 503), `enableAcademicMode(db, actor)` — MAIN만 PREPARING→READY, v2 VERIFIED·현재 미러·충돌·미귀속 공고 재검사, `inspectAcademicMode` 읽기 전용 |
 | `roster-sql.ts` | 백필·호환 쓰기 공용 SQL 조각: `CONFLICT_GROUPS_CTE`, `MIRROR_CONFLICT_GROUPS_CTE`, `NEEDS_REVIEW_EXPR`(필수값 누락·좌석 중복·정규화 이메일 중복) |
 | `access.ts` | `assertActor(tx, actor, required)` — 모든 보호 경로의 최종 근거. 토큰이 아닌 현재 DB 행으로 accessState·sessionVersion·role·adminLevel 재판정. `AccessRequirement` = SIGNED_IN/STUDENT/TEACHER/READ_ADMIN/WRITE_ADMIN/MAIN. `auth`를 import하지 않아 트랜잭션 안에서도 사용 (테스트 `__tests__/academic-access.test.ts`) |
@@ -392,7 +394,7 @@ public/
 | `test-db.ts` | 통합 테스트 DB wrapper — `up`/`migrate`/`down`만 허용(`npm run academic:test-db -- <명령>`). URL은 프로세스 내부에서만 구성·미출력, 운영 `DATABASE_URL`로 fallback하지 않음 |
 | `pg-daemon.ts` | `up`이 detached로 띄우는 embedded-postgres 프로세스(Docker 없을 때). `down`이 SIGINT로 종료 |
 | `fingerprint.ts` / `legacy-columns.json` | version 2 JSON 경계 인코딩으로 기존 컬럼·PK 지문 생성. NULL·제어문자·개행 구분, UTC 마이크로초 보존. 구형 증거 거절 |
-| `backfill.ts` | 초기 이전 CLI — 기본 읽기 전용 inspect, 쓰기는 승인된 대상 설정·보호된 출력 경로 명시 필요. 출력은 차이 종류·건수만(개인정보·URL 미출력) |
+| `backfill.ts` | 초기 이전 CLI — 기본 읽기 전용 inspect, 쓰기는 승인된 대상 설정·보호된 출력 경로 명시 필요. 최초 apply에만 선택 `--survey-confirmations` 보호 JSON을 허용하며 확인 자료를 보고 bundle에 보존. 출력은 차이 종류·건수만(개인정보·URL 미출력) |
 | `verify.ts` | 기본 inspect는 READ ONLY, 명시 apply만 검증 stamp 확정. `--before` v2 manifest 비교 |
 | `enable.ts` | 기본 inspect, 명시 apply만 MAIN READY 전환. 별도 CLI 뒤 웹 앱 캐시는 재시작/최대 30초 TTL 확인 |
 | `report.ts` | apply 전 before를 보호 bundle(0700)/파일(0600)로 영속 저장. public·symlink·덮어쓰기 거절 |
