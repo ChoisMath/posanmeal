@@ -17,7 +17,7 @@ import Link from "next/link";
 import { AdminMealTable } from "@/components/AdminMealTable";
 import { useAccountRows, useAcademicYears } from "@/hooks/useAcademicRoster";
 import { RosterManager } from "@/components/admin-roster/RosterManager";
-import { CheckInReviewPanel } from "@/components/admin-roster/CheckInReviewPanel";
+import { AdminSettingsPanels } from "@/components/admin-roster/AdminSettingsPanels";
 import { toast } from "sonner";
 import { useAdminPermission } from "@/hooks/useAdminPermission";
 import { todayKST, formatDateTimeKST } from "@/lib/timezone";
@@ -110,7 +110,6 @@ export default function AdminPage() {
   // 진입 시 ?tab= 쿼리 반영 (공고 저장 후 /admin?tab=applications 복귀 등)
   // SSR과 첫 클라이언트 렌더를 "users"로 일치시키고 마운트 후 전환 (hydration mismatch 방지)
   const [activeTab, setActiveTab] = useState("users");
-  const [mealView, setMealView] = useState("monthly");
   const [reviewPending, setReviewPending] = useState(false);
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
@@ -682,10 +681,10 @@ export default function AdminPage() {
           <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => clearClientStateAndSignOut("/")}><LogOut className="h-4 w-4" /></Button>
         </div>
       </header>
-      <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-1.5 sm:p-3 md:p-4 flex flex-col overflow-hidden page-enter">
+      <div className="flex-1 min-h-0 w-full mx-auto p-1.5 sm:p-2 md:p-3 flex flex-col overflow-hidden page-enter">
         <Tabs
           value={activeTab}
-          className="flex flex-col flex-1 min-h-0"
+          className="flex flex-col flex-1 min-h-0 gap-0"
           onValueChange={(v) => {
             if (reviewPending) return;
             setActiveTab(v);
@@ -693,8 +692,9 @@ export default function AdminPage() {
             if (v === "applications") fetchApps();
           }}
         >
+          <div className="relative z-10 shrink-0 overflow-x-auto pb-px -mb-px">
           <TabsList
-            className={`grid w-full ${adminPerm.isSubadmin ? "grid-cols-3" : "grid-cols-5"} rounded-xl h-11 max-w-2xl shrink-0`}
+            className={`grid w-full min-w-[340px] ${adminPerm.isSubadmin ? "grid-cols-4" : "grid-cols-5"} shrink-0 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-9 [&>[data-slot=tabs-trigger]]:h-9 [&>[data-slot=tabs-trigger]]:rounded-b-none [&>[data-slot=tabs-trigger]]:rounded-t-lg [&>[data-slot=tabs-trigger]]:border [&>[data-slot=tabs-trigger]]:border-b-0 [&>[data-slot=tabs-trigger]]:data-active:border-border [&>[data-slot=tabs-trigger]]:data-active:bg-card [&>[data-slot=tabs-trigger]]:data-active:shadow-none [&>[data-slot=tabs-trigger]]:data-active:translate-y-px`}
           >
             <TabsTrigger value="users" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">사용자 관리</TabsTrigger>
             {!adminPerm.isSubadmin && (
@@ -702,14 +702,13 @@ export default function AdminPage() {
             )}
             <TabsTrigger value="meals" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">급식 확인</TabsTrigger>
             <TabsTrigger value="dashboard" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">당일 현황</TabsTrigger>
-            {!adminPerm.isSubadmin && (
-              <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
-            )}
+            <TabsTrigger value="settings" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">설정</TabsTrigger>
           </TabsList>
+          </div>
 
-          <TabsContent value="users" className="flex-1 min-h-0 mt-1 overflow-hidden">
-            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
+          <TabsContent value="users" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
+              <CardContent className="px-2 pt-0 flex-1 min-h-0 overflow-hidden">
                 <RosterManager
                   canWrite={adminPerm.canWrite}
                   isMain={adminPerm.isEnvAdmin}
@@ -936,20 +935,20 @@ export default function AdminPage() {
           </TabsContent>
 
           {!adminPerm.isSubadmin && (
-          <TabsContent value="applications" className="flex-1 min-h-0 mt-1 overflow-hidden">
-            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
+          <TabsContent value="applications" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
               <CardContent className="pt-2 flex-1 min-h-0 overflow-auto">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold">신청 공고</h3>
                   <Link href="/admin/applications/new">
-                    <Button size="sm" className="min-h-11 whitespace-nowrap">
+                    <Button size="sm" className="h-8 py-1 whitespace-nowrap">
                       <Plus className="h-4 w-4 mr-1" /> 새 공고 작성
                     </Button>
                   </Link>
                 </div>
                 {academicError && <div role="alert" className="mb-2 flex flex-wrap items-center gap-2 text-sm text-destructive">
                   <p className="break-keep">학년도 상태를 불러오지 못했습니다.</p>
-                  <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => void refreshAcademicYears()}>학년도 다시 불러오기</Button>
+                  <Button variant="outline" className="h-8 py-1 whitespace-nowrap" onClick={() => void refreshAcademicYears()}>학년도 다시 불러오기</Button>
                 </div>}
                 {apps.length === 0 ? (
                   <p className="text-muted-foreground text-center py-8">등록된 공고가 없습니다.</p>
@@ -981,17 +980,17 @@ export default function AdminPage() {
                       const totalOpenDateCount = app.meals.reduce((s, m) => s + m.openDateCount, 0);
 
                       return (
-                        <div key={app.id} className="card-elevated rounded-2xl border-0 p-2 sm:p-3 lg:p-4 space-y-2">
+                        <div key={app.id} className="rounded-lg border bg-card p-2 space-y-1.5">
                           <div className="flex items-center gap-2 flex-wrap">
                             {statusBadge}
                             <span className="min-w-0 truncate font-semibold" title={app.title}>{app.title}</span>
                           </div>
-                          <p className="whitespace-nowrap text-xs text-muted-foreground">{app.academicYear === null ? "학년도 확인 필요" : `${app.academicYear}학년도`}</p>
-                          {(applyStart || applyEnd) && (
-                            <p className="text-xs text-muted-foreground whitespace-nowrap">
-                              {applyStart ? formatDateTimeKST(applyStart) : "—"} ~ {applyEnd ? formatDateTimeKST(applyEnd) : "—"}
+                          <div className="overflow-x-auto">
+                            <p className="whitespace-nowrap text-xs text-muted-foreground">
+                              {app.academicYear === null ? "학년도 확인 필요" : `${app.academicYear}학년도`}
+                              {(applyStart || applyEnd) && <> · 신청기간 {applyStart ? formatDateTimeKST(applyStart).slice(5) : "—"} ~ {applyEnd ? formatDateTimeKST(applyEnd).slice(5) : "—"}</>}
                             </p>
-                          )}
+                          </div>
                           {app.meals.length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
                               {app.meals.map((m) => {
@@ -1019,12 +1018,12 @@ export default function AdminPage() {
                           </p>
                           <div className="flex flex-wrap gap-2 pt-1">
                             <Link href={`/admin/applications/${app.id}/stats`}>
-                              <Button variant="outline" size="sm" className="min-h-11 min-w-11 whitespace-nowrap">
+                              <Button variant="outline" size="sm" className="h-7 min-w-7 py-0.5 whitespace-nowrap">
                                 <ExternalLink className="h-3.5 w-3.5 mr-1" /> 통계·명단
                               </Button>
                             </Link>
                             <Link href={`/admin/applications/${app.id}/edit`}>
-                              <Button variant="outline" size="sm" className="min-h-11 min-w-11 whitespace-nowrap">
+                              <Button variant="outline" size="sm" className="h-7 min-w-7 py-0.5 whitespace-nowrap">
                                 수정
                               </Button>
                             </Link>
@@ -1032,7 +1031,7 @@ export default function AdminPage() {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                className="min-h-11 min-w-11 whitespace-nowrap"
+                                className="h-7 min-w-7 py-0.5 whitespace-nowrap"
                                 onClick={async () => {
                                   if (!confirm(`"${app.title}" 공고를 마감하시겠습니까?`)) return;
                                   const res = await fetch(`/api/admin/applications/${app.id}/close`, { method: "POST" });
@@ -1046,7 +1045,7 @@ export default function AdminPage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="min-h-11 min-w-11 whitespace-nowrap text-destructive hover:text-destructive"
+                              className="h-7 min-w-7 py-0.5 whitespace-nowrap text-destructive hover:text-destructive"
                               onClick={() => handleDeleteApp(app)}
                             >
                               <Trash2 className="h-3.5 w-3.5 mr-1" /> 삭제
@@ -1062,30 +1061,17 @@ export default function AdminPage() {
           </TabsContent>
           )}
 
-          <TabsContent value="meals" className="flex-1 min-h-0 mt-1 overflow-hidden">
-            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
-                <Tabs value={mealView} onValueChange={(value) => { if (!reviewPending) setMealView(value); }} className="h-full min-h-0 gap-2">
-                  <div className="shrink-0 overflow-x-auto">
-                    <TabsList className="w-full min-w-max gap-2 group-data-horizontal/tabs:h-auto">
-                      <TabsTrigger value="monthly" disabled={reviewPending} className="min-h-11 min-w-11 whitespace-nowrap px-3">월별 기록</TabsTrigger>
-                      <TabsTrigger value="reviews" className="min-h-11 min-w-11 whitespace-nowrap px-3">체크인 검토</TabsTrigger>
-                    </TabsList>
-                  </div>
-                  <TabsContent value="monthly" className="min-h-0 overflow-hidden">
-                    <AdminMealTable readonly={!adminPerm.canWrite} />
-                  </TabsContent>
-                  <TabsContent value="reviews" className="min-h-0 overflow-hidden">
-                    <CheckInReviewPanel canWrite={adminPerm.canWrite} onPendingChange={setReviewPending} />
-                  </TabsContent>
-                </Tabs>
+          <TabsContent value="meals" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
+              <CardContent className="px-2 pt-0 flex-1 min-h-0 overflow-hidden">
+                <AdminMealTable readonly={!adminPerm.canWrite} />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="dashboard" className="flex-1 min-h-0 mt-1 overflow-hidden">
-            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-2 flex-1 min-h-0 overflow-hidden">
+          <TabsContent value="dashboard" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
+              <CardContent className="px-2 pt-0 flex-1 min-h-0 overflow-hidden">
                 <div className="flex justify-between items-center gap-2 flex-wrap mb-4">
                   <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
                     <Button
@@ -1236,11 +1222,11 @@ export default function AdminPage() {
             </Card>
           </TabsContent>
 
-          {!adminPerm.isSubadmin && (
-          <TabsContent value="settings" className="flex-1 min-h-0 mt-1 overflow-hidden">
-            <Card className="card-elevated rounded-2xl border-0 h-full flex flex-col">
-              <CardContent className="pt-2 px-2 sm:px-4 space-y-6 flex-1 min-h-0 overflow-y-auto">
-                <div>
+          <TabsContent value="settings" className="flex-1 min-h-0 mt-0 overflow-hidden">
+            <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
+              <CardContent className="pt-0 px-2 sm:px-3 space-y-3 flex-1 min-h-0 overflow-y-auto">
+                <AdminSettingsPanels canWrite={adminPerm.canWrite} isMain={adminPerm.isEnvAdmin} onPendingChange={setReviewPending} />
+                {!adminPerm.isSubadmin && <div>
                   <h3 className="font-semibold mb-4 flex items-center gap-2">
                     <Settings className="h-4 w-4" /> 시스템 설정
                   </h3>
@@ -1488,11 +1474,10 @@ export default function AdminPage() {
                       태블릿에서 동기화를 실행해야 설정이 반영됩니다.
                     </p>
                   )}
-                </div>
+                </div>}
               </CardContent>
             </Card>
           </TabsContent>
-          )}
         </Tabs>
       </div>
 

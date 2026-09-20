@@ -121,7 +121,7 @@ public/
 | `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단. 헤더 물음표는 학생 안내를 새 탭으로 연다 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭. 개인정보 탭은 읽기 전용(이름·교과·담임·직책 본인 수정 폼 제거 — 명부 소유) |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
-| `/admin` | `src/app/admin/page.tsx` | 관리자 | 사용자관리·신청관리·체크인·당일현황 |
+| `/admin` | `src/app/admin/page.tsx` | 관리자 | 본문에 붙는 탭: 사용자 관리·신청관리·급식 확인·당일 현황·설정. 설정에서 학년도 관리·체크인 검토 모달 제공 |
 | `/admin/applications/new` | `src/app/admin/applications/new/page.tsx` | 관리자 | 신청 공고 작성 (ApplicationForm) |
 | `/admin/applications/[id]/edit` | `src/app/admin/applications/[id]/edit/page.tsx` | 관리자 | 신청 공고 수정 |
 | `/admin/applications/[id]/stats` | `src/app/admin/applications/[id]/stats/page.tsx` | 관리자 | 공고 통계·신청 명단 (ApplicationStats) |
@@ -266,7 +266,8 @@ public/
 | `StudentQRCard` | `src/components/StudentQRCard.tsx` | 인쇄용 5×5cm(≈47mm) 단일 학생 QR 카드(로고·식별 한 줄·QR), mm 고정 치수, 화면 미리보기·인쇄 공용 프레젠테이션 |
 | `StudentQRPrintDialog` | `src/components/StudentQRPrintDialog.tsx` | 선택 학생 QR 카드 A4 일괄 인쇄 모달 — 미리보기 + `qrcode` 이미지 생성 + body 직속 포털 + `@page A4` 인쇄 격리(4×4=16개/페이지, 페이지 분할). `PrintStudent` 타입 export |
 | `TeacherApplications` | `src/components/TeacherApplications.tsx` | 담임 신청현황 탭 — 공고 목록↔우리 반 신청자 마스터-디테일, 서명 이미지 썸네일+확대 모달 |
-| `AdminMealTable` | `src/components/AdminMealTable.tsx` | 당시 학급 기준 월별 조회·체크인 토글. 교사/1~3학년/확인 필요 탭, 현재 학급 병기와 Excel 옵션. 확인 필요는 읽기 전용 |
+| `AdminMealTable` | `src/components/AdminMealTable.tsx` | 당시 학급 기준 월별 조회·체크인 토글. 교사/1~3학년 드롭다운·월 이동·Excel·현재학급 옵션을 한 행에 표시. `reviewOnly`는 설정의 체크인 검토에서 확인필요 기록을 읽기 전용으로 표시 |
+| `AdminSettingsPanels` | `src/components/admin-roster/AdminSettingsPanels.tsx` | 설정의 학년도 관리 모달(`RosterManager management`)과 체크인 검토 모달(오프라인 `CheckInReviewPanel`·확인필요 `AdminMealTable reviewOnly`) |
 | `PhotoUpload` | `src/components/PhotoUpload.tsx` | 프로필 사진 업로드/삭제 |
 | `SignaturePad` | `src/components/SignaturePad.tsx` | 석식 신청 시 서명 입력 |
 | `MealMenu` | `src/components/MealMenu.tsx` | NEIS API 급식 메뉴 표시 |
@@ -297,7 +298,8 @@ public/
 
 ### 학년도 관리 화면과 클라이언트
 
-- `src/components/admin-roster/`: `RosterManager`·`RosterToolbar`·`RosterTable`, `RosterAccountDialogs`, `RosterImportDialog`·`ImportPreviewPanel`, `CreateDraftDialog`·`RolloverDialog`, `ArchivedRosterDialog`, `CheckInReviewPanel`.
+- `src/components/admin-roster/`: `RosterManager`·`RosterToolbar`·`RosterTable`, `RosterAccountDialogs`, `RosterImportDialog`·`ImportPreviewPanel`, `CreateDraftDialog`·`RolloverDialog`, `ArchivedRosterDialog`, `CheckInReviewPanel`, `AdminSettingsPanels`.
+- `RosterManager` 기본 화면은 운영 학년도 텍스트와 교사/1~3학년 필터를 제공한다. `management` 모드는 설정의 모달에서 학년도 선택·준비·전환·지난 명부·전체 학생 조회를 제공한다. Excel 양식 내려받기와 기존 데이터 포함 옵션은 `RosterImportDialog` 내부에 있다.
 - `src/lib/admin-roster/`: 멱등 변경·request ID, import/archive/rollover/review controller, 누락자·프로필 편집·표시 유틸. 409 자동 덮어쓰기 금지, 응답 불명 재시도의 원래 본문 보존.
 - `src/hooks/useAcademicRoster.ts`: 연도별 SWR 조회. `useTeacherStudents.ts`: 운영 학년도 기본 월 또는 선택 월 조회.
 - `ApplicationForm`은 READY의 ACTIVE/DRAFT 선택·신청 이력 존재 시 연도 잠금, PREPARING은 기존 공고 저장을 유지한다. `ApplicationStats`·`StudentApplicationView`는 공고 학년도 프로필을 사용한다.

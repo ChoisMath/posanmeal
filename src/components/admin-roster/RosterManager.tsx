@@ -4,7 +4,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { canAddRosterUser } from "@/lib/admin-roster/labels";
+import { canAddRosterUser, filterRosterByGrade } from "@/lib/admin-roster/labels";
 import type { SaveResult } from "@/components/EditableCell";
 import type { ImportScope } from "@/lib/academic-year/contracts";
 import { rosterProfileWith } from "@/lib/admin-roster/profile-edit";
@@ -30,6 +30,7 @@ import { RolloverDialog } from "./RolloverDialog";
 import { ArchivedRosterDialog } from "./ArchivedRosterDialog";
 
 export type RosterManagerProps = {
+  management?: boolean;
   canWrite: boolean;
   isMain: boolean;
   /** 학년도 기능이 아직 준비 중일 때 그대로 보여 줄 기존 사용자 목록. */
@@ -38,6 +39,7 @@ export type RosterManagerProps = {
 };
 
 export function RosterManager({
+  management = false,
   canWrite,
   isMain,
   legacyFallback,
@@ -47,6 +49,7 @@ export function RosterManager({
   const years = useAcademicYears();
   const [pickedYear, setPickedYear] = useState<number | null>(null);
   const [role, setRole] = useState<"STUDENT" | "TEACHER">("STUDENT");
+  const [grade, setGrade] = useState<number | null>(management ? null : 1);
   const [includeData, setIncludeData] = useState(true);
   const [includeCurrent, setIncludeCurrent] = useState(false);
   const [includeExcluded, setIncludeExcluded] = useState(false);
@@ -63,7 +66,7 @@ export function RosterManager({
 
   // 고르지 않았으면 운영 중인 학년도를 본다. 상태를 따로 맞추지 않아야 목록이
   // 늦게 와도 화면이 한 번 더 그려지지 않는다.
-  const selectedYear = pickedYear ?? years.activeYear?.year ?? null;
+  const selectedYear = (management ? pickedYear : null) ?? years.activeYear?.year ?? null;
   const selected = years.years.find((year) => year.year === selectedYear) ?? null;
   const archived = selected?.state === "ARCHIVED";
   const nextDraft = years.years.find((year) => year.state === "DRAFT" && year.year === (years.activeYear?.year ?? 0) + 1);
@@ -195,33 +198,32 @@ export function RosterManager({
         activeYear={years.activeYear?.year ?? null}
         role={role}
         canWrite={canWrite}
-        includeData={includeData}
-        includeCurrent={includeCurrent}
+        grade={grade}
+        management={management}
         includeExcluded={includeExcluded}
         canAdd={canAdd}
         onSelectYear={selectYear}
-        onSelectRole={setRole}
-        onToggleIncludeData={setIncludeData}
-        onToggleIncludeCurrent={setIncludeCurrent}
+        onSelectCategory={(nextRole, nextGrade) => { setRole(nextRole); setGrade(nextGrade); }}
         onToggleIncludeExcluded={setIncludeExcluded}
-        onDownload={download}
         onOpenImport={() => setImportOpen(true)}
         onAddUser={onAddUser ? () => onAddUser(role) : undefined}
-        rolloverAction={canWrite && years.activeYear && years.controlVersion !== null && <>
-          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => nextDraft ? selectYear(nextDraft.year) : setCreateOpen(true)}>
+        rolloverAction={management && canWrite && years.activeYear && years.controlVersion !== null && <>
+          <Button variant="outline" className="h-8 py-1 whitespace-nowrap" onClick={() => nextDraft ? selectYear(nextDraft.year) : setCreateOpen(true)}>
             {nextDraft ? "준비 중 명부 열기" : "다음 학년도 준비"}
           </Button>
-          {selected?.state === "DRAFT" && <Button className="min-h-11 whitespace-nowrap" onClick={() => setRolloverOpen(true)}>학년도 전환 검토</Button>}
+          {selected?.state === "DRAFT" && <Button className="h-8 py-1 whitespace-nowrap" onClick={() => setRolloverOpen(true)}>학년도 전환 검토</Button>}
         </>}
-        archivedAction={archived && <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => setArchiveOpen(true)}>지난 명부·표시 정보</Button>}
+        archivedAction={management && archived && <Button variant="outline" className="h-8 py-1 whitespace-nowrap" onClick={() => setArchiveOpen(true)}>지난 명부·표시 정보</Button>}
       />
 
       {years.error && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           <p className="break-keep">학년도 목록을 불러오지 못했습니다.</p>
-          <Button variant="outline" className="min-h-11 whitespace-nowrap" onClick={() => void years.mutate()}>다시 불러오기</Button>
+          <Button variant="outline" className="h-8 py-1 whitespace-nowrap" onClick={() => void years.mutate()}>다시 불러오기</Button>
         </div>
       )}
+
+      {!management && role === "STUDENT" && roster.rows.some((row) => ![1, 2, 3].includes(row.profile.grade ?? 0)) && <p className="shrink-0 overflow-x-auto whitespace-nowrap text-xs text-amber-700">학년 확인이 필요한 사용자가 있습니다. 설정의 학년도 관리에서 전체 학생 명부를 확인하세요.</p>}
 
       {roster.error && (
         <p className="text-sm text-destructive break-keep">명부를 불러오지 못했습니다.</p>
@@ -229,7 +231,7 @@ export function RosterManager({
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <RosterTable
-          rows={roster.rows}
+          rows={filterRosterByGrade(roster.rows, role === "STUDENT" ? grade : null)}
           role={role}
           accounts={accountRows.accounts}
           canWrite={canWrite && !archived}
@@ -271,6 +273,12 @@ export function RosterManager({
       {selectedYear !== null && (
         <RosterImportDialog
           open={importOpen}
+          canImport={canWrite && !archived}
+          templateControls={<div className="flex flex-wrap items-center gap-3 rounded-lg border p-2">
+            <Button variant="outline" size="sm" className="h-8 py-1" onClick={download}>양식 내려받기</Button>
+            <label className="flex items-center gap-1.5 whitespace-nowrap text-sm"><input type="checkbox" checked={includeData} onChange={(event) => setIncludeData(event.target.checked)} /> 기존 데이터 포함</label>
+            {archived && <label className="flex items-center gap-1.5 whitespace-nowrap text-sm"><input type="checkbox" checked={includeCurrent} onChange={(event) => setIncludeCurrent(event.target.checked)} /> 현재학급</label>}
+          </div>}
           year={selectedYear}
           scope={scope}
           nameOf={nameOf}

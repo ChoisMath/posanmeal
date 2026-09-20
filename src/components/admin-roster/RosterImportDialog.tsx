@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,6 +17,8 @@ import { ImportPreviewPanel } from "./ImportPreviewPanel";
 
 export type RosterImportDialogProps = {
   open: boolean;
+  canImport?: boolean;
+  templateControls?: ReactNode;
   year: number;
   scope: ImportScope;
   nameOf: NameLookup;
@@ -41,6 +43,8 @@ export function RosterImportDialog(props: RosterImportDialogProps) {
 
 function RosterImportSession({
   open,
+  canImport = true,
+  templateControls,
   year,
   scope,
   nameOf,
@@ -79,10 +83,12 @@ function RosterImportSession({
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
       <DialogContent className={PANEL}>
         <DialogHeader>
-          <DialogTitle className="whitespace-nowrap">{year}학년도 Excel 올리기</DialogTitle>
+          <DialogTitle className="whitespace-nowrap">{year}학년도 Excel</DialogTitle>
         </DialogHeader>
 
-        {session.ui.stage === "DONE" ? (
+        {templateControls}
+
+        {!canImport ? <p className="text-sm text-muted-foreground">이 명부는 내려받기만 가능합니다.</p> : session.ui.stage === "DONE" ? (
           <div className="flex min-w-0 flex-col gap-3">
             <p className="text-sm break-keep">
               {session.ui.receipt.changed}건을 반영했습니다. 명부를 다시 불러왔습니다.

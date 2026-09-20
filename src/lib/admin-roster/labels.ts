@@ -119,3 +119,7 @@ export function clearedFields(row: RowChange): string[] {
     })
     .map((field) => PROFILE_FIELD_LABEL[field]);
 }
+
+export function filterRosterByGrade<T extends { profile: { grade: number | null } }>(rows: T[], grade: number | null): T[] {
+  return grade === null ? rows : rows.filter((row) => row.profile.grade === grade);
+}

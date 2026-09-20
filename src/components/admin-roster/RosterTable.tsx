@@ -21,9 +21,9 @@ export type RosterTableProps = {
   onEditPermissions: (row: RosterViewRow) => void;
 };
 
-const HEAD = "p-2 text-left bg-muted whitespace-nowrap sticky top-0 z-[2]";
-const HEAD_FIRST = "p-2 text-left bg-muted whitespace-nowrap sticky top-0 left-0 z-[4]";
-const CELL_FIRST = "p-1 align-middle whitespace-nowrap sticky left-0 z-[3] bg-card";
+const HEAD = "px-2 py-1 text-left bg-muted whitespace-nowrap sticky top-0 z-[2]";
+const HEAD_FIRST = "px-2 py-1 text-left bg-muted whitespace-nowrap sticky top-0 left-0 z-[4]";
+const CELL_FIRST = "px-1 py-0.5 align-middle whitespace-nowrap sticky left-0 z-[3] bg-card";
 
 function positiveInteger(label: string) {
   return (value: string): string | null => {
@@ -71,7 +71,7 @@ export function RosterTable({
   const student = role === "STUDENT";
 
   return (
-    <div className="h-full border rounded-lg overflow-auto">
+    <div className="h-full border rounded-lg overflow-auto [&_td_[role=button]>span]:min-h-7 [&_td_[role=button]>span]:py-1 [&_td_input]:min-h-7 [&_td_select]:min-h-7">
       <table className="w-full text-sm whitespace-nowrap">
         <thead>
           <tr>
@@ -117,7 +117,7 @@ export function RosterTable({
                 </td>
                 {student ? (
                   <>
-                    <td className="p-1 align-middle">
+                    <td className="px-1 py-0.5 align-middle">
                       <EditableTextCell
                         value={row.profile.grade?.toString() ?? ""}
                         inputType="number"
@@ -127,7 +127,7 @@ export function RosterTable({
                         onSave={(next) => onSaveField(row, "grade", next)}
                       />
                     </td>
-                    <td className="p-1 align-middle">
+                    <td className="px-1 py-0.5 align-middle">
                       <EditableTextCell
                         value={row.profile.classNum?.toString() ?? ""}
                         inputType="number"
@@ -137,7 +137,7 @@ export function RosterTable({
                         onSave={(next) => onSaveField(row, "classNum", next)}
                       />
                     </td>
-                    <td className="p-1 align-middle">
+                    <td className="px-1 py-0.5 align-middle">
                       <EditableTextCell
                         value={row.profile.number?.toString() ?? ""}
                         inputType="number"
@@ -150,7 +150,7 @@ export function RosterTable({
                   </>
                 ) : (
                   <>
-                    <td className="p-1 align-middle">
+                    <td className="px-1 py-0.5 align-middle">
                       <EditableTextCell
                         value={row.profile.subject ?? ""}
                         ariaLabel={`${row.profile.name} 교과명`}
@@ -159,7 +159,7 @@ export function RosterTable({
                         onSave={(next) => onSaveField(row, "subject", next)}
                       />
                     </td>
-                    <td className="p-1 align-middle">
+                    <td className="px-1 py-0.5 align-middle">
                       <EditableTextCell
                         value={row.profile.homeroom ?? ""}
                         ariaLabel={`${row.profile.name} 담임`}
@@ -168,7 +168,7 @@ export function RosterTable({
                         onSave={(next) => onSaveField(row, "homeroom", next)}
                       />
                     </td>
-                    <td className="p-1 align-middle">
+                    <td className="px-1 py-0.5 align-middle">
                       <EditableTextCell
                         value={row.profile.position ?? ""}
                         ariaLabel={`${row.profile.name} 직책`}
@@ -179,7 +179,7 @@ export function RosterTable({
                     </td>
                   </>
                 )}
-                <td className="p-1 align-middle">
+                <td className="px-1 py-0.5 align-middle">
                   <EditableSelectCell
                     value={row.profile.gender ?? ""}
                     ariaLabel={`${row.profile.name} 성별`}
@@ -193,11 +193,11 @@ export function RosterTable({
                   />
                 </td>
                 {!student && !recordOnly && (
-                  <td className="p-2 align-middle">
+                  <td className="px-2 py-0.5 align-middle">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="min-h-11 whitespace-nowrap"
+                      className="h-7 py-0.5 whitespace-nowrap"
                       disabled={!isMain || !accountReady}
                       onClick={() => onEditPermissions(row)}
                     >
@@ -209,7 +209,7 @@ export function RosterTable({
                     </Button>
                   </td>
                 )}
-                <td className="p-2 align-middle">
+                <td className="px-2 py-0.5 align-middle">
                   <span
                     title={row.email}
                     className="inline-block whitespace-nowrap align-middle"
@@ -217,15 +217,15 @@ export function RosterTable({
                     {row.email}
                   </span>
                 </td>
-                <td className="p-2 align-middle">
+                <td className="px-2 py-0.5 align-middle">
                   <RowStatus row={row} />
                 </td>
-                {!recordOnly && <td className="p-2 align-middle">
+                {!recordOnly && <td className="px-2 py-0.5 align-middle">
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="min-h-11 whitespace-nowrap"
+                      className="h-7 py-0.5 whitespace-nowrap"
                       disabled={!accountReady}
                       onClick={() => onEditEmail(row)}
                     >
@@ -234,7 +234,7 @@ export function RosterTable({
                     <Button
                       variant="outline"
                       size="sm"
-                      className="min-h-11 whitespace-nowrap"
+                      className="h-7 py-0.5 whitespace-nowrap"
                       disabled={!accountReady || (account?.accessState === "INACTIVE" && !isMain)}
                       onClick={() => onEditAccess(row)}
                     >

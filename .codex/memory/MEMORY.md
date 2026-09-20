@@ -4,6 +4,7 @@
 
 ## 활성 작업 기록
 
+- [2026-09-20 관리자 화면 공간·도구 배치 개선](2026-09-20-admin-compact-ui.md): 책갈피 탭·짧은 도구/셀·교사/학년 필터·Excel 모달, 학년도/체크인 검토를 설정으로 이동. 운영 학년도는 숫자만. unit 586·type·변경 TS lint·Prisma generate·격리 production build 41/41·5개 화면 폭 예시 API 브라우저 검증 통과. 실제 Chrome 운영/로컬 Apple SD Gothic Neo 일치, 글꼴 코드 변경 없음. main 반영/푸시 승인 및 사전 검증 완료, 기록 시점 커밋/푸시 전·배포 결과 별도 확인. 전체 lint·실데이터/실제 Excel·DB 변경 미실행.
 - [2026-09-20 main 통합·운영 DB 전환 완료](2026-09-20-main-merge-and-activation.md): 로컬 6개·원격 8개 브랜치와 검토한 미커밋 안내/영상을 main `67848d0`에 통합·푸시, Railway dinner 배포 SUCCESS. 운영 백필 622건 VERIFIED·READY/version 1 완료, 기존 11개 테이블 hash 및 날짜 없는 희망조사 승인 120/전체 125건 보존·2026 귀속. unit 584/PG 443/guide 4·type·build 41개, 실제 복원 앱 HTTP 23개·운영 HTTP 19개 검사 통과. 임시 Edge Rule 원복·3개 도메인 공개 복구 확인. 전체 lint 기존 오류 5개·경고 6개, 원본 사진 6개·성별 1건 결측은 보존. 추가 서비스 삭제·물리 키오스크 재개·실제 OAuth는 미실행.
 - [2026-09-20 학년도 명부 배포 준비](2026-09-20-academic-deploy-preflight.md): push/deploy 승인, 준비 브랜치 3개 푸시. DB·사진 백업 및 분리 복원, 11개 테이블 원본 비교·사진 8개 해시 일치, 복원본 추가 migration 검증. 당시 날짜 없는 공고·신청 120건 확인 대기와 원본 사진 결측 6건을 기록했다. 이후 사용자 답변·main 통합·운영 재확인은 위 최신 진행 인계를 따른다.
 - [2026-09-20 학년도 명부 구현 재개 완료](2026-09-20-academic-year-roster-handoff.md): Task14a/b/c와 Task15 코드·문서·독립 검토 완료. B 코드7cf4859(unit584/PG420/guide4/격리build), A c39aa23(unit347/격리build, foundation PG110). 이후 푸시·배포를 승인받아 준비를 진행했으며 최신 상태는 위 배포 준비 인계를 따른다. 기존 guide/video 변경 보존.

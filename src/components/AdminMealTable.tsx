@@ -5,7 +5,6 @@ import useSWR, { useSWRConfig } from "swr";
 import { errorTextOf, fetcher } from "@/lib/fetcher";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { academicYearOfDate } from "@/lib/academic-year/calendar";
 import { todayKST } from "@/lib/timezone";
@@ -151,10 +150,10 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
       <table className="text-xs border-collapse w-full whitespace-nowrap">
         <thead>
           <tr>
-            <th className="sticky top-0 left-0 z-[4] bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[100px] text-fit-sm">
+            <th className="sticky top-0 left-0 z-[4] bg-muted px-2 py-1 text-left font-medium text-muted-foreground border-b border-r min-w-[100px] text-fit-sm">
               {isTeacher || needsProfile ? "이름" : "반 번호 이름"}
             </th>
-            {includeCurrent && <th className="sticky top-0 z-[2] bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r">현재 학급·상태</th>}
+            {includeCurrent && <th className="sticky top-0 z-[2] bg-muted px-2 py-1 text-left font-medium text-muted-foreground border-b border-r">현재 학급·상태</th>}
             {mealColumns.map((column) => {
               const weekend = isWeekend(column.day);
               const mealHeaderClass =
@@ -166,7 +165,7 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
               return (
                 <th
                   key={column.key}
-                  className={`sticky top-0 z-[2] px-1 py-2 text-center font-medium border-b min-w-11 ${
+                  className={`sticky top-0 z-[2] px-1 py-1 text-center font-medium border-b min-w-11 ${
                     weekend
                       ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                       : mealHeaderClass
@@ -183,15 +182,15 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
             })}
             {isTeacher && (
               <>
-                <th className="sticky top-0 z-[2] bg-green-50 dark:bg-green-950 px-2 py-2 text-center font-medium text-green-700 dark:text-green-300 border-b border-l min-w-[44px] text-fit-sm">
+                <th className="sticky top-0 z-[2] bg-green-50 dark:bg-green-950 px-2 py-1 text-center font-medium text-green-700 dark:text-green-300 border-b border-l min-w-[44px] text-fit-sm">
                   개인
                 </th>
-                <th className="sticky top-0 z-[2] bg-blue-50 dark:bg-blue-950 px-2 py-2 text-center font-medium text-blue-700 dark:text-blue-300 border-b border-l min-w-[44px] text-fit-sm">
+                <th className="sticky top-0 z-[2] bg-blue-50 dark:bg-blue-950 px-2 py-1 text-center font-medium text-blue-700 dark:text-blue-300 border-b border-l min-w-[44px] text-fit-sm">
                   근무
                 </th>
               </>
             )}
-            <th className="sticky top-0 right-0 z-[4] bg-muted px-2 py-2 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
+            <th className="sticky top-0 right-0 z-[4] bg-muted px-2 py-1 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
               합계
             </th>
           </tr>
@@ -204,7 +203,7 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
 
             return (
               <tr key={user.id} className="hover:bg-muted/50">
-                <td className="sticky left-0 z-[3] bg-background px-2 py-1.5 border-b border-r">
+                <td className="sticky left-0 z-[3] bg-background px-2 py-0.5 border-b border-r">
                   <div className="text-fit-sm">
                     {isTeacher || needsProfile ? (
                       <span className="font-semibold">{user.name}</span>
@@ -218,7 +217,7 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
                   </div>
                   {user.profileWarning && <p className="whitespace-nowrap text-xs text-amber-700">{user.profileWarning}</p>}
                 </td>
-                {includeCurrent && <td className="border-b border-r px-2 py-1.5 text-muted-foreground">{user.currentClass ?? "확인 필요"}</td>}
+                {includeCurrent && <td className="border-b border-r px-2 py-0.5 text-muted-foreground">{user.currentClass ?? "확인 필요"}</td>}
                 {mealColumns.map((column) => {
                   const checkIn = checkedDaysMap.get(column.key);
                   const weekend = isWeekend(column.day);
@@ -227,7 +226,7 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
                   return (
                     <td
                       key={column.key}
-                      className={`h-11 min-w-11 text-center border-b px-0.5 py-1.5 ${
+                      className={`h-8 min-w-11 text-center border-b px-0.5 py-0.5 ${
                         checkIn
                           ? isTeacher
                             ? checkIn.type === "WORK"
@@ -265,16 +264,16 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
                   const personalCount = user.checkIns.length - workCount;
                   return (
                     <>
-                      <td className="text-center border-b border-l px-2 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">
+                      <td className="text-center border-b border-l px-2 py-0.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">
                         {personalCount}
                       </td>
-                      <td className="text-center border-b border-l px-2 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                      <td className="text-center border-b border-l px-2 py-0.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
                         {workCount}
                       </td>
                     </>
                   );
                 })()}
-                <td className="sticky right-0 z-[3] bg-background text-center border-b border-l px-2 py-1.5 font-medium">
+                <td className="sticky right-0 z-[3] bg-background text-center border-b border-l px-2 py-0.5 font-medium">
                   {user.checkIns.length}{isTeacher || needsProfile ? "" : `/${mealColumns.filter((c) => c.mealKind === "DINNER").length}`}
                 </td>
               </tr>
@@ -286,12 +285,12 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
           {isTeacher ? (
             <>
               <tr>
-                <td className="sticky left-0 z-[3] bg-blue-50 dark:bg-blue-950 px-2 py-1.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
+                <td className="sticky left-0 z-[3] bg-blue-50 dark:bg-blue-950 px-2 py-0.5 border-t border-r font-semibold text-blue-700 dark:text-blue-300 text-fit-sm">근무</td>
                 {includeCurrent && <td className="border-t border-r bg-blue-50 dark:bg-blue-950" />}
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
-                    className={`text-center border-t px-0.5 py-1.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 ${d.work > 0 ? "" : "opacity-30"}`}
+                    className={`text-center border-t px-0.5 py-0.5 font-semibold bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 ${d.work > 0 ? "" : "opacity-30"}`}
                     style={colHoverStyle(mealColumns[i]?.day ?? i + 1)}
                     onMouseEnter={() => setHoveredDay(mealColumns[i]?.day ?? i + 1)}
                     onMouseLeave={() => setHoveredDay(null)}
@@ -299,21 +298,21 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
                     {d.work || ""}
                   </td>
                 ))}
-                <td className="text-center border-t border-l px-2 py-1.5 bg-blue-50 dark:bg-blue-950 opacity-30">0</td>
-                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                <td className="text-center border-t border-l px-2 py-0.5 bg-blue-50 dark:bg-blue-950 opacity-30">0</td>
+                <td className="text-center border-t border-l px-2 py-0.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
-                <td className="sticky right-0 z-[3] bg-blue-50 dark:bg-blue-950 text-center border-t border-l px-2 py-1.5 font-bold text-blue-700 dark:text-blue-300">
+                <td className="sticky right-0 z-[3] bg-blue-50 dark:bg-blue-950 text-center border-t border-l px-2 py-0.5 font-bold text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
               </tr>
               <tr>
-                <td className="sticky left-0 z-[3] bg-green-50 dark:bg-green-950 px-2 py-1.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
+                <td className="sticky left-0 z-[3] bg-green-50 dark:bg-green-950 px-2 py-0.5 border-t border-r font-semibold text-green-700 dark:text-green-300 text-fit-sm">개인</td>
                 {includeCurrent && <td className="border-t border-r bg-green-50 dark:bg-green-950" />}
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
-                    className={`text-center border-t px-0.5 py-1.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 ${d.personal > 0 ? "" : "opacity-30"}`}
+                    className={`text-center border-t px-0.5 py-0.5 font-semibold bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 ${d.personal > 0 ? "" : "opacity-30"}`}
                     style={colHoverStyle(mealColumns[i]?.day ?? i + 1)}
                     onMouseEnter={() => setHoveredDay(mealColumns[i]?.day ?? i + 1)}
                     onMouseLeave={() => setHoveredDay(null)}
@@ -321,21 +320,21 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
                     {d.personal || ""}
                   </td>
                 ))}
-                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+                <td className="text-center border-t border-l px-2 py-0.5 font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
                   {dailyTotals.reduce((s, d) => s + d.personal, 0)}
                 </td>
-                <td className="text-center border-t border-l px-2 py-1.5 bg-green-50 dark:bg-green-950 opacity-30">0</td>
-                <td className="sticky right-0 z-[3] bg-green-50 dark:bg-green-950 text-center border-t border-l px-2 py-1.5 font-bold text-green-700 dark:text-green-300">
+                <td className="text-center border-t border-l px-2 py-0.5 bg-green-50 dark:bg-green-950 opacity-30">0</td>
+                <td className="sticky right-0 z-[3] bg-green-50 dark:bg-green-950 text-center border-t border-l px-2 py-0.5 font-bold text-green-700 dark:text-green-300">
                   {dailyTotals.reduce((s, d) => s + d.personal, 0)}
                 </td>
               </tr>
               <tr>
-                <td className="sticky left-0 z-[3] bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+                <td className="sticky left-0 z-[3] bg-muted px-2 py-0.5 border-t border-r font-bold text-fit-sm">합계</td>
                 {includeCurrent && <td className="border-t border-r bg-muted" />}
                 {dailyTotals.map((d, i) => (
                   <td
                     key={mealColumns[i]?.key ?? i}
-                    className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}
+                    className={`text-center border-t px-0.5 py-0.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}
                     style={colHoverStyle(mealColumns[i]?.day ?? i + 1)}
                     onMouseEnter={() => setHoveredDay(mealColumns[i]?.day ?? i + 1)}
                     onMouseLeave={() => setHoveredDay(null)}
@@ -343,27 +342,27 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
                     {d.total || ""}
                   </td>
                 ))}
-                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
+                <td className="text-center border-t border-l px-2 py-0.5 font-bold bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300">
                   {dailyTotals.reduce((s, d) => s + d.personal, 0)}
                 </td>
-                <td className="text-center border-t border-l px-2 py-1.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                <td className="text-center border-t border-l px-2 py-0.5 font-bold bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
                   {dailyTotals.reduce((s, d) => s + d.work, 0)}
                 </td>
-                <td className="sticky right-0 z-[3] bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+                <td className="sticky right-0 z-[3] bg-muted text-center border-t border-l px-2 py-0.5 font-bold">
                   {grandTotal}
                 </td>
               </tr>
             </>
           ) : (
             <tr>
-              <td className="sticky left-0 z-[3] bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+              <td className="sticky left-0 z-[3] bg-muted px-2 py-0.5 border-t border-r font-bold text-fit-sm">합계</td>
               {includeCurrent && <td className="border-t border-r bg-muted" />}
               {dailyTotals.map((d, i) => (
-                <td key={mealColumns[i]?.key ?? i} className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
+                <td key={mealColumns[i]?.key ?? i} className={`text-center border-t px-0.5 py-0.5 font-bold bg-muted ${d.total > 0 ? "" : "opacity-30"}`}>
                   {d.total || ""}
                 </td>
               ))}
-              <td className="sticky right-0 z-[3] bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+              <td className="sticky right-0 z-[3] bg-muted text-center border-t border-l px-2 py-0.5 font-bold">
                 {grandTotal}
               </td>
             </tr>
@@ -374,7 +373,7 @@ function MealGrid({ category, year, month, includeCurrent, readonly = false }: {
   );
 }
 
-export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}) {
+export function AdminMealTable({ readonly = false, reviewOnly = false }: { readonly?: boolean; reviewOnly?: boolean } = {}) {
   const today = todayKST();
   const [year, setYear] = useState(Number(today.slice(0, 4)));
   const [month, setMonth] = useState(Number(today.slice(5, 7)));
@@ -414,44 +413,30 @@ export function AdminMealTable({ readonly = false }: { readonly?: boolean } = {}
     }
   }
 
-  return (
-    <div className="h-full min-h-0 min-w-0">
-      <Tabs className="h-full min-h-0 gap-2" value={tab} onValueChange={(v) => setTab(v as Category)}>
-        <div className="shrink-0 overflow-x-auto">
-          <TabsList className="w-full min-w-max gap-2 group-data-horizontal/tabs:h-auto">
-            {CATEGORIES.map(({ value, label }) => <TabsTrigger key={value} value={value} className="min-h-11 min-w-11 whitespace-nowrap px-3">{label}</TabsTrigger>)}
-          </TabsList>
-        </div>
+  const category = reviewOnly ? "unknown" : tab;
 
-        {CATEGORIES.map(({ value: cat }) => (
-          <TabsContent key={cat} value={cat} className="flex min-h-0 flex-col gap-2 overflow-hidden">
-            <div className="flex shrink-0 flex-wrap items-center justify-center gap-2">
-              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={prevMonth} aria-label="이전 달" disabled={year === 2000 && month === 1}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <h3 className="font-semibold text-fit-base whitespace-nowrap">{year}년 {month}월</h3>
-              <Button variant="ghost" size="icon" className="min-h-11 min-w-11" onClick={nextMonth} aria-label="다음 달" disabled={year === 2100 && month === 12}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="sm" className="min-h-11 whitespace-nowrap" onClick={handleExport} disabled={exporting} title="전체 월별 Excel 다운로드">
-                <Download className="h-4 w-4 mr-1" /> Excel
-              </Button>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-              <p className="whitespace-nowrap text-xs text-muted-foreground">{academicYear}학년도 최종 소속 기준</p>
-              <label className="flex min-h-11 cursor-pointer items-center gap-2 whitespace-nowrap text-sm">
-                <input type="checkbox" className="size-5 shrink-0" checked={includeCurrent} onChange={(event) => setIncludeCurrent(event.target.checked)} />
-                현재 학급도 함께 표시
-              </label>
-            </div>
-            {cat === "unknown" && <p className="shrink-0 break-keep rounded-lg bg-amber-50 p-2 text-sm text-amber-800">
-              해당 학년도 표시 정보가 없는 식사 기록입니다. 현재 학급으로 대신 표시하지 않습니다.
-              사용자 관리에서 해당 학년도 정보를 확인해 주세요. 이 목록에서는 체크인을 변경할 수 없습니다.
-            </p>}
-            <MealGrid category={cat} year={year} month={month} includeCurrent={includeCurrent} readonly={readonly} />
-          </TabsContent>
-        ))}
-      </Tabs>
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-1">
+      <div className="shrink-0 overflow-x-auto">
+        <div className="flex min-w-max items-center gap-2 py-1">
+          {!reviewOnly && <select aria-label="급식확인 대상" value={tab} onChange={(event) => setTab(event.target.value as Category)} className="h-8 rounded-md border bg-background px-2 text-sm">
+            {CATEGORIES.filter(({ value }) => value !== "unknown").map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+          </select>}
+          <div className="flex items-center gap-1" title={`${academicYear}학년도 최종 소속 기준`}>
+            <Button variant="ghost" size="icon" className="size-8" onClick={prevMonth} aria-label="이전 달" disabled={year === 2000 && month === 1}><ChevronLeft className="size-4" /></Button>
+            <h3 className="whitespace-nowrap text-sm font-semibold">{year}년 {String(month).padStart(2, "0")}월</h3>
+            <Button variant="ghost" size="icon" className="size-8" onClick={nextMonth} aria-label="다음 달" disabled={year === 2100 && month === 12}><ChevronRight className="size-4" /></Button>
+          </div>
+          <Button variant="outline" size="sm" className="h-8 py-1 whitespace-nowrap" onClick={handleExport} disabled={exporting} title="전체 월별 Excel 다운로드"><Download className="size-4" /> Excel</Button>
+          <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-sm">
+            <input type="checkbox" className="size-4 shrink-0" checked={includeCurrent} onChange={(event) => setIncludeCurrent(event.target.checked)} /> 현재학급
+          </label>
+        </div>
+      </div>
+      {reviewOnly && <p className="shrink-0 overflow-x-auto whitespace-nowrap rounded-lg bg-amber-50 p-2 text-xs text-amber-800">
+        해당 학년도 소속 정보가 없는 기록입니다. 설정의 학년도 관리에서 확인하세요. 이 목록에서는 체크인을 변경할 수 없습니다.
+      </p>}
+      <MealGrid key={category} category={category} year={year} month={month} includeCurrent={includeCurrent} readonly={readonly || reviewOnly} />
     </div>
   );
 }
