@@ -32,9 +32,19 @@
 - 수정된 src와 동일함을 확인한 격리 복사본에서 `npm run build -- --webpack` 성공(정적 페이지 41/41). 첫 시도는 복사본에 `scripts/academic-year/fingerprint`가 빠져 실패했고 누락 파일 보완 후 성공했다. 앱 코드 문제는 아니었으며 운영 환경 파일 없이 dummy DB URL을 사용했다.
 - Railway advisor 사전 확인: 기존 dinner 배포 main `0ffec4b` SUCCESS, 이번 schema/migration/config 변경 없음, 배포 차단 사항 없음. 이는 새 UI 배포 성공 확인과 구분한다.
 
+## 후속: 당일현황·설정 밀도 개선
+
+- 앞선 관리자 UI 변경은 main `ccfe6fdd7f757e2e797836482b2ecf57a6d2c436`으로 푸시 완료했다. 아래 추가 변경은 아직 커밋·푸시하지 않았다.
+- `src/app/admin/page.tsx`: 당일현황 도구 6개를 한 줄에 배치하고 좁은 화면에서 행 내부 가로 스크롤을 제공한다. 버튼 명칭은 `Excel`, 통계는 nowrap 및 여백 축소를 적용했다.
+- 당일현황 표의 `max-h-[50dvh]` 제한을 제거하고 `flex-1/min-h-0`으로 화면의 남은 높이를 채운다. 고정 헤더·열을 유지하고 셀 여백을 줄였다. 설정 패널·입력·버튼도 compact/nowrap으로 조정했다.
+- 전역 CSS·글꼴·색상은 변경하지 않았다. 기존 `.claude/.project-map-pending.log` 사용자 변경을 보존했다.
+- 실제 추가 검증: TypeScript·ESLint, `npm test` 60파일·586개 통과. 예시 API 격리 브라우저의 320/375/768/1024/1440px 모두 문서 가로 넘침 없음, 도구들의 y좌표 동일, 통계 한 줄 높이 16px, 설정 입력 높이 32px, 표 하단과 viewport 하단 사이 15~21px 확인. 320px 날짜 스크린샷 잘림 없음. UI 검토에서 차단 결함 없음.
+- 들여쓰기 정리 후 TypeScript·ESLint·`git diff --check` 재통과. 전용 3107 검증 서버 정상 종료 완료.
+- 이 후속 변경의 격리 production build (`npm run build -- --webpack`)는 41/41 페이지 생성으로 통과했다. 실기기·운영 사이트 검증은 미실행. 사용자의 커밋·푸시 요청에 따라 origin/main과 HEAD 일치 확인 후 커밋·푸시를 진행한다 (이 기록은 커밋 직전 기준).
+
 ## 미실행·다음 단계
 
 - 전체 lint, 실제 데이터 수정, 실제 Excel 가져오기 및 다운로드 내용 검사는 미실행.
-- 사용자가 main 반영·푸시를 승인했다. fetch 후 main HEAD와 origin/main이 `0ffec4b`로 같음을 확인했으며 사전 검증 완료. 이 기록 시점에는 새 UI 커밋·푸시 실행 전이며 실제 푸시 SHA와 배포 결과는 별도로 확인해야 한다. 기존 `.claude/.project-map-pending.log`는 커밋 대상에서 제외한다. DB 변경은 수행하지 않았다.
+- 앞선 main 반영·푸시는 완료했으며 새 당일현황·설정 변경은 미커밋·미푸시다. 배포 결과는 별도로 확인해야 한다. 기존 `.claude/.project-map-pending.log`는 커밋 대상에서 제외한다. DB 변경은 수행하지 않았다.
 - 브라우저 검증은 예시 API를 사용했으므로 운영 데이터·실기기 검증과 구분한다.
 - 임시 검증 스크립트·이미지는 `/tmp/posanmeal-admin-ui`, 최종 사용자 관리 화면은 `users-1440.png`. 격리 복사본은 `/Volumes/Chois_SD2/dev/.posanmeal-admin-ui-preview`. 운영 환경 파일은 복사하지 않았고 DB URL은 dummy였다. `localhost:3107` 검증 서버는 정상 종료했으며 기존 `localhost:3100` 서버는 변경하지 않았다.

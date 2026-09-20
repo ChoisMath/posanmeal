@@ -1071,24 +1071,25 @@ export default function AdminPage() {
 
           <TabsContent value="dashboard" className="flex-1 min-h-0 mt-0 overflow-hidden">
             <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
-              <CardContent className="px-2 pt-0 flex-1 min-h-0 overflow-hidden">
-                <div className="flex justify-between items-center gap-2 flex-wrap mb-4">
-                  <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+              <CardContent className="px-2 pt-0 flex flex-col gap-2 flex-1 min-h-0 overflow-hidden">
+                <div className="shrink-0 overflow-x-auto" aria-label="당일현황 도구">
+                  <div className="flex min-w-max items-center gap-1 py-0.5">
                     <Button
                       variant="outline"
                       size="icon"
                       onClick={() => shiftDashboardDate(-1)}
                       aria-label="이전 날짜"
                       title="이전 날짜"
-                      className="min-h-11 min-w-11"
+                      className="size-8 shrink-0"
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </Button>
                     <Input
                       type="date"
+                      aria-label="조회 날짜"
                       value={dashboardDate}
                       onChange={(e) => { if (e.target.value) setDashboardDate(e.target.value); }}
-                      className="w-auto min-w-[10rem] min-h-11 rounded-xl whitespace-nowrap"
+                      className="h-8 w-32 shrink-0 rounded-md px-2 py-1 text-xs whitespace-nowrap"
                     />
                     <Button
                       variant="outline"
@@ -1096,7 +1097,7 @@ export default function AdminPage() {
                       onClick={() => shiftDashboardDate(1)}
                       aria-label="다음 날짜"
                       title="다음 날짜"
-                      className="min-h-11 min-w-11"
+                      className="size-8 shrink-0"
                     >
                       <ChevronRight className="h-4 w-4" />
                     </Button>
@@ -1105,60 +1106,60 @@ export default function AdminPage() {
                       size="sm"
                       onClick={() => setDashboardDate(todayKST())}
                       disabled={dashboardDate === todayKST()}
-                      className="min-h-11 whitespace-nowrap"
+                      className="h-8 shrink-0 px-2 py-1 whitespace-nowrap"
                     >
                       오늘
                     </Button>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="icon" onClick={() => fetchDashboard(dashboardDate)} aria-label="새로고침" title="새로고침" className="min-h-11 min-w-11">
+                    <Button variant="outline" size="icon" onClick={() => fetchDashboard(dashboardDate)} aria-label="새로고침" title="새로고침" className="size-8 shrink-0">
                       <RefreshCw className="h-4 w-4" />
                     </Button>
-                    <Button variant="outline" size="sm" onClick={handleExport} className="min-h-11 whitespace-nowrap"><Download className="h-4 w-4 mr-1" /> Excel 다운로드</Button>
+                    <Button variant="outline" size="sm" onClick={handleExport} className="h-8 shrink-0 px-2 py-1 whitespace-nowrap"><Download className="h-4 w-4 mr-1" /> Excel</Button>
                   </div>
                 </div>
                 {dashboard && (
                   <>
-                    <div className="grid grid-cols-5 gap-2 sm:gap-3 mb-5">
-                      {[
-                        { count: grade1Count, breakfast: grade1Breakfast, lunch: grade1Lunch, dinner: grade1Dinner, label: "1학년", color: "from-amber-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-amber-500/10" },
-                        { count: grade2Count, breakfast: grade2Breakfast, lunch: grade2Lunch, dinner: grade2Dinner, label: "2학년", color: "from-orange-500/10 to-orange-500/5 dark:from-orange-500/20 dark:to-orange-500/10" },
-                        { count: grade3Count, breakfast: grade3Breakfast, lunch: grade3Lunch, dinner: grade3Dinner, label: "3학년", color: "from-rose-500/10 to-rose-500/5 dark:from-rose-500/20 dark:to-rose-500/10" },
-                        { count: dashboard.teacherWorkCount, breakfast: 0, lunch: 0, dinner: 0, label: "교사(근무)", color: "from-blue-500/10 to-blue-500/5 dark:from-blue-500/20 dark:to-blue-500/10" },
-                        { count: dashboard.teacherPersonalCount, breakfast: 0, lunch: 0, dinner: 0, label: "교사(개인)", color: "from-emerald-500/10 to-emerald-500/5 dark:from-emerald-500/20 dark:to-emerald-500/10" },
-                      ].map(({ count, breakfast, lunch, dinner, label, color }) => (
-                        <div key={label} className={`bg-gradient-to-b ${color} rounded-xl p-3 text-center`}>
-                          <p className="text-2xl font-bold">{count}</p>
-                          {label.endsWith("학년") && (dashboard.hasBreakfast || dashboard.hasLunch) && (
-                            <p className="text-[10px] text-muted-foreground whitespace-nowrap">
-                              {dashboard.hasBreakfast && <>조 {breakfast} · </>}
-                              {dashboard.hasLunch && <>중 {lunch} · </>}
-                              석 {dinner}
-                            </p>
-                          )}
-                          <p className="text-[11px] text-muted-foreground font-medium">{label}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="border rounded-lg overflow-auto max-h-[50dvh]">
-                      <table className="w-full text-sm whitespace-nowrap">
-                        <thead className="sticky top-0 z-20">
-                          <tr>
-                            <th className="p-2 text-left bg-muted whitespace-nowrap">이름</th>
-                            <th className="p-2 text-left bg-muted whitespace-nowrap">구분</th>
-                            {(dashboard.hasBreakfast || dashboard.hasLunch) && (
-                              <th className="p-2 text-left bg-muted whitespace-nowrap">식사</th>
+                    <div className="shrink-0 overflow-x-auto" aria-label="당일현황 통계">
+                      <div className="grid min-w-full grid-cols-[repeat(5,minmax(max-content,1fr))] gap-1.5">
+                        {[
+                          { count: grade1Count, breakfast: grade1Breakfast, lunch: grade1Lunch, dinner: grade1Dinner, label: "1학년", color: "from-amber-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-amber-500/10" },
+                          { count: grade2Count, breakfast: grade2Breakfast, lunch: grade2Lunch, dinner: grade2Dinner, label: "2학년", color: "from-orange-500/10 to-orange-500/5 dark:from-orange-500/20 dark:to-orange-500/10" },
+                          { count: grade3Count, breakfast: grade3Breakfast, lunch: grade3Lunch, dinner: grade3Dinner, label: "3학년", color: "from-rose-500/10 to-rose-500/5 dark:from-rose-500/20 dark:to-rose-500/10" },
+                          { count: dashboard.teacherWorkCount, breakfast: 0, lunch: 0, dinner: 0, label: "교사(근무)", color: "from-blue-500/10 to-blue-500/5 dark:from-blue-500/20 dark:to-blue-500/10" },
+                          { count: dashboard.teacherPersonalCount, breakfast: 0, lunch: 0, dinner: 0, label: "교사(개인)", color: "from-emerald-500/10 to-emerald-500/5 dark:from-emerald-500/20 dark:to-emerald-500/10" },
+                        ].map(({ count, breakfast, lunch, dinner, label, color }) => (
+                          <div key={label} className={`bg-gradient-to-b ${color} rounded-lg px-2 py-1 text-center`}>
+                            <p className="text-xl leading-6 font-bold whitespace-nowrap">{count}</p>
+                            {label.endsWith("학년") && (dashboard.hasBreakfast || dashboard.hasLunch) && (
+                              <p className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                {dashboard.hasBreakfast && <>조 {breakfast} · </>}
+                                {dashboard.hasLunch && <>중 {lunch} · </>}
+                                석 {dinner}
+                              </p>
                             )}
-                            <th className="p-2 text-left bg-muted whitespace-nowrap">체크인 시각</th>
-                            <th className="p-2 text-left bg-muted whitespace-nowrap">출처</th>
-                            <th className="p-2 text-center w-16 bg-muted whitespace-nowrap">수정</th>
+                            <p className="text-[11px] leading-4 text-muted-foreground font-medium whitespace-nowrap">{label}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex-1 min-h-0 border rounded-lg overflow-auto">
+                      <table className="w-full text-sm whitespace-nowrap">
+                        <thead>
+                          <tr>
+                            <th className="sticky top-0 left-0 z-[4] px-2 py-1 text-left bg-muted whitespace-nowrap">이름</th>
+                            <th className="sticky top-0 z-[2] px-2 py-1 text-left bg-muted whitespace-nowrap">구분</th>
+                            {(dashboard.hasBreakfast || dashboard.hasLunch) && (
+                              <th className="sticky top-0 z-[2] px-2 py-1 text-left bg-muted whitespace-nowrap">식사</th>
+                            )}
+                            <th className="sticky top-0 z-[2] px-2 py-1 text-left bg-muted whitespace-nowrap">체크인 시각</th>
+                            <th className="sticky top-0 z-[2] px-2 py-1 text-left bg-muted whitespace-nowrap">출처</th>
+                            <th className="sticky top-0 z-[2] px-2 py-1 text-center w-12 bg-muted whitespace-nowrap">수정</th>
                           </tr>
                         </thead>
                         <tbody>
                           {sortedRecords.map((r, i) => (
                             <tr key={i} className="border-t">
-                              <td className="p-2 whitespace-nowrap">{r.role === "STUDENT" ? `${r.grade}-${r.classNum} ${r.number}번 ${r.userName}` : `${r.userName} 선생님`}</td>
-                              <td className="p-2 whitespace-nowrap">
+                              <td className="sticky left-0 z-[3] bg-card px-2 py-1 whitespace-nowrap">{r.role === "STUDENT" ? `${r.grade}-${r.classNum} ${r.number}번 ${r.userName}` : `${r.userName} 선생님`}</td>
+                              <td className="px-2 py-1 whitespace-nowrap">
                                 <Badge variant="outline" className={`text-xs ${
                                   r.type === "WORK" ? "border-blue-300 text-blue-600 dark:text-blue-400" :
                                   r.type === "PERSONAL" ? "border-green-300 text-green-600 dark:text-green-400" : ""
@@ -1167,7 +1168,7 @@ export default function AdminPage() {
                                 </Badge>
                               </td>
                               {(dashboard.hasBreakfast || dashboard.hasLunch) && (
-                                <td className="p-2 whitespace-nowrap">
+                                <td className="px-2 py-1 whitespace-nowrap">
                                   <Badge variant="outline" className={`text-xs ${
                                     r.mealKind === "BREAKFAST"
                                       ? "border-amber-300 text-amber-600 dark:text-amber-400"
@@ -1179,8 +1180,8 @@ export default function AdminPage() {
                                   </Badge>
                                 </td>
                               )}
-                              <td className="p-2 whitespace-nowrap">{formatDateTimeKST(new Date(r.checkedAt))}</td>
-                              <td className="p-2 whitespace-nowrap">
+                              <td className="px-2 py-1 whitespace-nowrap">{formatDateTimeKST(new Date(r.checkedAt))}</td>
+                              <td className="px-2 py-1 whitespace-nowrap">
                                 {r.source ? (
                                   <Badge variant="outline" className={`text-xs ${
                                     r.source === "ADMIN_MANUAL" ? "border-amber-300 text-amber-600 dark:text-amber-400" :
@@ -1194,12 +1195,12 @@ export default function AdminPage() {
                                   <span className="text-muted-foreground text-xs">—</span>
                                 )}
                               </td>
-                              <td className="p-2 text-center whitespace-nowrap">
+                              <td className="px-2 py-0.5 text-center whitespace-nowrap">
                                 {r.role === "TEACHER" && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-9 w-9 disabled:opacity-60 disabled:cursor-not-allowed"
+                                    className="size-7 disabled:opacity-60 disabled:cursor-not-allowed"
                                     disabled={adminPerm.isSubadmin}
                                     onClick={() => {
                                       if (adminPerm.isSubadmin) return;
@@ -1224,18 +1225,18 @@ export default function AdminPage() {
 
           <TabsContent value="settings" className="flex-1 min-h-0 mt-0 overflow-hidden">
             <Card className="rounded-t-none rounded-b-xl border shadow-sm py-2 gap-2 h-full flex flex-col">
-              <CardContent className="pt-0 px-2 sm:px-3 space-y-3 flex-1 min-h-0 overflow-y-auto">
+              <CardContent className="pt-0 px-2 sm:px-3 space-y-2 flex-1 min-h-0 overflow-y-auto">
                 <AdminSettingsPanels canWrite={adminPerm.canWrite} isMain={adminPerm.isEnvAdmin} onPendingChange={setReviewPending} />
                 {!adminPerm.isSubadmin && <div>
-                  <h3 className="font-semibold mb-4 flex items-center gap-2">
+                  <h3 className="font-semibold mb-2 flex items-center gap-2 whitespace-nowrap text-sm">
                     <Settings className="h-4 w-4" /> 시스템 설정
                   </h3>
 
                   {/* Operation Mode */}
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-xl">
-                    <div className="min-w-0 break-keep">
-                      <p className="font-medium">운영 모드</p>
-                      <p className="text-sm text-muted-foreground">
+                  <div className="flex items-center justify-between gap-3 overflow-x-auto p-2 border rounded-lg">
+                    <div className="min-w-max">
+                      <p className="font-medium text-sm whitespace-nowrap">운영 모드</p>
+                      <p className="text-xs text-muted-foreground whitespace-nowrap">
                         {sysMode === "online"
                           ? "온라인 — JWT 토큰 QR (3분 갱신)"
                           : "로컬 — 고유 QR코드 (오프라인 체크인)"}
@@ -1244,7 +1245,7 @@ export default function AdminPage() {
                     <Button
                       variant={sysMode === "local" ? "default" : "outline"}
                       size="sm"
-                      className="min-h-11 shrink-0 self-end sm:self-auto"
+                      className="h-8 shrink-0 py-1 whitespace-nowrap"
                       onClick={handleModeToggle}
                       disabled={sysLoading}
                     >
@@ -1253,17 +1254,17 @@ export default function AdminPage() {
                   </div>
 
                   {/* QR Generation */}
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-xl mt-3">
-                    <div className="min-w-0 break-keep">
-                      <p className="font-medium">QR 세대</p>
-                      <p className="text-sm text-muted-foreground">
+                  <div className="flex items-center justify-between gap-3 overflow-x-auto p-2 border rounded-lg mt-2">
+                    <div className="min-w-max">
+                      <p className="font-medium text-sm whitespace-nowrap">QR 세대</p>
+                      <p className="text-xs text-muted-foreground whitespace-nowrap">
                         현재: {sysGeneration}세대 — 새로고침 시 기존 QR 모두 무효화
                       </p>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="min-h-11 shrink-0 self-end sm:self-auto"
+                      className="h-8 shrink-0 py-1 whitespace-nowrap"
                       onClick={handleRefreshQR}
                       disabled={sysLoading}
                     >
@@ -1272,22 +1273,22 @@ export default function AdminPage() {
                   </div>
 
                   {/* Data Sync for Tablets */}
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between p-3 sm:p-4 border rounded-xl mt-3">
-                    <div className="min-w-0 break-keep">
-                      <p className="font-medium">태블릿 데이터 동기화</p>
-                      <p className="text-sm text-muted-foreground">
+                  <div className="flex items-center justify-between gap-3 overflow-x-auto p-2 border rounded-lg mt-2">
+                    <div className="min-w-max">
+                      <p className="font-medium text-sm whitespace-nowrap">태블릿 데이터 동기화</p>
+                      <p className="text-xs text-muted-foreground whitespace-nowrap">
                         사용자·석식기간·설정을 이 기기에 저장합니다
                       </p>
                       {syncStatus && (
-                        <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">{syncStatus}</p>
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 whitespace-nowrap">{syncStatus}</p>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 justify-end self-end sm:self-auto shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={handleOpenLocalData}
-                        className="relative min-h-11"
+                        className="relative h-8 py-1 whitespace-nowrap"
                       >
                         <Database className="h-4 w-4 mr-1" />
                         로컬 데이터
@@ -1300,7 +1301,7 @@ export default function AdminPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="min-h-11"
+                        className="h-8 py-1 whitespace-nowrap"
                         onClick={handleAdminSync}
                         disabled={isSyncing}
                       >
@@ -1311,30 +1312,30 @@ export default function AdminPage() {
                   </div>
 
                   {/* Meal Time Windows */}
-                  <div className="p-3 sm:p-4 border rounded-xl mt-3">
-                    <p className="font-medium">식사 시간 윈도우</p>
-                    <p className="text-sm text-muted-foreground break-keep">
+                  <div className="p-2 border rounded-lg mt-2">
+                    <p className="font-medium text-sm whitespace-nowrap">식사 시간 윈도우</p>
+                    <p className="text-xs text-muted-foreground whitespace-nowrap overflow-x-auto">
                       QR 체크인이 가능한 시간대입니다. 시간 외 스캔은 거부됩니다.
                     </p>
 
                     {windowsLoadFailed && (
-                      <p className="text-sm text-red-600 dark:text-red-400 mt-3 break-keep">
+                      <p className="text-sm text-red-600 dark:text-red-400 mt-2 whitespace-nowrap overflow-x-auto">
                         설정을 불러올 수 없습니다. 새로고침 해주세요.
                       </p>
                     )}
 
                     {windowsForm && (
                       <>
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-2 space-y-1 overflow-x-auto">
                           {(["breakfast", "lunch", "dinner"] as const).map((meal) => (
                             <div
                               key={meal}
-                              className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3"
+                              className="flex min-w-max items-center gap-2"
                             >
-                              <span className="font-medium text-sm whitespace-nowrap w-12">
+                              <span className="font-medium text-sm whitespace-nowrap w-8 shrink-0">
                                 {meal === "breakfast" ? "조식" : meal === "lunch" ? "중식" : "석식"}
                               </span>
-                              <div className="flex items-center gap-2">
+                              <div className="flex shrink-0 items-center gap-2">
                                 <Label htmlFor={`${meal}-start`} className="text-sm whitespace-nowrap">
                                   시작
                                 </Label>
@@ -1346,10 +1347,10 @@ export default function AdminPage() {
                                     handleWindowsChange(meal, "start", e.target.value)
                                   }
                                   disabled={sysLoading}
-                                  className="w-32 h-11"
+                                  className="w-28 h-8 px-2 py-1"
                                 />
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex shrink-0 items-center gap-2">
                                 <Label htmlFor={`${meal}-end`} className="text-sm whitespace-nowrap">
                                   종료
                                 </Label>
@@ -1361,7 +1362,7 @@ export default function AdminPage() {
                                     handleWindowsChange(meal, "end", e.target.value)
                                   }
                                   disabled={sysLoading}
-                                  className="w-32 h-11"
+                                  className="w-28 h-8 px-2 py-1"
                                 />
                               </div>
                             </div>
@@ -1369,16 +1370,16 @@ export default function AdminPage() {
                         </div>
 
                         {windowsError && (
-                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-start gap-1 break-keep">
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-2 flex items-center gap-1 whitespace-nowrap overflow-x-auto">
                             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
                             {windowsError}
                           </p>
                         )}
 
-                        <div className="flex justify-end mt-3">
+                        <div className="flex justify-end mt-2">
                           <Button
                             size="sm"
-                            className="min-h-11"
+                            className="h-8 py-1 whitespace-nowrap"
                             onClick={handleSaveWindows}
                             disabled={
                               sysLoading ||
@@ -1395,17 +1396,17 @@ export default function AdminPage() {
                   </div>
 
                   {/* Face Match Threshold */}
-                  <div className="p-3 sm:p-4 border rounded-xl mt-3">
-                    <p className="font-medium">안면인식 임계값</p>
-                    <p className="text-sm text-muted-foreground break-keep">
+                  <div className="p-2 border rounded-lg mt-2">
+                    <p className="font-medium text-sm whitespace-nowrap">안면인식 임계값</p>
+                    <p className="text-xs text-muted-foreground whitespace-nowrap overflow-x-auto">
                       유사도가 임계값 이상이면 본인으로 판정합니다. 높일수록 타인 통과는 줄고 본인 거부는 늘어납니다.
                       2위와 차이는 1위 후보가 2위보다 앞서야 하는 최소 유사도 차이입니다.
                     </p>
 
                     {faceMatchForm && sysFaceMatch && (
                       <>
-                        <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
-                          <div className="flex items-center gap-2">
+                        <div className="mt-2 flex items-center gap-3 overflow-x-auto">
+                          <div className="flex shrink-0 items-center gap-2">
                             <Label htmlFor="face-threshold" className="text-sm whitespace-nowrap">
                               임계값
                             </Label>
@@ -1419,10 +1420,10 @@ export default function AdminPage() {
                               value={faceMatchForm.threshold}
                               onChange={(e) => handleFaceMatchChange("threshold", e.target.value)}
                               disabled={sysLoading}
-                              className="w-24 h-11"
+                              className="w-20 h-8 px-2 py-1"
                             />
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex shrink-0 items-center gap-2">
                             <Label htmlFor="face-margin" className="text-sm whitespace-nowrap">
                               2위와 차이
                             </Label>
@@ -1436,7 +1437,7 @@ export default function AdminPage() {
                               value={faceMatchForm.margin}
                               onChange={(e) => handleFaceMatchChange("margin", e.target.value)}
                               disabled={sysLoading}
-                              className="w-24 h-11"
+                              className="w-20 h-8 px-2 py-1"
                             />
                           </div>
                           <span className="text-xs text-muted-foreground whitespace-nowrap">
@@ -1445,16 +1446,16 @@ export default function AdminPage() {
                         </div>
 
                         {faceMatchError && (
-                          <p className="text-sm text-red-600 dark:text-red-400 mt-3 flex items-start gap-1 break-keep">
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-2 flex items-center gap-1 whitespace-nowrap overflow-x-auto">
                             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" aria-hidden="true" />
                             {faceMatchError}
                           </p>
                         )}
 
-                        <div className="flex justify-end mt-3">
+                        <div className="flex justify-end mt-2">
                           <Button
                             size="sm"
-                            className="min-h-11"
+                            className="h-8 py-1 whitespace-nowrap"
                             onClick={handleSaveFaceMatch}
                             disabled={
                               sysLoading ||
@@ -1470,7 +1471,7 @@ export default function AdminPage() {
                   </div>
 
                   {sysMode === "local" && (
-                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-3 break-keep">
+                    <p className="text-sm text-amber-600 dark:text-amber-400 mt-2 whitespace-nowrap overflow-x-auto">
                       태블릿에서 동기화를 실행해야 설정이 반영됩니다.
                     </p>
                   )}
