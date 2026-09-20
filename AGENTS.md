@@ -42,6 +42,13 @@
 - 키오스크 온라인/로컬 판정, IndexedDB, Service Worker 캐시와 QR 폴백을 함께 고려한다. 성능 개선 목적으로 임베딩 모델/입력을 임의 변경하지 않는다.
 - 운영 연결 및 배포 정책은 과거 기록 간 충돌이 있으므로 `.codex/rules/railway-stack.md`를 따른다.
 
+## 안내 영상·가이드 페이지 스킬
+
+- 프로젝트 스킬은 `.agents/skills/`에 있다. 안내 영상·목업 기반 도움말 요청 시 `guide-page/SKILL.md`와 `.codex/GUIDE_PAGES.md`를 읽는다. 호출 예: `$guide-page 학생 급식 신청 안내 영상과 가이드 페이지를 만들어줘`.
+- Remotion API는 `remotion-best-practices`, 모션은 `remotion-motion-graphics`, 사용자 목소리 내레이션은 `mlx-voice-clone`을 사용한다. 음성 패키지는 `mlx-audio==0.5.3`이다.
+- 영상·가이드 이미지는 같은 Remotion 장면을 사용한다. UI 목업에는 그레인·비네트·색 보정·Ken Burns를 적용하지 않는다.
+- `guide-page/assets/demo-video/`는 미설치 제작 템플릿이다. 실제 제작 요청 때 루트 `demo-video/`로 복사·설치한다. 스킬 설치만으로 앱에 `/help`나 안내 영상이 구현된 것은 아니다.
+
 ## 작업 마무리와 역할
 
 `.codex/config.toml`에 등록된 역할을 해당 조건에서 사용한다. 지원하지 않는 실행 환경에서는 같은 역할 파일의 체크리스트를 직접 수행하고 그 사실을 알린다.

@@ -212,6 +212,13 @@ describe("public path allowlist", () => {
     expect(isPublicPath("/check")).toBe(true);
     expect(isPublicPath("/admin/login")).toBe(true);
     expect(isPublicPath("/admin")).toBe(false);
+    expect(isPublicPath("/help")).toBe(true);
+    expect(isPublicPath("/help/student")).toBe(true);
+    expect(isPublicPath("/helpful")).toBe(false);
+    expect(isPublicPath("/helper")).toBe(false);
+    expect(isPublicPath("/api/help")).toBe(false);
+    expect(isPublicPath("/student")).toBe(false);
+    expect(isPublicPath("/api/users/me")).toBe(false);
   });
 });
 

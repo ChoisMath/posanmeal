@@ -6,9 +6,13 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-19 (학년도별 명부 Release A — 커밋 `1d9a15e..81a4a81`. 마이그레이션 `20260919000001_add_academic_year_roster`로 User 4컬럼·`MealApplication.academicYear`·새 모델 13개 추가, `src/lib/academic-year/`(행위자 재검증 `requireActor`/`assertActor`, 계정 API, 호환 쓰기 `withCompatUserWrite`, 초기 이전), JWT `sessionVersion`·매 요청 DB 재검증, `/api/admin/users/[id]/{email,access,permissions}`, `/api/users/me` PUT 삭제, 사용자 DELETE 409, 전용 통합 테스트 DB(`tests/integration/`, `scripts/academic-year/`). 설계 `docs/superpowers/specs/2026-09-19-academic-year-roster-design.md`, 계획 `docs/superpowers/plans/2026-09-19-academic-year-roster.md`)
+> 마지막 업데이트: 2026-09-20 (`main` 통합 준비로 기존 미커밋 학생 안내·영상·프로젝트 스킬의 실제 파일 구조를 대조하고 음성 제작 테스트 경로를 보완. 이 구조 확인은 통합 검증·원격 푸시·운영 배포 완료를 의미하지 않음)
 >
-> 이전 업데이트: 2026-09-19 (독립 `demo-video/` 제작 환경과 학생 안내 `StudentGuide` 16장면·46문장. 인트로·얼굴 인식 베타 소개·도움말 아웃트로, 자막·챕터·썸네일·스틸 제작 경로는 §14 참조. 앱 `/help`는 미구현)
+> 이전 업데이트: 2026-09-19 (공개 학생 안내 `/help/student`와 `/help` 리다이렉트, 공용 가이드 컴포넌트 3종, 로그인·학생 화면 도움말 링크 추가. YouTube 영상·4개 목차·9단계 설명과 기존 목업 WebP를 연결. §3·4·7·9·14 참조)
+>
+> 이전 업데이트: 2026-09-19 (학년도별 명부 Release A — 커밋 `1d9a15e..81a4a81`. 마이그레이션 `20260919000001_add_academic_year_roster`로 User 4컬럼·`MealApplication.academicYear`·새 모델 13개 추가, `src/lib/academic-year/`(행위자 재검증 `requireActor`/`assertActor`, 계정 API, 호환 쓰기 `withCompatUserWrite`, 초기 이전), JWT `sessionVersion`·매 요청 DB 재검증, `/api/admin/users/[id]/{email,access,permissions}`, `/api/users/me` PUT 삭제, 사용자 DELETE 409, 전용 통합 테스트 DB(`tests/integration/`, `scripts/academic-year/`). 설계 `docs/superpowers/specs/2026-09-19-academic-year-roster-design.md`, 계획 `docs/superpowers/plans/2026-09-19-academic-year-roster.md`)
+>
+> 이전 업데이트: 2026-09-19 (독립 `demo-video/` 제작 환경과 학생 안내 `StudentGuide` 18장면·59문장. 주소 안내 직후 Android·iPhone 홈 화면 설치 절차 추가. 인트로·얼굴 인식 베타 소개·도움말 아웃트로, 자막·챕터·썸네일·스틸 제작 경로는 §14 참조. 당시 앱 `/help`는 미구현)
 >
 > 이전 업데이트: 2026-09-19 (`/check`·`/facecheck` 공용 `KioskViewport` 추가: 실제 가시 높이와 화면 복귀·회전 대응, 확대 중 재배치 방지. `globals.css`의 `.kiosk-*`로 결과·하단 조작부를 축소하고 로컬 동기화 상세를 별도 행에 배치)
 >
@@ -60,6 +64,9 @@ src/
 ├── app/
 │   ├── layout.tsx               # Root layout (SwUpdater, AuthProvider)
 │   ├── page.tsx                 # 랜딩 (Google 로그인)
+│   ├── help/
+│   │   ├── page.tsx             # /help/student 리다이렉트 (공개)
+│   │   └── student/             # page.tsx 서버 페이지·metadata, content.ts 안내 4목차·9단계
 │   ├── check/page.tsx           # QR 키오스크 (공개) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과, 모드 해석 kiosk-sync.ts·로컬 판정 qr-checkin-local.ts
 │   ├── facecheck/page.tsx       # 얼굴 키오스크 (공개, 온라인·로컬) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과 + 페이지 내 QR 모드
 │   ├── student/page.tsx         # 학생 기본 4탭 (식단, QR, 개인정보, 확인), 공고가 있으면 신청 추가
@@ -72,6 +79,7 @@ src/
 │   │       └── [id]/{edit,stats}/page.tsx
 │   └── api/                     # Route Handlers (§5 참조)
 ├── components/                  # (§7 참조)
+│   ├── guide/                   # GuideVideo·GuideGallery·HelpButton
 │   └── meal/                    # 식사별 공고·신청 UI (meal-ui.ts 테마 포함)
 ├── lib/                         # (§8 참조)
 │   ├── academic-year/           # 학년도 명부 도메인: 행위자 재검증·계정 서비스·호환 쓰기·초기 이전 (§8)
@@ -96,6 +104,7 @@ tests/
 compose.academic-year-test.yml   # postgres:16-alpine, 127.0.0.1:55439, tmpfs
 vitest.integration.config.ts     # tests/integration/**/*.test.ts, fileParallelism 끔
 public/
+├── guide/student/               # 안내 목업 16장·영상 표지 1장 (기존 영상 제작 WebP 재사용)
 ├── sw.js                        # Service Worker (posanmeal-v7) — /check·/facecheck 네트워크 우선(5s)→캐시→오프라인 HTML, /_next/static·/models 캐시 우선 (§12)
 └── models/                      # @vladmandic/human 모델 self-host (blazeface/facemesh/antispoof/liveness + insightface-mobilenet-emore .json+.bin; faceres는 미사용 잔존. 출처·해시: public/models/README.md)
 ```
@@ -104,10 +113,12 @@ public/
 
 | 경로 | 파일 | 접근 | 설명 |
 |------|------|------|------|
-| `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
+| `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼·학생 사용 안내 새 탭 링크 |
+| `/help` | `src/app/help/page.tsx` | 공개 | `/help/student` 리다이렉트 |
+| `/help/student` | `src/app/help/student/page.tsx` | 공개 | metadata를 제공하는 서버 페이지. `content.ts`의 4목차·9단계, YouTube 영상 구간 재생·단계별 시각 링크, 목업 갤러리 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 키오스크 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). `KioskViewport` 화면의 중앙에는 `object-contain` 영상과 실제 QR 윤곽 overlay를, 하단에는 한 줄 결과를 둔다. 결과는 성공/중복/미신청/오류별 두꺼운 초록/파랑/빨강/주황 테두리. 하단 왼쪽은 로컬 동기화 그룹, 오른쪽 [얼굴로 체크인]은 SW 오프라인 응답을 위한 의도적 전체 이동 `<a href="/facecheck">` |
 | `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 키오스크 — `KioskViewport` 내 중앙 `object-contain` 영상과 하단 1행 4색 결과를 쓰며, 얼굴 크기·경계·자세 검사와 동일 사용자·날짜·식사의 연속 3회 유효 매칭(`face-stability.ts`) 후 확인창을 연다. 학생은 학번·이름 확인/취소, 교사는 근무/개인/취소를 선택하며 모두 10초 무응답 시 취소한다. 확인 전 매칭은 읽기 전용이고 명시적 확인 후에만 저장한다. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·확인 후 IDB 저장. 얼굴↔QR 전환·언마운트 시 세션 세대, busy, 확인 대기, 재개/결과 타이머를 정리하고 요청·감지 호출을 AbortSignal로 취소한다. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽 버튼이 [QR로 체크인]↔[얼굴로 체크인]을 전환하며 `giveUpFace`도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`, 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
-| `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단 |
+| `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단. 헤더 물음표는 학생 안내를 새 탭으로 연다 |
 | `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭. 개인정보 탭은 읽기 전용(이름·교과·담임·직책 본인 수정 폼 제거 — 명부 소유) |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
 | `/admin` | `src/app/admin/page.tsx` | 관리자 | 사용자관리·신청관리·체크인·당일현황 |
@@ -245,6 +256,9 @@ public/
 
 | 컴포넌트 | 파일 | 설명 |
 |----------|------|------|
+| `GuideVideo` | `src/components/guide/GuideVideo.tsx` | 표지 클릭 또는 4개 구간 버튼으로 YouTube nocookie iframe 재생, 외부 YouTube 링크 |
+| `GuideGallery` | `src/components/guide/GuideGallery.tsx` | 목업 이미지 가로 스크롤·새 탭 원본 보기, 대체 텍스트·캡션 |
+| `HelpButton` | `src/components/guide/HelpButton.tsx` | `/help/student` 새 탭 링크. 로그인 화면은 아이콘·라벨, 학생 헤더는 물음표 아이콘 |
 | `QRScanner` | `src/components/QRScanner.tsx` | nimiq/qr-scanner 래퍼. 전 화면 `object-contain` 영상과 라이브러리의 실제 스캔 윤곽용 외부 overlay, 카메라 전환·오류 표시. StrictMode 정리와 스트림이 경합하지 않도록 deferred start |
 | `QRGenerator` | `src/components/QRGenerator.tsx` | JWT 토큰 → QR 이미지 (STUDENT/WORK/PERSONAL) |
 | `MonthlyCalendar` | `src/components/MonthlyCalendar.tsx` | 월별 달력, showType prop으로 근무/개인 구분 |
@@ -394,7 +408,7 @@ public/
   - 관리자: ADMIN_USERNAME / ADMIN_PASSWORD_HASH (bcryptjs) 환경변수 비교
 - `src/proxy.ts` (실제 파일명 — `src/middleware.ts` 아님. Next.js가 `proxy.ts`를 미들웨어로 인식): allowlist 방식 — 판정은 `src/lib/public-paths.ts`의 `isPublicPath`(`PUBLIC_EXACT`/`PUBLIC_PREFIXES`), 그 외 경로는 role 검증 후 리다이렉트/403. proxy 판정은 화면 이동용 선제 검사일 뿐이며 실제 허용은 각 Route Handler의 `requireActor`가 정함
   - `publicExact`: `/`, `/check`, `/facecheck`, `/admin/login`
-  - `publicPrefixes`: `/api/auth`, `/api/checkin`, `/api/facecheck`, `/api/uploads`, `/api/system/settings`, `/api/sync`, `/api/meals`, `/_next`, `/uploads` — **경로 경계 매칭**(정확히 일치하거나 `prefix/`로 시작). 예전 bare `startsWith`는 `/api/checkins`를 `/api/checkin` 접두사로 공개 처리했으나 이제 보호됨
+  - `publicPrefixes`: `/help`, `/api/auth`, `/api/checkin`, `/api/facecheck`, `/api/uploads`, `/api/system/settings`, `/api/sync`, `/api/meals`, `/_next`, `/uploads` — **경로 경계 매칭**(정확히 일치하거나 `prefix/`로 시작). `/help`·`/help/student`는 로그인 없이 접근하며 `/helpful`은 공개되지 않음. 예전 bare `startsWith`는 `/api/checkins`를 `/api/checkin` 접두사로 공개 처리했으나 이제 보호됨
   - 보호 경로: `/student`(STUDENT), `/teacher`(TEACHER), `/admin`(canReadAdmin) — role별 리다이렉트. `/api/users/me/face`는 allowlist에 없어 로그인 필수
   - matcher: `_next/`와 확장자 포함 경로 제외 전체
 
@@ -418,7 +432,7 @@ public/
 
 ## §11 브랜치 / 배포 (2026-06-16 단일 서비스)
 
-> 2026-09-20 실행 상태: 준비 브랜치 3개 푸시 완료, 운영 `main`은 `68e81d0` 유지이며 배포 미실행. DB·사진 백업과 분리 복원, 11개 테이블 원본 비교·사진 8개 해시·복원본 추가 migration 검증 완료. 과거 공고의 날짜 없는 신청 120건·귀속 불명 1건은 사용자 처리 기준 확인 대기이며 기존 사진 파일 결측 6개도 기록했다. 상세는 `docs/operations/academic-year-deployment-2026-09-20.md`, 다음 작업 인계는 `.codex/memory/2026-09-20-academic-deploy-preflight.md`를 따른다. 아래는 당시 구성 기록이다.
+> 2026-09-20 배포 준비 당시 기록: 준비 브랜치 3개 푸시 완료, 당시 운영 `main`은 `68e81d0` 유지이며 배포 미실행. DB·사진 백업과 분리 복원, 11개 테이블 원본 비교·사진 8개 해시·복원본 추가 migration 검증 완료. 과거 공고의 날짜 없는 신청 120건·귀속 불명 1건은 사용자 처리 기준 확인 대기이며 기존 사진 파일 결측 6개도 기록했다. 상세는 `docs/operations/academic-year-deployment-2026-09-20.md`, 당시 다음 작업 인계는 `.codex/memory/2026-09-20-academic-deploy-preflight.md`를 참조한다. 현재 병합·푸시·배포 상태는 후속 실행 기록을 확인한다. 아래는 당시 구성 기록이다.
 
 | 브랜치 | 환경 | 도메인 | Railway 서비스 |
 |--------|------|--------|----------------|
@@ -487,9 +501,14 @@ Codex 기준 맵은 `.codex/PROJECT_MAP.md`. `project-map-updater`가 git diff�
 - `.codex/GUIDE_PAGES.md`: PosanMeal 대상 화면, 영상·스틸의 장면 재사용, 로컬 복제 음성, 제작·검증·가이드 연결 기준과 진행 현황.
 - `demo-video/`: 템플릿에서 복사·설치한 독립 Remotion 4.0.518 작업 공간. 자체 Node 의존성과 `.venv-tts/`(`mlx-audio==0.5.3`)를 사용한다. 루트 TypeScript·ESLint와 Tailwind 소스 탐색에서 제외한다.
 - `demo-video/src/Root.tsx`: 학생 본편 `StudentGuide`, 장면별 `Student-*`, 환경 점검용 `SetupCheck` 컴포지션 등록.
-- `demo-video/src/student/`: 학생 안내 16장면·46문장. `scenes/`와 `scenes.ts`는 인트로/주소/로그인/계정 복구/탭/식단/신청/서명/수정·취소/QR/인쇄/얼굴 인식 소개/얼굴 등록/키오스크/기록/마무리 순서다. `Intro.tsx`는 포산밀 학생 사용안내 타이틀·인사, `FaceOption.tsx`는 휴대전화·인쇄 QR 휴대가 어려운 학생에게 얼굴 인식 베타를 선택지로 소개하며 `Print`와 `Enroll` 사이에 배치한다. `Closing.tsx`는 물음표 아이콘으로 학생 안내 페이지를 다시 확인하는 아웃트로를 포함한다. `StudentMockups.tsx`·`data.ts`는 예시 데이터 기반 학생·키오스크 목업, `SceneLayout.tsx`·`style.ts`는 화면 구성과 스타일이다.
-- `demo-video/src/student/narration.ts`·`timing.ts`·`narration-durations.json`: 자막 원고·발음 대체문·문장별 실측 길이와 장면 타이밍. 말끝 보존 후 1초 여유와 0.35초 페이드아웃을 적용한다. `scripts/narrate.mjs --guide student`가 생성·전사 검수를 수행하며 생성 음성은 `public/narration/student/`에 둔다.
+- `demo-video/src/student/`: 학생 안내 18장면·59문장. `scenes/`와 `scenes.ts`는 인트로/주소/Android 설치/iPhone 설치/로그인/계정 복구/탭/식단/신청/서명/수정·취소/QR/인쇄/얼굴 인식 소개/얼굴 등록/키오스크/기록/마무리 순서다. `Intro.tsx`는 포산밀 학생 사용안내 타이틀·인사, `FaceOption.tsx`는 휴대전화·인쇄 QR 휴대가 어려운 학생에게 얼굴 인식 베타를 선택지로 소개하며 `Print`와 `Enroll` 사이에 배치한다. `Closing.tsx`는 물음표 아이콘으로 학생 안내 페이지를 다시 확인하는 아웃트로를 포함한다. `StudentMockups.tsx`·`data.ts`는 예시 데이터 기반 학생·키오스크 목업, `SceneLayout.tsx`·`style.ts`는 화면 구성과 스타일이다.
+- `demo-video/src/student/InstallMockups.tsx`: Chrome·Safari 메뉴, 설치/홈 화면 추가 창과 앱 실행을 보여주는 상태별 목업(`AndroidInstallMock`·`IphoneInstallMock`). `scenes/AndroidInstall.tsx`(6문장)·`scenes/IphoneInstall.tsx`(7문장)가 원고 타이밍에 맞춰 화면과 탭 표시를 전환하며 `Address` 다음, `Login` 전에 배치한다.
+- `demo-video/src/student/narration.ts`·`timing.ts`·`narration-durations.json`: 자막 원고·발음 대체문·문장별 실측 길이와 장면 타이밍. 말끝 보존 후 1초 여유와 0.35초 페이드아웃을 적용하며 생성 음성은 `public/narration/student/`에 둔다.
+- `demo-video/scripts/tts_mlx.py`: Voicebox 참조를 읽는 MLX 음성 워커. Qwen3 단일 비패딩 디코딩에서 유효한 코드 `0`이 패딩으로 제외되지 않도록 출력 길이를 보정한다.
+- `demo-video/scripts/narrate.mjs`·`scripts/lib/narration-core.mjs`: 생성기 소스 해시를 포함한 캐시, 발화 길이·속도와 원음 끝 20ms RMS(-60dB 이하) 검사, 최대 3라운드 재생성, 전사 검수·말끝 후처리. 동일 로직을 스킬 템플릿에도 유지하며, 반복 실패 시 종결 표현 점검 기준은 `mlx-voice-clone` 스킬을 따른다.
+- `demo-video/scripts/lib/narration-core.test.mjs`·`scripts/tests/test_stt_check.py`·`scripts/tests/test_tts_mlx.py`: 음성 제작 회귀 테스트. 스킬 템플릿의 같은 상대 경로에도 둔다.
+- `demo-video/public/posanmeal-app-icon.png`: 설치 안내에 사용하는 실제 앱 아이콘 사본.
 - `demo-video/scripts/student-deliverables.mjs`: 장면 ID별 제목과 실측 타이밍에서 SRT 자막·챕터 메타데이터/목록·`student-timeline.json`을 생성한다.
-- `demo-video/src/stills/student.ts`: 본편과 같은 장면의 스틸 15장 추출 지점·크롭 정의. `scripts/guide-stills.mjs --page student --out out/guide-stills`로 장면을 렌더하거나, `scripts/student-previews.mjs`로 최종 MP4에서 장면별 검토 프레임·첫 장면 썸네일·가이드 스틸을 추출한다. 렌더·검수 산출물은 `demo-video/out/`, 생성 음성·가상환경·산출물은 Git 제외 대상이다.
+- `demo-video/src/stills/student.ts`: Android 메뉴·설치와 iPhone 공유·추가 화면 4장을 포함해 본편 스틸 19장의 추출 지점·크롭을 정의한다. `scripts/guide-stills.mjs --page student --out out/guide-stills`로 장면을 렌더하거나, `scripts/student-previews.mjs`로 최종 MP4에서 장면별 검토 프레임·첫 장면 썸네일·가이드 스틸을 추출한다. 렌더·검수 산출물은 `demo-video/out/`, 이전 산출물은 `demo-video/out/archive/`의 `v1/`·`v2/`·`v3/`에 보존한다. 생성 음성·가상환경·산출물은 Git 제외 대상이다.
 - `docs/video/student-guide-storyboard.md`: 학생 안내 구성과 실제 UI에 근거한 설명 기준. 최종 음성·영상 검증 상태는 제작 기록으로 별도 확인한다.
-- 앱 `/help`와 공용 가이드 UI는 아직 구현하지 않았다. 영상의 물음표 아이콘·학생 안내 페이지 설명은 후속 앱 구현을 전제로 하며, 영상·스틸 제작을 앱 가이드 공개·배포 완료로 간주하지 않는다.
+- 앱 가이드는 `/help/student`에 구현되어 있고 `/help`는 해당 페이지로 이동한다. `src/app/help/student/content.ts`가 안내 문구·4목차·9단계·영상 시각·이미지 정보를 관리하며, 영상은 `https://youtu.be/rOww_TPHGR0`에 연결한다. `public/guide/student/`는 `demo-video/out/guide-stills/`의 WebP 17장(본문 목업 16장·영상 표지 1장)을 재사용한다. 앱 구조와 별개로 운영 공개·배포 여부는 배포 기록에서 확인한다.
