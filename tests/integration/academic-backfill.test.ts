@@ -6,10 +6,13 @@ import {
   ACADEMIC_BACKFILL_KEY,
   INITIAL_ACADEMIC_YEAR,
   backfill2026,
+  captureDateLessSurveySource,
   copyAcademicRecords,
+  parseDateLessSurveyConfirmations,
+  runPreflight,
   verifyBackfill,
 } from "@/lib/academic-year/backfill";
-import { enableAcademicMode, requireAcademicReady } from "@/lib/academic-year/readiness";
+import { enableAcademicMode, inspectAcademicMode, requireAcademicReady } from "@/lib/academic-year/readiness";
 import { captureLegacyFingerprint, compareLegacyFingerprints } from "../../scripts/academic-year/fingerprint";
 import {
   assertApplyAllowed,
@@ -43,6 +46,196 @@ describe("2026 backfill", () => {
     await resetAcademicTestDb(db);
     fixture = await seedLegacyFixture(db);
   });
+
+  it("preserves an explicitly confirmed dateless survey and its evidence through verify and rerun", async () => {
+    await db.mealApplicationMealDate.deleteMany({ where: { applicationId: fixture.applicationId } });
+    await db.mealRegistrationMealDate.deleteMany({ where: { registrationId: fixture.registrationId } });
+    const before = await captureLegacyFingerprint(pgClient);
+    const confirmation = {
+      applicationId: fixture.applicationId,
+      academicYear: 2026 as const,
+      kind: "DATELESS_INTENT_SURVEY" as const,
+      expectedApprovedRegistrationCount: 1,
+      expectedTotalRegistrationCount: 1,
+      expectedSourceRowHash: (await captureDateLessSurveySource(db, fixture.applicationId))!.sourceRowHash,
+    };
+    const result = await backfill2026(db, before, [confirmation]);
+    expect(result.blockingIssues).toEqual([]);
+    expect(compareLegacyFingerprints(before, await captureLegacyFingerprint(pgClient)).equal).toBe(true);
+    expect(await db.mealApplication.findUniqueOrThrow({ where: { id: fixture.applicationId } }))
+      .toMatchObject({ academicYear: 2026 });
+    const copied = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    const resolutions = (copied.sourceManifest as Record<string, unknown>).dateLessSurveyResolutions;
+    expect(resolutions).toEqual([expect.objectContaining({
+      applicationId: fixture.applicationId,
+      academicYear: 2026,
+      kind: "DATELESS_INTENT_SURVEY",
+      registrations: [{ id: fixture.registrationId, status: "APPROVED" }],
+      sourceRowHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })]);
+    expect((await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient))).canEnable).toBe(true);
+    await backfill2026(db, before);
+    const rerun = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    expect((rerun.sourceManifest as Record<string, unknown>).dateLessSurveyResolutions).toEqual(resolutions);
+    await enableAcademicMode(db, MAIN);
+    expect((await db.rosterControl.findUniqueOrThrow({ where: { id: 1 } })).mode).toBe("READY");
+  });
+
+  async function prepareSurveyConfirmation() {
+    await db.mealApplicationMealDate.deleteMany({ where: { applicationId: fixture.applicationId } });
+    await db.mealRegistrationMealDate.deleteMany({ where: { registrationId: fixture.registrationId } });
+    return {
+      applicationId: fixture.applicationId, academicYear: 2026 as const, kind: "DATELESS_INTENT_SURVEY" as const,
+      expectedApprovedRegistrationCount: 1, expectedTotalRegistrationCount: 1,
+      expectedSourceRowHash: (await captureDateLessSurveySource(db, fixture.applicationId))!.sourceRowHash,
+    };
+  }
+
+  it("never exempts another dateless application or an application with only its year manually filled", async () => {
+    const confirmation = await prepareSurveyConfirmation();
+    const other = await db.mealApplication.create({ data: {
+      title: "미확인 합성 공고", academicYear: 2026, applyStartAt: new Date("2026-05-01"),
+      applyEndAt: new Date("2026-05-20"), startYear: 2026, startMonth: 5,
+    } });
+    await db.mealRegistration.create({ data: { applicationId: other.id, userId: fixture.studentId, signature: "합성 서명", status: "APPROVED" } });
+    const before = await captureLegacyFingerprint(pgClient);
+    const result = await backfill2026(db, before, [confirmation]);
+    expect(result.blockingIssues).toEqual(["APPLICATION_YEAR_UNKNOWN:1", "REGISTRATION_WITHOUT_DATES:1"]);
+    expect((await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient))).canEnable).toBe(false);
+    await expect(enableAcademicMode(db, MAIN)).rejects.toMatchObject({ code: "NOT_READY" });
+  });
+
+  it.each(["missing-application", "approved-count", "total-count", "source-hash", "application-date", "cancelled-registration-date"])(
+    "rejects a survey confirmation with %s before any copy is committed", async (mismatch) => {
+      const confirmation = await prepareSurveyConfirmation();
+      if (mismatch === "missing-application") confirmation.applicationId += 999;
+      if (mismatch === "approved-count") confirmation.expectedApprovedRegistrationCount += 1;
+      if (mismatch === "total-count") confirmation.expectedTotalRegistrationCount += 1;
+      if (mismatch === "source-hash") confirmation.expectedSourceRowHash = "0".repeat(64);
+      if (mismatch === "application-date") {
+        await db.mealApplicationMealDate.create({ data: {
+          applicationId: fixture.applicationId, mealKind: "DINNER", grade: 1, date: new Date("2026-05-01"),
+        } });
+      }
+      if (mismatch === "cancelled-registration-date") {
+        await db.mealRegistration.update({ where: { id: fixture.registrationId }, data: { status: "CANCELLED" } });
+        await db.mealRegistrationMealDate.create({ data: {
+          registrationId: fixture.registrationId, mealKind: "DINNER", date: new Date("2026-05-01"),
+        } });
+        confirmation.expectedApprovedRegistrationCount = 0;
+        confirmation.expectedSourceRowHash = (await captureDateLessSurveySource(db, fixture.applicationId))!.sourceRowHash;
+      }
+      const before = await captureLegacyFingerprint(pgClient);
+      await expect(backfill2026(db, before, [confirmation])).rejects.toMatchObject({ code: "NOT_READY" });
+      expect(await db.userAcademicRecord.count()).toBe(0);
+      expect(await db.academicBackfill.count()).toBe(0);
+      expect((await db.mealApplication.findUniqueOrThrow({ where: { id: fixture.applicationId } })).academicYear).toBeNull();
+      expect(compareLegacyFingerprints(before, await captureLegacyFingerprint(pgClient)).equal).toBe(true);
+    },
+  );
+
+  it.each(["signature", "status", "replacement-registration", "timestamp", "application-meal", "registration-meal", "application-date", "registration-date", "academic-year"])(
+    "rechecks stored survey evidence after %s changes before verify or READY", async (change) => {
+      const confirmation = await prepareSurveyConfirmation();
+      const before = await captureLegacyFingerprint(pgClient);
+      await backfill2026(db, before, [confirmation]);
+      await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+      expect((await inspectAcademicMode(db)).canEnable).toBe(true);
+      const original = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+      if (change === "signature") await db.$executeRaw`UPDATE "MealRegistration" SET signature = '변경 서명' WHERE id = ${fixture.registrationId}`;
+      if (change === "status") await db.$executeRaw`UPDATE "MealRegistration" SET status = 'CANCELLED' WHERE id = ${fixture.registrationId}`;
+      if (change === "timestamp") await db.$executeRaw`UPDATE "MealApplication" SET "updatedAt" = "updatedAt" + interval '1 millisecond' WHERE id = ${fixture.applicationId}`;
+      if (change === "replacement-registration") {
+        await db.mealRegistration.delete({ where: { id: fixture.registrationId } });
+        await db.mealRegistration.create({ data: {
+          applicationId: fixture.applicationId, userId: fixture.studentId, signature: "학생테스트-서명", status: "APPROVED",
+        } });
+      }
+      if (change === "application-meal") await db.mealApplicationMeal.updateMany({ data: { price: 9999 } });
+      if (change === "registration-meal") await db.mealRegistrationMeal.updateMany({ data: { exempt: true } });
+      if (change === "application-date") await db.mealApplicationMealDate.create({ data: {
+        applicationId: fixture.applicationId, mealKind: "DINNER", grade: 1, date: new Date("2026-05-01"),
+      } });
+      if (change === "registration-date") await db.mealRegistrationMealDate.create({ data: {
+        registrationId: fixture.registrationId, mealKind: "DINNER", date: new Date("2026-05-01"),
+      } });
+      if (change === "academic-year") await db.$executeRaw`UPDATE "MealApplication" SET "academicYear" = NULL WHERE id = ${fixture.applicationId}`;
+      expect((await inspectAcademicMode(db)).issues).toContain("DATELESS_SURVEY_EVIDENCE_INVALID:1");
+      await expect(enableAcademicMode(db, MAIN)).rejects.toMatchObject({ code: "NOT_READY" });
+      expect((await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient))).issues)
+        .toContain("DATELESS_SURVEY_EVIDENCE_INVALID:1");
+      const rerun = await backfill2026(db, before);
+      expect(rerun.blockingIssues).toContain("DATELESS_SURVEY_EVIDENCE_INVALID:1");
+      const changed = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+      expect((changed.sourceManifest as Record<string, unknown>).dateLessSurveyResolutions)
+        .toEqual((original.sourceManifest as Record<string, unknown>).dateLessSurveyResolutions);
+      expect(changed.state).toBe("COPIED");
+      expect(changed.verifiedAt).toBeNull();
+    },
+  );
+
+  it("does not silently replace stored survey evidence or discard malformed proof", async () => {
+    const confirmation = await prepareSurveyConfirmation();
+    const before = await captureLegacyFingerprint(pgClient);
+    await backfill2026(db, before, [confirmation]);
+    await expect(backfill2026(db, before, [confirmation])).rejects.toMatchObject({ code: "NOT_READY" });
+    const stamp = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    const malformed = { ...stamp.sourceManifest as Record<string, unknown>, dateLessSurveyResolutions: [{ applicationId: fixture.applicationId }] };
+    await db.academicBackfill.update({ where: { key: ACADEMIC_BACKFILL_KEY }, data: { sourceManifest: JSON.parse(JSON.stringify(malformed)) } });
+    expect((await runPreflight(db)).issues).toEqual([
+      "APPLICATION_YEAR_UNKNOWN:1", "DATELESS_SURVEY_EVIDENCE_INVALID:1", "REGISTRATION_WITHOUT_DATES:1",
+    ]);
+    await verifyBackfill(db, before, await captureLegacyFingerprint(pgClient));
+    const result = await db.academicBackfill.findUniqueOrThrow({ where: { key: ACADEMIC_BACKFILL_KEY } });
+    expect((result.sourceManifest as Record<string, unknown>).dateLessSurveyResolutions).toEqual(malformed.dateLessSurveyResolutions);
+  });
+
+  it("produces the same survey proof in UTC and KST sessions", async () => {
+    await prepareSurveyConfirmation();
+    const utc = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL TIME ZONE 'UTC'`;
+      return captureDateLessSurveySource(tx, fixture.applicationId);
+    });
+    const kst = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL TIME ZONE 'Asia/Seoul'`;
+      return captureDateLessSurveySource(tx, fixture.applicationId);
+    });
+    expect(kst).toEqual(utc);
+  });
+
+  it.each(["application-meal", "registration-meal"])(
+    "waits for an in-flight %s write and rejects stale survey confirmation atomically", async (table) => {
+      const confirmation = await prepareSurveyConfirmation();
+      const before = await captureLegacyFingerprint(pgClient);
+      await pgClient.query("BEGIN");
+      if (table === "application-meal") {
+        await pgClient.query('UPDATE "MealApplicationMeal" SET price = price + 1 WHERE "applicationId" = $1', [fixture.applicationId]);
+      } else {
+        await pgClient.query('UPDATE "MealRegistrationMeal" SET exempt = true WHERE "registrationId" = $1', [fixture.registrationId]);
+      }
+      const outcome = backfill2026(db, before, [confirmation])
+        .then((value) => ({ value }), (error: unknown) => ({ error }));
+      try {
+        await expect.poll(async () => {
+          await pgClient.query("SELECT pg_stat_clear_snapshot()");
+          const waiting = await pgClient.query<{ count: number }>(`
+            SELECT count(*)::int AS count FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+              AND query LIKE 'LOCK TABLE "MealApplication"%'
+          `);
+          return waiting.rows[0]?.count ?? 0;
+        }, { timeout: 2000, interval: 10 }).toBeGreaterThan(0);
+      } finally {
+        await pgClient.query("COMMIT");
+        await outcome;
+      }
+      expect(await outcome).toMatchObject({ error: { code: "NOT_READY" } });
+      expect(await db.userAcademicRecord.count()).toBe(0);
+      expect(await db.rosterEntry.count()).toBe(0);
+      expect(await db.academicBackfill.count()).toBe(0);
+      expect((await db.mealApplication.findUniqueOrThrow({ where: { id: fixture.applicationId } })).academicYear).toBeNull();
+    },
+  );
 
   it.each(["verify", "enable"])("%s waits for an in-flight application write and validates its committed state", async (operation) => {
     const before = await captureLegacyFingerprint(pgClient);
@@ -532,6 +725,20 @@ describe("migration CLI guards", () => {
   };
 
   const applyArgs = ["--mode", "apply", "--target-config", "t.json", "--report-dir", "r"];
+
+  it("rejects incomplete, duplicate and non-2026 survey approvals", () => {
+    const valid = { applicationId: 3, academicYear: 2026, kind: "DATELESS_INTENT_SURVEY",
+      expectedApprovedRegistrationCount: 1, expectedTotalRegistrationCount: 1, expectedSourceRowHash: "a".repeat(64) };
+    expect(parseDateLessSurveyConfirmations([valid])).toEqual([valid]);
+    for (const invalid of [[], [valid, valid], [{ ...valid, academicYear: 2027 }],
+      [{ ...valid, kind: "ACTUAL_MEAL" }], [{ ...valid, expectedSourceRowHash: undefined }],
+      [{ ...valid, expectedTotalRegistrationCount: -1 }], [{ ...valid, applicationId: 0 }]]) {
+      expect(() => parseDateLessSurveyConfirmations(invalid)).toThrow();
+    }
+    expect(() => parseCliArgs([...applyArgs, "--survey-confirmations", "s.json"])).toThrow();
+    expect(() => parseCliArgs(["--survey-confirmations", "s.json"], true)).toThrow();
+    expect(parseCliArgs([...applyArgs, "--survey-confirmations", "s.json"], true).surveyConfirmationsPath).toBe("s.json");
+  });
 
   it("refuses an apply against a target without a restore report id", () => {
     const parsed = parseMigrationTargetConfig({ ...config, restoreReportId: null });
