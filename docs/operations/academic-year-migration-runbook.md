@@ -2,7 +2,7 @@
 
 작성일: 2026-09-20. 기준 브랜치: `feat/academic-year-roster`.
 
-이 문서는 구현·합성 데이터 검증과 실제 운영 적용을 구분한다. 작성 뒤 사용자가 push/deploy를 승인했고 백업·분리 복원 준비를 시작했다. 최신 실행 결과와 중단 조건은 [2026-09-20 운영 기록](academic-year-deployment-2026-09-20.md)이 우선한다. 아래 최초 조사·후보·명령 예시는 실제 완료 기록으로 해석하지 않는다. 운영 적용은 [승인된 계획 Task 15](../superpowers/plans/2026-09-19-academic-year-roster.md)의 Step 3~7 순서를 따른다.
+이 문서는 구현·합성 데이터 검증과 실제 운영 적용을 구분한다. 작성 뒤 사용자가 push/deploy를 승인했고 백업·분리 복원 준비를 시작했다. 최초 준비 결과는 [2026-09-20 운영 기록](academic-year-deployment-2026-09-20.md), 이후 사용자 확인·통합·DB 이전의 최신 상태는 [현재 인계](../../.codex/memory/2026-09-20-main-merge-and-activation.md)를 따른다. 아래 최초 조사·후보·명령 예시는 실제 완료 기록으로 해석하지 않는다. 운영 적용은 [승인된 계획 Task 15](../superpowers/plans/2026-09-19-academic-year-roster.md)의 Step 3~7 순서를 따른다.
 
 ## 1. 완료 판단과 실행 책임
 

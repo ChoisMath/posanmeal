@@ -363,8 +363,6 @@ public/
 | `db.ts` | 타입 `Db`(PrismaClient \| TransactionClient), `Tx` |
 | `mutation.ts` | 멱등 변경 wrapper. `withAcademicMutation`(전환·Excel 확정 등 전역 변경: RosterControl `FOR UPDATE` + control version 낙관 충돌), `withUserMutation`(사용자 한 행: RosterControl `FOR SHARE` → User 행 `FOR UPDATE`, `profileVersion`으로 충돌 판정·증가), `withRosterRowMutation`은 User→Record 잠금. 행 잠금 대기 뒤 receipt 재조회. `RosterMutation`에 requestId 영수증 저장, 같은 actor·kind·payloadHash만 재전송으로 인정(아니면 REQUEST_REUSED). 트랜잭션 옵션 `ROSTER_TX`(timeout 60s)/`USER_TX`(15s) |
 | `backfill.ts` | 초기 이전: `INITIAL_ACADEMIC_YEAR`(2026), `runPreflight`(읽기 전용 충돌 보고), `copyAcademicRecords`, `backfill2026`(RosterControl `FOR UPDATE`, 점검·복사·상태 기록 한 트랜잭션, COPIED 이후 재복사 안 함, 기존 행 미덮어쓰기), `inspectBackfill`(READ ONLY), `verifyBackfill`(명시 확정; 실패 시 COPIED/verifiedAt 취소), 최신 미러·미귀속 공고 검사 |
-
-`backfill.ts`의 `captureDateLessSurveySource`·`parseDateLessSurveyConfirmations`는 사람이 확인한 특정 희망조사의 원본 해시·승인/전체 신청 건수·날짜 부재를 검사한다. 확인 증거는 `AcademicBackfill.sourceManifest.dateLessSurveyResolutions`에 보존하며 신규 `academicYear`만 채운다. 재실행·verify·READY도 증거를 다시 검사하고 기존 신청·서명·식사일과 legacy v2 원본 비교를 보존한다.
 | `readiness.ts` | `requireAcademicReady(db)` — 새 학년도 기능 API 전용 가드(PREPARING이면 NOT_READY 503), `enableAcademicMode(db, actor)` — MAIN만 PREPARING→READY, v2 VERIFIED·현재 미러·충돌·미귀속 공고 재검사, `inspectAcademicMode` 읽기 전용 |
 | `roster-sql.ts` | 백필·호환 쓰기 공용 SQL 조각: `CONFLICT_GROUPS_CTE`, `MIRROR_CONFLICT_GROUPS_CTE`, `NEEDS_REVIEW_EXPR`(필수값 누락·좌석 중복·정규화 이메일 중복) |
 | `access.ts` | `assertActor(tx, actor, required)` — 모든 보호 경로의 최종 근거. 토큰이 아닌 현재 DB 행으로 accessState·sessionVersion·role·adminLevel 재판정. `AccessRequirement` = SIGNED_IN/STUDENT/TEACHER/READ_ADMIN/WRITE_ADMIN/MAIN. `auth`를 import하지 않아 트랜잭션 안에서도 사용 (테스트 `__tests__/academic-access.test.ts`) |
@@ -374,6 +372,8 @@ public/
 | `profile-schema.ts` | `normalizeEmail(email)` — `emailKey` 산출 규칙 |
 | `compat-write.ts` | `withCompatUserWrite(db, write)` — `User` 명부 필드를 쓰는 기존 경로의 유일한 통로(첫 문장 RosterControl `FOR SHARE`, 반환 id를 같은 트랜잭션에서 미러). `mirrorUsersToActiveYear(tx, userIds)` — ACTIVE 학년도의 UserAcademicRecord·RosterEntry·`emailKey`를 `User` 현재값에 맞추고 needsReview 재계산, 값이 바뀐 사용자만 `profileVersion` 증가. 집합 기반 고정 문장만 사용 |
 | `test-target.ts` | 통합 테스트 DB 고정 대상 상수(`ACADEMIC_TEST_HOST` 127.0.0.1, `ACADEMIC_TEST_PORT` 55439, DB·compose 프로젝트·Docker 라벨·identity marker) + `parseAcademicTestTarget(raw)` 검증 (테스트 `__tests__/academic-year-test-target.test.ts`) |
+
+`backfill.ts`의 `captureDateLessSurveySource`·`parseDateLessSurveyConfirmations`는 사람이 확인한 특정 희망조사의 원본 해시·승인/전체 신청 건수·날짜 부재를 검사한다. 확인 증거는 `AcademicBackfill.sourceManifest.dateLessSurveyResolutions`에 보존하며 신규 `academicYear`만 채운다. 재실행·verify·READY도 증거를 다시 검사하고 기존 신청·서명·식사일과 legacy v2 원본 비교를 보존한다.
 
 ### 학년도 Release B 서비스
 
