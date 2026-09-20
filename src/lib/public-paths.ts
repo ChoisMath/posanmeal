@@ -1,6 +1,7 @@
 const PUBLIC_EXACT = new Set(["/", "/check", "/facecheck", "/admin/login"]);
 
 const PUBLIC_PREFIXES = [
+  "/help",
   "/api/auth",
   "/api/checkin",
   "/api/facecheck",

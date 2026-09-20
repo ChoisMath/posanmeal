@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/BrandMark";
 import { ResetOnQuery } from "@/components/ResetOnQuery";
+import { HelpButton } from "@/components/guide/HelpButton";
 
 export default async function HomePage() {
   const session = await auth();
@@ -63,6 +64,7 @@ export default async function HomePage() {
           <Link href="/admin/login" className="block text-center text-sm text-muted-foreground hover:text-foreground transition-colors">
             관리자 로그인 →
           </Link>
+          <HelpButton showLabel className="w-full" />
         </div>
         <div className="mt-4 text-center">
           <Link

@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { BrandMark } from "@/components/BrandMark";
+import { HelpButton } from "@/components/guide/HelpButton";
 import { QRGenerator } from "@/components/QRGenerator";
 import { MonthlyCalendar } from "@/components/MonthlyCalendar";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -62,11 +63,14 @@ export default function StudentPage() {
     <div className="min-h-dvh bg-warm-subtle">
       <header className="header-gradient px-4 py-3 flex items-center justify-between">
         <BrandMark variant="header" label="PosanMeal" />
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          <HelpButton className="text-white/80 hover:text-white hover:bg-white/10" />
           <Button
             variant="ghost"
             size="icon"
-            className="text-white/80 hover:text-white hover:bg-white/10"
+            className="min-h-11 min-w-11 text-white/80 hover:text-white hover:bg-white/10"
+            aria-label="로그아웃"
+            title="로그아웃"
             onClick={() => clearClientStateAndSignOut("/")}
           >
             <LogOut className="h-4 w-4" />

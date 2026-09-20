@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@source not "../../demo-video";
 
 /* 라이트모드 전용 운영. dark: 유틸리티가 prefers-color-scheme 미디어쿼리로 되살아나지 않도록
    class 기반 variant 정의는 유지하되, .dark 클래스는 어디에서도 부여하지 않는다. */
