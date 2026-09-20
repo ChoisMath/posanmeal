@@ -1,6 +1,6 @@
 # Project Map — PosanMeal
 
-> 학년도 명부 최신 구조: 2026-09-20, Task 5~14와 Task 15 회귀 보완. 운영 반영·실제 복원은 미실행이며 `docs/operations/academic-year-validation-report.md`와 실행안을 참조한다.
+> 학년도 명부 최신 구조: 2026-09-20, Task 5~14와 Task 15 회귀 보완. 코드 검증은 `docs/operations/academic-year-validation-report.md`, 운영 준비의 최신 실행 상태는 `docs/operations/academic-year-deployment-2026-09-20.md`를 참조한다.
 
 > 2026-09-18 `.claude/PROJECT_MAP.md`에서 이관. §11 배포 설명은 과거 기록이며 9월 테스트 서비스 기록과 충돌한다. 현재 연결은 배포 작업 시 확인하고 `.codex/rules/railway-stack.md`를 따른다.
 
@@ -417,6 +417,8 @@ public/
 > `AUTH_URL`, `DATABASE_PUBLIC_URL`, `RAILWAY_VOLUME_MOUNT_PATH` 는 Railway 서비스 환경에서 추가 설정.
 
 ## §11 브랜치 / 배포 (2026-06-16 단일 서비스)
+
+> 2026-09-20 실행 상태: 준비 브랜치 3개 푸시 완료, 운영 `main`은 `68e81d0` 유지이며 배포 미실행. DB·사진 백업과 분리 복원, 11개 테이블 원본 비교·사진 8개 해시·복원본 추가 migration 검증 완료. 과거 공고의 날짜 없는 신청 120건·귀속 불명 1건은 사용자 처리 기준 확인 대기이며 기존 사진 파일 결측 6개도 기록했다. 상세는 `docs/operations/academic-year-deployment-2026-09-20.md`, 다음 작업 인계는 `.codex/memory/2026-09-20-academic-deploy-preflight.md`를 따른다. 아래는 당시 구성 기록이다.
 
 | 브랜치 | 환경 | 도메인 | Railway 서비스 |
 |--------|------|--------|----------------|
