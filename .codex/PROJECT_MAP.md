@@ -123,8 +123,8 @@ public/
 | `/help/teacher` | `src/app/help/teacher/page.tsx` | 공개 | 교사·담임 안내 4목차·9단계, 공용 GuideVideo로 YouTube 4구간 재생·9단계별 시각 링크와 목업 갤러리 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 키오스크 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). `KioskViewport` 화면의 중앙에는 `object-contain` 영상과 실제 QR 윤곽 overlay를, 하단에는 한 줄 결과를 둔다. 결과는 성공/중복/미신청/오류별 두꺼운 초록/파랑/빨강/주황 테두리. 하단 왼쪽은 로컬 동기화 그룹, 오른쪽 [얼굴로 체크인]은 SW 오프라인 응답을 위한 의도적 전체 이동 `<a href="/facecheck">` |
 | `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 키오스크 — `KioskViewport` 내 중앙 `object-contain` 영상과 하단 1행 4색 결과를 쓰며, 얼굴 크기·경계·자세 검사와 동일 사용자·날짜·식사의 연속 3회 유효 매칭(`face-stability.ts`) 후 확인창을 연다. 학생은 학번·이름 확인/취소, 교사는 근무/개인/취소를 선택하며 모두 10초 무응답 시 취소한다. 확인 전 매칭은 읽기 전용이고 명시적 확인 후에만 저장한다. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·확인 후 IDB 저장. 얼굴↔QR 전환·언마운트 시 세션 세대, busy, 확인 대기, 재개/결과 타이머를 정리하고 요청·감지 호출을 AbortSignal로 취소한다. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽 버튼이 [QR로 체크인]↔[얼굴로 체크인]을 전환하며 `giveUpFace`도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`, 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
-| `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단. 헤더 물음표는 학생 안내를 새 탭으로 연다 |
-| `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭. 개인정보 탭은 읽기 전용(이름·교과·담임·직책 본인 수정 폼 제거 — 명부 소유) |
+| `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단. 책갈피 탭(`bookmark`)·가로 스크롤 탭바와 화면 높이 내 본문 스크롤. 헤더 물음표는 학생 안내를 새 탭으로 연다 |
+| `/teacher` | `src/app/teacher/page.tsx` | 교사 | 담임 6탭(식단/QR/확인/학생관리/신청현황/개인정보) / 비담임 4탭. 책갈피 탭(`bookmark`)·가로 스크롤 탭바, 전체폭 본문과 내부 스크롤로 학생관리 표가 남은 화면 높이를 사용한다. 개인정보 탭은 읽기 전용(이름·교과·담임·직책 본인 수정 폼 제거 — 명부 소유) |
 | `/admin/login` | `src/app/admin/login/page.tsx` | 공개 | 관리자 credentials 로그인 |
 | `/admin` | `src/app/admin/page.tsx` | 관리자 | 본문에 붙는 탭: 사용자 관리·신청관리·급식 확인·당일 현황·설정. 설정에서 학년도 관리·체크인 검토 모달 제공 |
 | `/admin/applications/new` | `src/app/admin/applications/new/page.tsx` | 관리자 | 신청 공고 작성 (ApplicationForm) |
@@ -267,7 +267,8 @@ public/
 | `QRScanner` | `src/components/QRScanner.tsx` | nimiq/qr-scanner 래퍼. 전 화면 `object-contain` 영상과 라이브러리의 실제 스캔 윤곽용 외부 overlay, 카메라 전환·오류 표시. StrictMode 정리와 스트림이 경합하지 않도록 deferred start |
 | `QRGenerator` | `src/components/QRGenerator.tsx` | JWT 토큰 → QR 이미지 (STUDENT/WORK/PERSONAL) |
 | `MonthlyCalendar` | `src/components/MonthlyCalendar.tsx` | 월별 달력, showType prop으로 근무/개인 구분 |
-| `StudentTable` | `src/components/StudentTable.tsx` | 담임 학생관리 표 — 식사별(조/중/석) 컬럼 읽기전용 (미신청=회색 음영/신청=흰색/체크인=식사색 "O") + 첫 열 sticky 체크박스(전체선택 헤더·행별 선택 `Set<number>`)·"N명 선택"/"QR출력" 툴바 → `StudentQRPrintDialog` 연결 |
+| `StudentTable` | `src/components/StudentTable.tsx` | 담임 학생관리 표 — 식사별(조/중/석) 컬럼 읽기전용 (미신청=회색 음영/신청=흰색/체크인=식사색 "O"). 학급·월 이동·"N명 선택"/"QR출력"을 상단 한 행에 표시하고 바로 아래 표를 내부 스크롤한다. 제목행·첫 열 체크박스·합계 sticky, 학년도 조회 안내는 표 하단. 전체선택·행별 선택 `Set<number>` → `StudentQRPrintDialog` 연결 |
+| `TabsList` | `src/components/ui/tabs.tsx` | 공용 탭의 `bookmark` variant — 교사·학생 페이지에서 본문에 이어지는 책갈피 모양과 최소 44px 탭 조작 영역 제공. 기존 `default`·`line` 유지 |
 | `StudentQRCard` | `src/components/StudentQRCard.tsx` | 인쇄용 5×5cm(≈47mm) 단일 학생 QR 카드(로고·식별 한 줄·QR), mm 고정 치수, 화면 미리보기·인쇄 공용 프레젠테이션 |
 | `StudentQRPrintDialog` | `src/components/StudentQRPrintDialog.tsx` | 선택 학생 QR 카드 A4 일괄 인쇄 모달 — 미리보기 + `qrcode` 이미지 생성 + body 직속 포털 + `@page A4` 인쇄 격리(4×4=16개/페이지, 페이지 분할). `PrintStudent` 타입 export |
 | `TeacherApplications` | `src/components/TeacherApplications.tsx` | 담임 신청현황 탭 — 공고 목록↔우리 반 신청자 마스터-디테일, 서명 이미지 썸네일+확대 모달 |

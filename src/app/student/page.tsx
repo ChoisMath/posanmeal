@@ -60,8 +60,8 @@ export default function StudentPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-warm-subtle">
-      <header className="header-gradient px-4 py-3 flex items-center justify-between">
+    <div className="h-dvh flex flex-col overflow-hidden bg-warm-subtle">
+      <header className="header-gradient shrink-0 px-2 py-2 sm:px-4 sm:py-3 flex items-center justify-between">
         <BrandMark variant="header" label="PosanMeal" />
         <div className="flex items-center gap-2">
           <HelpButton className="text-white/80 hover:text-white hover:bg-white/10" />
@@ -78,48 +78,48 @@ export default function StudentPage() {
         </div>
       </header>
 
-      <div className="max-w-md mx-auto p-2 sm:p-4 page-enter">
-        <Tabs defaultValue="meal">
-          <TabsList
-            className={`grid w-full ${hasApplicationTab ? "grid-cols-5" : "grid-cols-4"} rounded-xl h-11`}
-          >
-            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm">
-              식단
-            </TabsTrigger>
-            {hasApplicationTab && (
-              <TabsTrigger
-                value="apply"
-                className="rounded-lg text-xs sm:text-sm relative"
-              >
-                신청
-                {pendingCount > 0 && (
-                  <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
-                    {pendingCount}
-                  </span>
-                )}
+      <div className="w-full max-w-lg mx-auto flex flex-1 min-h-0 flex-col p-1.5 sm:p-2 md:p-3 page-enter">
+        <Tabs defaultValue="meal" className="flex-1 min-h-0 gap-0">
+          <div className="relative z-10 shrink-0 overflow-x-auto pb-px -mb-px">
+            <TabsList variant="bookmark" className="min-w-max">
+              <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm">
+                식단
               </TabsTrigger>
-            )}
-            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm">
-              QR
-            </TabsTrigger>
-            <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm">
-              개인정보
-            </TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm">
-              확인
-            </TabsTrigger>
-          </TabsList>
+              {hasApplicationTab && (
+                <TabsTrigger
+                  value="apply"
+                  className="rounded-lg text-xs sm:text-sm relative"
+                >
+                  신청
+                  {pendingCount > 0 && (
+                    <span className="ml-1 inline-flex shrink-0 items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                      {pendingCount}
+                    </span>
+                  )}
+                </TabsTrigger>
+              )}
+              <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm">
+                QR
+              </TabsTrigger>
+              <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm">
+                개인정보
+              </TabsTrigger>
+              <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm">
+                확인
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-          <TabsContent value="meal">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="meal" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0">
                 <MealMenu />
               </CardContent>
             </Card>
           </TabsContent>
 
           {hasApplicationTab && (
-            <TabsContent value="apply">
+            <TabsContent value="apply" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card p-2">
               {selectedAppId !== null ? (
                 <StudentApplicationView
                   applicationId={selectedAppId}
@@ -206,9 +206,9 @@ export default function StudentPage() {
             </TabsContent>
           )}
 
-          <TabsContent value="qr">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6 text-center">
+          <TabsContent value="qr" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0 text-center">
                 {hasActiveMeal ? (
                   <>
                     <QRGenerator type="STUDENT" />
@@ -229,9 +229,9 @@ export default function StudentPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="profile">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6 space-y-4">
+          <TabsContent value="profile" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0 space-y-4">
                 <PhotoUpload
                   currentPhotoUrl={user.photoUrl}
                   onPhotoChange={() => mutateUser()}
@@ -257,9 +257,9 @@ export default function StudentPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="history">
-            <Card className="card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="history" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0">
                 <MonthlyCalendar />
               </CardContent>
             </Card>

@@ -94,42 +94,40 @@ export function StudentTable() {
   if (isLoading) return <p className="py-8 text-center text-sm text-muted-foreground whitespace-nowrap">담당 학급을 불러오는 중...</p>;
 
   return (
-    <div className="min-w-0">
-      <p className="mb-2 overflow-x-auto text-sm text-muted-foreground whitespace-nowrap">{academicYear}학년도 담당 학급 · 3월부터 다음 해 2월까지 조회</p>
-      <div className="flex min-w-0 items-center justify-between gap-2 mb-4">
-        <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label="이전 달" onClick={prevMonth}
-          disabled={academicYear === undefined || (year === academicYear && month === 3)}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <h3 className="truncate whitespace-nowrap font-semibold text-fit-base" title={`${grade}학년 ${classNum}반 — ${year}년 ${month}월`}>
-          {grade}학년 {classNum}반 — {year}년 {month}월
-        </h3>
-        <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label="다음 달" onClick={nextMonth}
-          disabled={academicYear === undefined || (year === academicYear + 1 && month === 2)}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+    <div className="flex flex-1 min-h-0 min-w-0 flex-col gap-2">
+      <div className="shrink-0 overflow-x-auto">
+        <div className="flex min-w-max items-center gap-2">
+          <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label="이전 달" onClick={prevMonth}
+            disabled={academicYear === undefined || (year === academicYear && month === 3)}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <h3 className="whitespace-nowrap font-semibold text-fit-base" title={`${grade}학년 ${classNum}반 — ${year}년 ${month}월`}>
+            {grade}학년 {classNum}반 — {year}년 {month}월
+          </h3>
+          <Button variant="ghost" size="icon" className="min-h-11 min-w-11 shrink-0" aria-label="다음 달" onClick={nextMonth}
+            disabled={academicYear === undefined || (year === academicYear + 1 && month === 2)}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <span className="ml-auto text-sm text-muted-foreground whitespace-nowrap">
+            {selectedPrintStudents.length}명 선택
+          </span>
+          <Button
+            size="sm"
+            className="min-h-11 rounded-xl whitespace-nowrap"
+            disabled={selectedPrintStudents.length === 0}
+            onClick={() => setPrintOpen(true)}
+          >
+            <Printer className="mr-1 h-4 w-4" />
+            QR출력
+          </Button>
+        </div>
       </div>
 
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="text-sm text-muted-foreground whitespace-nowrap">
-          {selectedPrintStudents.length}명 선택
-        </span>
-        <Button
-          size="sm"
-          className="min-h-11 rounded-xl whitespace-nowrap"
-          disabled={selectedPrintStudents.length === 0}
-          onClick={() => setPrintOpen(true)}
-        >
-          <Printer className="mr-1 h-4 w-4" />
-          QR출력
-        </Button>
-      </div>
-
-      <div className="overflow-auto max-h-[70dvh] border rounded-lg">
+      <div className="flex-1 min-h-0 overflow-auto border rounded-lg">
         <table className="text-xs border-collapse w-full whitespace-nowrap">
           <thead className="sticky top-0 z-20">
             <tr>
-              <th className="sticky left-0 z-30 bg-muted px-2 py-2 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">
+              <th className="sticky left-0 z-30 bg-muted px-2 py-1 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">
                 <label className="flex min-h-11 cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
@@ -155,7 +153,7 @@ export function StudentTable() {
                 return (
                   <th
                     key={column.key}
-                    className={`sticky top-0 px-1 py-2 text-center font-medium border-b min-w-[28px] ${
+                    className={`sticky top-0 px-1 py-1 text-center font-medium border-b min-w-[28px] ${
                       weekend
                         ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                         : mealHeaderClass
@@ -167,7 +165,7 @@ export function StudentTable() {
                   </th>
                 );
               })}
-              <th className="sticky right-0 z-30 bg-muted px-2 py-2 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
+              <th className="sticky right-0 z-30 bg-muted px-2 py-1 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
                 합계
               </th>
             </tr>
@@ -180,7 +178,7 @@ export function StudentTable() {
               const appliedSet = new Set(student.appliedDates.map((a) => `${a.date}:${a.mealKind}`));
               return (
                 <tr key={student.id} className="hover:bg-muted/50">
-                  <td className="sticky left-0 z-10 bg-background px-2 py-1.5 border-b border-r">
+                  <td className="sticky left-0 z-10 bg-background px-2 py-0.5 border-b border-r">
                     <label className="flex min-h-11 cursor-pointer items-center gap-2 text-fit-sm">
                       <input
                         type="checkbox"
@@ -208,7 +206,7 @@ export function StudentTable() {
                     return (
                       <td
                         key={column.key}
-                        className={`text-center border-b px-0.5 py-1.5 ${cellClass}`}
+                        className={`text-center border-b px-0.5 py-0.5 ${cellClass}`}
                         title={
                           checkIn
                             ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })}`
@@ -221,7 +219,7 @@ export function StudentTable() {
                       </td>
                     );
                   })}
-                  <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-1.5 font-medium">
+                  <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-0.5 font-medium">
                     {student.checkIns.length}
                   </td>
                 </tr>
@@ -230,22 +228,24 @@ export function StudentTable() {
           </tbody>
           <tfoot className="sticky bottom-0 z-20">
             <tr>
-              <td className="sticky left-0 z-30 bg-muted px-2 py-1.5 border-t border-r font-bold text-fit-sm">합계</td>
+              <td className="sticky left-0 z-30 bg-muted px-2 py-0.5 border-t border-r font-bold text-fit-sm">합계</td>
               {dailyTotals.map((count, i) => (
                 <td
                   key={mealColumns[i]?.key ?? i}
-                  className={`text-center border-t px-0.5 py-1.5 font-bold bg-muted ${count > 0 ? "" : "opacity-30"}`}
+                  className="text-center border-t px-0.5 py-0.5 font-bold bg-muted"
                 >
                   {count || ""}
                 </td>
               ))}
-              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-1.5 font-bold">
+              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-0.5 font-bold">
                 {grandTotal}
               </td>
             </tr>
           </tfoot>
         </table>
       </div>
+
+      <p className="shrink-0 overflow-x-auto text-xs text-muted-foreground whitespace-nowrap">{academicYear}학년도 담당 학급 · 3월부터 다음 해 2월까지 조회</p>
 
       <StudentQRPrintDialog
         open={printOpen}

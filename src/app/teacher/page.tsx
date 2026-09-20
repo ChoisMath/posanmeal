@@ -30,50 +30,52 @@ export default function TeacherPage() {
   const isHomeroom = !!user.homeroom;
 
   return (
-    <div className="min-h-screen bg-warm-subtle">
-      <header className="header-gradient px-2 py-2 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-2">
+    <div className="h-dvh flex flex-col overflow-hidden bg-warm-subtle">
+      <header className="header-gradient shrink-0 px-2 py-2 sm:px-4 sm:py-3 flex flex-wrap items-center justify-between gap-2">
         <BrandMark variant="header" label="PosanMeal" />
         <div className="ml-auto flex items-center gap-2">
           <HelpButton role="teacher" className="text-white/80 hover:text-white hover:bg-white/10" />
           {canRead && isTeacher && (
             <Link href="/admin">
-              <Button variant="outline" size="sm" className="rounded-xl bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white">
+              <Button variant="outline" size="sm" className="min-h-11 whitespace-nowrap rounded-xl bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white">
                 관리자 페이지
               </Button>
             </Link>
           )}
-          <Button variant="ghost" size="icon" className="text-white/80 hover:text-white hover:bg-white/10" onClick={() => clearClientStateAndSignOut("/")}>
+          <Button variant="ghost" size="icon" className="min-h-11 min-w-11 text-white/80 hover:text-white hover:bg-white/10" aria-label="로그아웃" onClick={() => clearClientStateAndSignOut("/")}>
             <LogOut className="h-4 w-4" />
           </Button>
         </div>
       </header>
-      <div className="max-w-4xl mx-auto p-4 page-enter">
-        <Tabs defaultValue="meal">
-          <TabsList className={`grid w-full max-w-md mx-auto rounded-xl h-11 ${isHomeroom ? "grid-cols-6" : "grid-cols-4"}`}>
-            <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">식단</TabsTrigger>
-            <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">QR</TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">확인</TabsTrigger>
-            {isHomeroom && <TabsTrigger value="students" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">학생관리</TabsTrigger>}
-            {isHomeroom && <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청현황</TabsTrigger>}
-            <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">개인정보</TabsTrigger>
-          </TabsList>
+      <div className="flex flex-1 min-h-0 w-full flex-col p-1.5 sm:p-2 md:p-3 page-enter">
+        <Tabs defaultValue="meal" className="flex-1 min-h-0 gap-0">
+          <div className="relative z-10 shrink-0 overflow-x-auto pb-px -mb-px">
+            <TabsList variant="bookmark" className="min-w-max">
+              <TabsTrigger value="meal" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">식단</TabsTrigger>
+              <TabsTrigger value="qr" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">QR</TabsTrigger>
+              <TabsTrigger value="history" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">확인</TabsTrigger>
+              {isHomeroom && <TabsTrigger value="students" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">학생관리</TabsTrigger>}
+              {isHomeroom && <TabsTrigger value="applications" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">신청현황</TabsTrigger>}
+              <TabsTrigger value="profile" className="rounded-lg text-xs sm:text-sm whitespace-nowrap">개인정보</TabsTrigger>
+            </TabsList>
+          </div>
 
-          <TabsContent value="meal">
-            <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="meal" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="w-full max-w-md mx-auto rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0">
                 <MealMenu />
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="qr">
-            <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6 text-center">
+          <TabsContent value="qr" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="w-full max-w-md mx-auto rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0 text-center">
                 {/* 세그먼트 컨트롤: 개인정산 / 근무 */}
                 <div className="flex rounded-xl bg-muted p-1 mb-4 max-w-xs mx-auto">
                   <button
                     onClick={() => setQrType("PERSONAL")}
-                    className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                    className={`flex-1 min-h-11 whitespace-nowrap py-1.5 text-sm font-medium rounded-lg transition-colors ${
                       qrType === "PERSONAL"
                         ? "bg-background shadow-sm text-foreground"
                         : "text-muted-foreground hover:text-foreground"
@@ -83,7 +85,7 @@ export default function TeacherPage() {
                   </button>
                   <button
                     onClick={() => setQrType("WORK")}
-                    className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                    className={`flex-1 min-h-11 whitespace-nowrap py-1.5 text-sm font-medium rounded-lg transition-colors ${
                       qrType === "WORK"
                         ? "bg-background shadow-sm text-foreground"
                         : "text-muted-foreground hover:text-foreground"
@@ -109,9 +111,9 @@ export default function TeacherPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="history">
-            <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6">
+          <TabsContent value="history" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="w-full max-w-md mx-auto rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0">
                 <h3 className="font-semibold mb-4">석식 이력</h3>
                 <MonthlyCalendar showType />
               </CardContent>
@@ -119,24 +121,24 @@ export default function TeacherPage() {
           </TabsContent>
 
           {isHomeroom && (
-            <TabsContent value="students">
-              <Card className="card-elevated rounded-2xl border-0">
-                <CardContent className="pt-6"><StudentTable /></CardContent>
+            <TabsContent value="students" className="min-h-0 overflow-hidden rounded-b-xl border bg-card">
+              <Card className="h-full min-h-0 rounded-none border-0 shadow-none ring-0 py-2">
+                <CardContent className="flex flex-1 min-h-0 flex-col px-2 pt-0"><StudentTable /></CardContent>
               </Card>
             </TabsContent>
           )}
 
           {isHomeroom && (
-            <TabsContent value="applications">
-              <Card className="card-elevated rounded-2xl border-0">
-                <CardContent className="pt-6"><TeacherApplications /></CardContent>
+            <TabsContent value="applications" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+              <Card className="rounded-none border-0 shadow-none ring-0 py-2">
+                <CardContent className="pt-0"><TeacherApplications /></CardContent>
               </Card>
             </TabsContent>
           )}
 
-          <TabsContent value="profile">
-            <Card className="max-w-md mx-auto card-elevated rounded-2xl border-0">
-              <CardContent className="pt-6 space-y-4">
+          <TabsContent value="profile" className="min-h-0 overflow-y-auto rounded-b-xl border bg-card">
+            <Card className="w-full max-w-md mx-auto rounded-none border-0 shadow-none ring-0 py-3">
+              <CardContent className="pt-0 space-y-4">
                 <PhotoUpload currentPhotoUrl={user.photoUrl} onPhotoChange={() => mutateUser()} />
                 <FaceEnroll />
                 <div className="space-y-1">

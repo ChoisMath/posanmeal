@@ -30,6 +30,7 @@ const tabsListVariants = cva(
       variant: {
         default: "bg-muted",
         line: "gap-1 bg-transparent",
+        bookmark: "w-full justify-start gap-2 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:min-h-11 [&>[data-slot=tabs-trigger]]:min-w-11 [&>[data-slot=tabs-trigger]]:shrink-0 [&>[data-slot=tabs-trigger]]:basis-auto [&>[data-slot=tabs-trigger]]:rounded-b-none [&>[data-slot=tabs-trigger]]:rounded-t-lg [&>[data-slot=tabs-trigger]]:border [&>[data-slot=tabs-trigger]]:border-b-0 [&>[data-slot=tabs-trigger]]:px-3 [&>[data-slot=tabs-trigger]]:data-active:border-border [&>[data-slot=tabs-trigger]]:data-active:bg-card [&>[data-slot=tabs-trigger]]:data-active:shadow-none [&>[data-slot=tabs-trigger]]:data-active:translate-y-px",
       },
     },
     defaultVariants: {
