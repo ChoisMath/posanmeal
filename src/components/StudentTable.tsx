@@ -123,11 +123,11 @@ export function StudentTable() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto border border-stone-400 dark:border-zinc-600 rounded-lg">
-        <table className="text-xs border-collapse w-full whitespace-nowrap [&_th]:border-stone-400 [&_td]:border-stone-400 dark:[&_th]:border-zinc-600 dark:[&_td]:border-zinc-600 [&_th]:border-r [&_td]:border-r">
+      <div className="flex-1 min-h-0 overflow-auto border border-stone-300 dark:border-zinc-700 rounded-lg">
+        <table className="text-xs border-collapse w-full whitespace-nowrap [&_th]:border-stone-300 [&_td]:border-stone-300 dark:[&_th]:border-zinc-700 dark:[&_td]:border-zinc-700 [&_th]:border-r [&_td]:border-r">
           <thead className="sticky top-0 z-20">
             <tr>
-              <th className="sticky left-0 z-30 bg-muted px-2 py-1 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">
+              <th className="sticky left-0 z-30 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 text-left font-medium text-muted-foreground border-b border-r min-w-[110px] text-fit-sm">
                 <label className="flex min-h-11 cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
@@ -146,14 +146,14 @@ export function StudentTable() {
                 const weekend = isWeekend(column.day);
                 const mealHeaderClass =
                   column.mealKind === "BREAKFAST"
-                    ? "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                    ? "bg-amber-50 text-sky-700 dark:bg-amber-950 dark:text-sky-300"
                     : column.mealKind === "LUNCH"
-                      ? "bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300"
-                      : "bg-muted text-muted-foreground";
+                      ? "bg-amber-50 text-orange-700 dark:bg-amber-950 dark:text-orange-300"
+                      : "bg-amber-50 dark:bg-amber-950 text-muted-foreground";
                 return (
                   <th
                     key={column.key}
-                    className={`sticky top-0 px-1 py-1 text-center font-medium border-b min-w-[28px] ${
+                    className={`sticky top-0 px-1 py-0.5 text-center font-medium border-b min-w-[28px] ${
                       weekend
                         ? "bg-red-50 text-red-400 dark:bg-red-950 dark:text-red-400"
                         : mealHeaderClass
@@ -165,7 +165,7 @@ export function StudentTable() {
                   </th>
                 );
               })}
-              <th className="sticky right-0 z-30 bg-muted px-2 py-1 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
+              <th className="sticky right-0 z-30 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 text-center font-medium text-muted-foreground border-b border-l min-w-[44px] text-fit-sm">
                 합계
               </th>
             </tr>
@@ -178,7 +178,7 @@ export function StudentTable() {
               const appliedSet = new Set(student.appliedDates.map((a) => `${a.date}:${a.mealKind}`));
               return (
                 <tr key={student.id} className="hover:bg-muted/50">
-                  <td className="sticky left-0 z-10 bg-background px-2 py-0.5 border-b border-r">
+                  <td className="sticky left-0 z-10 bg-background px-2 py-0 border-b border-r">
                     <label className="flex min-h-11 cursor-pointer items-center gap-2 text-fit-sm">
                       <input
                         type="checkbox"
@@ -202,11 +202,11 @@ export function StudentTable() {
                           : "bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-bold"
                       : applied
                         ? "bg-white dark:bg-zinc-950"
-                        : "bg-stone-300/80 dark:bg-zinc-700/70";
+                        : "bg-stone-300/60 dark:bg-zinc-700/50";
                     return (
                       <td
                         key={column.key}
-                        className={`text-center border-b px-0.5 py-0.5 ${cellClass}`}
+                        className={`text-center border-b px-0.5 py-0 ${cellClass}`}
                         title={
                           checkIn
                             ? `${column.label} ${new Date(checkIn.checkedAt).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })}`
@@ -219,7 +219,7 @@ export function StudentTable() {
                       </td>
                     );
                   })}
-                  <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-0.5 font-medium">
+                  <td className="sticky right-0 z-10 bg-background text-center border-b border-l px-2 py-0 font-medium">
                     {student.checkIns.length}
                   </td>
                 </tr>
@@ -228,16 +228,16 @@ export function StudentTable() {
           </tbody>
           <tfoot className="sticky bottom-0 z-20">
             <tr>
-              <td className="sticky left-0 z-30 bg-muted px-2 py-0.5 border-t border-r font-bold text-fit-sm">합계</td>
+              <td className="sticky left-0 z-30 bg-muted px-2 py-0 border-t border-r font-bold text-fit-sm">합계</td>
               {dailyTotals.map((count, i) => (
                 <td
                   key={mealColumns[i]?.key ?? i}
-                  className="text-center border-t px-0.5 py-0.5 font-bold bg-muted"
+                  className="text-center border-t px-0.5 py-0 font-bold bg-muted"
                 >
                   {count || ""}
                 </td>
               ))}
-              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-0.5 font-bold">
+              <td className="sticky right-0 z-30 bg-muted text-center border-t border-l px-2 py-0 font-bold">
                 {grandTotal}
               </td>
             </tr>

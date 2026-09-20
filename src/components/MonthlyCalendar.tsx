@@ -148,11 +148,18 @@ export function MonthlyCalendar({ showType = false, teacherCalendar = false }: M
         onTouchMove={teacherCalendar ? handleTouchMove : undefined}
         onTouchEnd={teacherCalendar ? handleTouchEnd : undefined}
         onTouchCancel={teacherCalendar ? cancelSwipe : undefined}
+        style={teacherCalendar ? { gridTemplateRows: `auto repeat(${displayedDays.length / (hideWeekends ? 5 : 7)}, minmax(104px, 1fr))` } : undefined}
         className={`grid text-center text-xs ${hideWeekends ? "grid-cols-5" : "grid-cols-7"} ${teacherCalendar ? "touch-pan-y touch-pinch-zoom border-l border-t border-stone-200 dark:border-zinc-700" : "gap-1"}`}
       >
-        {dayNames.map((d, i) => (
-          <div key={d} className={`font-semibold py-1 ${teacherCalendar ? "border-r border-b border-stone-200 dark:border-zinc-700" : ""} ${weekendText(hideWeekends ? i + 1 : i) || "text-muted-foreground"}`}>{d}</div>
-        ))}
+        {dayNames.map((d, i) => {
+          const weekday = hideWeekends ? i + 1 : i;
+          const headerBg = !teacherCalendar ? "" : weekday === 0
+            ? "bg-red-50 dark:bg-red-950"
+            : weekday === 6 ? "bg-blue-50 dark:bg-blue-950" : "bg-stone-100 dark:bg-zinc-800";
+          return (
+            <div key={d} className={`font-semibold py-1 ${teacherCalendar ? "border-r border-b border-stone-200 dark:border-zinc-700" : ""} ${headerBg} ${weekendText(weekday) || "text-muted-foreground"}`}>{d}</div>
+          );
+        })}
         {displayedDays.map((day, i) => {
           if (day === null) return <div key={`empty-${i}`} aria-hidden="true" className={teacherCalendar ? "border-r border-b border-stone-200 dark:border-zinc-700" : undefined} />;
           const slot = getDaySlot(day);
@@ -166,21 +173,21 @@ export function MonthlyCalendar({ showType = false, teacherCalendar = false }: M
               ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
               : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200";
           return (
-            <div key={day} data-calendar-day={day} className={`py-2 text-sm ${teacherCalendar ? "min-w-0 border-r border-b border-stone-200 dark:border-zinc-700" : "rounded-md"} ${cellBg}`}>
-              <div className={weekendText(new Date(year, month - 1, day).getDay())}>{day}</div>
+            <div key={day} data-calendar-day={day} className={`py-2 text-sm ${teacherCalendar ? "min-w-0 px-1.5 border-r border-b border-stone-200 dark:border-zinc-700" : "rounded-md"} ${cellBg}`}>
+              <div className={`${teacherCalendar ? "text-left text-lg font-medium leading-6" : ""} ${weekendText(new Date(year, month - 1, day).getDay())}`}>{day}</div>
               {breakfast && (
                 <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                  {showType && <span className={teacherCalendar && showWeekends ? "block" : undefined}>조식 </span>}<span className="whitespace-nowrap">{formatTime(breakfast.checkedAt)}</span>
+                  {showType && <span className={teacherCalendar ? "block" : undefined}>조식 </span>}<span className="whitespace-nowrap">{formatTime(breakfast.checkedAt)}</span>
                 </div>
               )}
               {lunch && (
                 <div className="text-[10px] font-medium text-orange-600 dark:text-orange-400">
-                  {showType && <span className={teacherCalendar && showWeekends ? "block" : undefined}>중식 </span>}<span className="whitespace-nowrap">{formatTime(lunch.checkedAt)}</span>
+                  {showType && <span className={teacherCalendar ? "block" : undefined}>중식 </span>}<span className="whitespace-nowrap">{formatTime(lunch.checkedAt)}</span>
                 </div>
               )}
               {dinner && (
                 <div className={`text-[10px] font-medium ${dinner.type === "WORK" ? "text-blue-600 dark:text-blue-400" : "text-emerald-700 dark:text-emerald-300"}`}>
-                  {showType && <span className={teacherCalendar && showWeekends ? "block" : undefined}>{dinner.type === "WORK" ? "근무 " : "석식 "}</span>}<span className="whitespace-nowrap">{formatTime(dinner.checkedAt)}</span>
+                  {showType && <span className={teacherCalendar ? "block" : undefined}>{dinner.type === "WORK" ? "근무 " : "석식 "}</span>}<span className="whitespace-nowrap">{formatTime(dinner.checkedAt)}</span>
                 </div>
               )}
             </div>
