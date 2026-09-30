@@ -20,6 +20,19 @@ describe("sessionRecoveryAction", () => {
     }
   });
 
+  it("treats a 403 ACCOUNT_INACTIVE as signed out, since accessState is checked before sessionVersion", () => {
+    const inactive = { error: { code: "ACCOUNT_INACTIVE", message: "이용이 중지된 계정입니다." } };
+    expect(sessionRecoveryAction(403, inactive, "/student")).toBe("SIGN_OUT_HOME");
+    expect(sessionRecoveryAction(403, inactive, "/teacher")).toBe("SIGN_OUT_HOME");
+    expect(sessionRecoveryAction(403, inactive, "/admin")).toBe("SIGN_OUT_ADMIN");
+    expect(sessionRecoveryAction(403, inactive, "/check")).toBe("NONE");
+  });
+
+  it("keeps other 403 codes on the page", () => {
+    expect(sessionRecoveryAction(403, { error: { code: "STALE_SESSION" } }, "/student")).toBe("NONE");
+    expect(sessionRecoveryAction(403, { error: { code: "UNAUTHENTICATED" } }, "/student")).toBe("NONE");
+  });
+
   it("leaves the public kiosk pages alone", () => {
     expect(sessionRecoveryAction(401, staleBody, "/check")).toBe("NONE");
     expect(sessionRecoveryAction(401, staleBody, "/facecheck")).toBe("NONE");

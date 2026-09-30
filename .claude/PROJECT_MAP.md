@@ -157,6 +157,18 @@ public/
 | `/api/admin/checkins/toggle` | POST | 관리자 | 체크인 수동 토글 (body.mealKind 필수, 학생: on/off, 교사: cycle WORK→PERSONAL→삭제) |
 | `/api/admin/dashboard` | GET | 관리자 | 당일 현황 + `hasBreakfast`/`hasLunch`/`breakfastStudentCount`/`lunchStudentCount`/`dinnerStudentCount` |
 | `/api/admin/export` | GET | 관리자 | 월별/일별 Excel 다운로드 (mealKind 표시: 월별 셀 "O+조"/"근+조", 일별 "식사" 컬럼) |
+| `/api/admin/academic-years` | GET/POST | READ_ADMIN / WRITE_ADMIN (+`requireAcademicReady`) | 학년도 목록 / 다음 학년도 초안 생성(`createDraftYear`) |
+| `/api/admin/academic-years/[year]/roster` | GET/DELETE | READ_ADMIN / MAIN | 학년도 명부 조회 / 보관(ARCHIVED) 명부 삭제(`deleteArchivedRoster`) |
+| `/api/admin/academic-years/[year]/template` | GET | READ_ADMIN | 명부 Excel 내보내기/양식(`exportRoster`) |
+| `/api/admin/academic-years/[year]/imports` | POST | WRITE_ADMIN | Excel 가져오기 미리보기(`previewRosterImport`, 만료 사본 정리) |
+| `/api/admin/academic-years/[year]/imports/[id]` | PATCH/DELETE | WRITE_ADMIN | 가져오기 충돌 해결(`resolveImportConflicts`) / 취소 |
+| `/api/admin/academic-years/[year]/imports/[id]/commit` | POST | WRITE_ADMIN | 가져오기 확정(`commitRosterImport`) |
+| `/api/admin/academic-years/[year]/records/[userId]` | PUT | WRITE_ADMIN | 명부 프로필 수정(`upsertRosterProfile`) / 보관 학년도 기록 정정(`correctAcademicRecord`) |
+| `/api/admin/academic-years/[year]/decisions` | POST/PUT | WRITE_ADMIN | 학년 전환 결정 저장(`saveRolloverDecision`) |
+| `/api/admin/academic-years/[year]/review` | POST | WRITE_ADMIN | 전환 검토 완료(`reviewRollover`) |
+| `/api/admin/academic-years/[year]/activate` | POST | MAIN | 학년도 활성화(`activateAcademicYear`) |
+| `/api/admin/checkin-reviews` | GET | READ_ADMIN | 로컬 체크인 검토 대기열 |
+| `/api/admin/checkin-reviews/[id]` | POST/PUT | WRITE_ADMIN | 검토 건 처리(`resolveCheckInReview`) |
 | `/api/admin/applications` | GET/POST | 관리자 | 신청 공고 목록 조회 / 신규 생성 (adminApplicationSchema, 식사별 meals+mealDates — `lib/meal-plan-server.ts:saveApplication`) |
 | `/api/admin/applications/[id]` | GET/PUT/DELETE | 관리자 | 신청 공고 상세/수정/삭제 (수정 시 resyncRegistrations로 기존 신청 확정일 재계산) |
 | `/api/admin/applications/[id]/close` | POST | 관리자 | 신청 공고 강제 마감 |
@@ -174,7 +186,7 @@ public/
 | `/api/sync/download` | GET | 관리자 | 오프라인 모드용 초기 데이터 다운로드 (사용자 목록, 신청 자격자). `?faces=1`이면 `faceProfiles[{userId,embeddings}]`(현재 `FACE_MODEL_VERSION` 프로필만)·`faceMatch{threshold,margin}` 추가(로컬 모드 안면인식용, 없으면 기존 페이로드 불변; 테스트 `__tests__/sync-download.test.ts`) |
 | `/api/sync/upload` | POST | 관리자 | 오프라인에서 쌓인 체크인 서버 업로드 |
 
-> **가드 현황(학년도 명부 Release A)**: `requireActor`(최신 DB 재검증, §9)로 바뀐 라우트는 `/api/admin/users`(+`[id]/email·access·permissions`), `/api/admin/import`, `/api/system/settings` PUT, `/api/users/me`, `/api/users/me/photo`, `/api/users/me/face`, `/api/checkins`, `/api/qr/token`. 이 라우트들의 오류는 `routeResponse`/`errorResponse`가 `{error:{code,message}}`로 변환(401 UNAUTHENTICATED·STALE_SESSION / 403 FORBIDDEN·ACCOUNT_INACTIVE / 409 VERSION_CONFLICT·REQUEST_REUSED·IDENTITY_CONFLICT / 422 / 503 NOT_READY). 그 외 `/api/admin/applications/**`, `/api/admin/checkins/**`, `/api/applications/**`, `/api/teacher/**`, `/api/sync/**`는 아직 `auth()` 직접 호출(토큰 기반) 그대로다.
+> **가드 현황(2026-10-01 확인)**: `src/app/api/**` 의 모든 Route Handler(43개 파일)가 `requireActor`(최신 DB 재검증, §9)를 쓰며 `auth()` 직접 호출은 남아 있지 않다. 오류는 `routeResponse`/`errorResponse`가 `{error:{code,message}}`로 변환(401 UNAUTHENTICATED·STALE_SESSION / 403 FORBIDDEN·ACCOUNT_INACTIVE / 409 VERSION_CONFLICT·REQUEST_REUSED·IDENTITY_CONFLICT / 422 / 503 NOT_READY). `{error, reason}` 옛 형식은 `/api/admin/users`·`[id]/access`, `/api/admin/checkin-reviews/**`, `/api/sync/upload`의 400/409 응답에만 남아 있고 세션 오류에는 쓰이지 않는다. 클라이언트 복구(`session-recovery.ts`)는 401 세션 코드와 403 `ACCOUNT_INACTIVE`를 로그아웃으로 처리한다(배경: `docs/handouts/2026-10-01-posanmeal-stale-session-check.md`).
 
 ## §6 데이터 모델 (Prisma)
 
@@ -256,6 +268,19 @@ public/
 | `StudentApplicationView` | `src/components/meal/StudentApplicationView.tsx` | 학생 공고 상세·식사별 신청 UI — 폼 로직이 ApplicationApplyForm으로 추출되어 래퍼화 |
 | `ApplicationStats` | `src/components/meal/ApplicationStats.tsx` | 공고 통계·신청 명단 (stats 페이지) — AddDialog 제거, AdminApplyDialog 통합, 행 클릭/수정 버튼/관리자 배지 |
 
+### 학년도 명부 UI (`src/components/admin-roster/`, `src/hooks/useAcademicRoster.ts`, `src/lib/admin-roster/`)
+
+| 파일 | 설명 |
+|------|------|
+| `RosterManager` / `RosterTable` / `RosterToolbar` | 관리자 사용자관리 탭의 명부 화면(`src/app/admin/page.tsx`에서 사용) |
+| `RosterAccountDialogs` | `EmailChangeDialog`/`AccessChangeDialog`/`PermissionsDialog` |
+| `RosterImportDialog` / `ImportPreviewPanel` | Excel 가져오기 모달·미리보기 |
+| `CreateDraftDialog` / `RolloverDialog` / `ArchivedRosterDialog` | 초안 생성 / 학년 전환 / 보관 명부 |
+| `CheckInReviewPanel` / `AdminSettingsPanels` | 로컬 체크인 검토 / 관리자 설정 탭 패널 |
+| `src/components/ForceResetDialog.tsx` | 강제 초기화 확인 모달 (`clearClientState.ts` 사용) |
+| `useAcademicRoster.ts` | `useAcademicYears`/`useRoster`/`useAccountRows`, `isNotReady` |
+| `lib/admin-roster/*` | UI 상태·컨트롤러: `import-state`(reducer)·`import-controller`, `rollover-controller`·`rollover-draft-controller`, `checkin-review(-controller)`, `archive-actions`, `mutate`(`sendMutation`), `request-id`, `labels`, `omissions`, `profile-edit` |
+
 > `DateMultiPicker`, `BreakfastMatrixTable` 은 삭제됨 (meal/ 컴포넌트로 대체).
 
 ## §8 주요 lib 파일
@@ -272,7 +297,8 @@ public/
 | `src/lib/local-db.ts` | IndexedDB 스키마 v5 (오프라인 모드용: settings, users, eligibleEntries, checkins, faceProfiles). v5에서 `faceProfiles`(keyPath userId, `{userId, embeddings:number[][]}`) 추가 — `replaceAllFaceProfiles/getAllFaceProfiles/clearFaceProfiles`, `clearAllData`에 포함 |
 | `src/lib/clearClientState.ts` | SW 해제 + Cache API + IndexedDB 전체 삭제 후 signOut |
 | `src/lib/fetcher.ts` | SWR 전용 fetch 래퍼 — `fetchWithSessionRecovery` 경유, 실패 시 `status`/`info`를 단 Error throw (테스트 `__tests__/fetcher.test.ts`) |
-| `src/lib/session-recovery.ts` | 세션 만료 복구: `sessionRecoveryAction(status, body, pathname)` → `NONE`/`SIGN_OUT_HOME`/`SIGN_OUT_ADMIN`(보호 API의 401 코드 기준, 공개 키오스크 경로는 제외), `recoverSession`(첫 판정만 화면 이동), `fetchWithSessionRecovery(input, init?)` — 로그인 화면의 fetch 공용 (테스트 `__tests__/session-recovery.test.ts`) |
+| `src/lib/session-recovery.ts` | 세션 만료 복구: `sessionRecoveryAction(status, body, pathname)` → `NONE`/`SIGN_OUT_HOME`/`SIGN_OUT_ADMIN`(보호 API의 401 코드 + 403 `ACCOUNT_INACTIVE` 기준, 공개 키오스크 경로는 제외), `recoverSession`(첫 판정만 화면 이동), `fetchWithSessionRecovery(input, init?)` — 로그인 화면의 fetch 공용 (테스트 `__tests__/session-recovery.test.ts`) |
+| `src/lib/login-notice.ts` | `loginNoticeFor(errorParam)` — Auth.js가 `/?error=`로 돌려보낸 값을 홈 로그인 카드 안내로 변환. `AccessDenied`=미등록 Google 계정, 그 외=일반 실패, 없음=null (테스트 `__tests__/login-notice.test.ts`) |
 | `src/lib/public-paths.ts` | `isPublicPath(pathname)` — proxy 공개 경로 판정. 접두사는 경로 경계(`=== prefix` 또는 `prefix + "/"`)에서만 인정 (§9) |
 | `src/lib/utils.ts` | 공통 유틸 (clsx/tailwind-merge 등) |
 | `src/lib/meal-kind.ts` | 서버 헬퍼: 3윈도우(조/중/석) `resolveMealKind` + `isStudentEligibleToday`(MealRegistrationMealDate 단일 조회로 자격 판정) |
@@ -327,6 +353,12 @@ public/
 | `profile-schema.ts` | `normalizeEmail(email)` — `emailKey` 산출 규칙 |
 | `compat-write.ts` | `withCompatUserWrite(db, write)` — `User` 명부 필드를 쓰는 기존 경로의 유일한 통로(첫 문장 RosterControl `FOR SHARE`, 반환 id를 같은 트랜잭션에서 미러). `mirrorUsersToActiveYear(tx, userIds)` — ACTIVE 학년도의 UserAcademicRecord·RosterEntry·`emailKey`를 `User` 현재값에 맞추고 needsReview 재계산, 값이 바뀐 사용자만 `profileVersion` 증가. 집합 기반 고정 문장만 사용 |
 | `test-target.ts` | 통합 테스트 DB 고정 대상 상수(`ACADEMIC_TEST_HOST` 127.0.0.1, `ACADEMIC_TEST_PORT` 55439, DB·compose 프로젝트·Docker 라벨·identity marker) + `parseAcademicTestTarget(raw)` 검증 (테스트 `__tests__/academic-year-test-target.test.ts`) |
+| `kiosk-snapshot.ts` / `local-snapshot.ts` | 키오스크 스냅샷 발급(`issueKioskSnapshot`/`issueKioskDownload`, `KioskSnapshot` 모델)·클라이언트 측 타입(`LocalSnapshot`) |
+| `upload-review.ts` / `sync-guard.ts` | 오프라인 체크인 업로드 판정·`LocalCheckInReview` 검토(`prepareUploadBatch`/`processUploadedCheckIn`), 동기화 오류 응답 |
+| `roster-service.ts` / `roster-sql.ts` / `roster-write-sql.ts` / `roster-mode-cache.ts` | 명부 조회·쓰기(`listRoster`, `upsertRosterProfile`, `readYearState`), SQL 조각, 모드 캐시 |
+| `import-service.ts` / `import-diff.ts` / `workbook.ts` / `workbook-parser.ts` / `export-service.ts` / `retention.ts` | Excel 명부 가져오기·내보내기·차이 계산, 만료 사본 정리 |
+| `rollover-service.ts` / `rollover-sql.ts` / `archive-service.ts` | 학년 전환(결정·검토·활성화), 보관 명부 삭제·기록 정정 |
+| `eligibility-mutation.ts` / `registration-context.ts` / `teacher-scope.ts` / `profile-service.ts` / `report-profile.ts` | 자격 변경 이벤트, 신청 학년도·모드 판정, 담임 범위, 학년도 프로필·보고서용 프로필 |
 
 ### 학년도 명부 스크립트 (`scripts/academic-year/`)
 
@@ -342,6 +374,7 @@ public/
 ## §9 인증 / 미들웨어
 
 - `src/auth.ts`: Auth.js v5, 전략=JWT, Google OAuth + credentials(관리자)
+  - Google provider는 `prompt=select_account`로 매번 계정 선택기를 띄운다(없으면 iOS Safari처럼 계정이 하나인 브라우저에서 거부된 계정이 자동 재사용됨). 거부 시 Auth.js가 `/?error=AccessDenied`로 보내고 홈이 `login-notice.ts`로 안내를 표시
   - signIn 콜백: email로 User 조회 (미등록 또는 `accessState≠ACTIVE` 거부), role·adminLevel·`sessionVersion` 토큰 주입
   - JWT `sessionVersion`은 **로그인 시점에만** 기록(재검증 때 덮어쓰면 끊어 둔 토큰이 되살아남). 이메일·이용 상태·권한 변경이 DB `User.sessionVersion`을 올리면 기존 토큰은 무효. 타입은 `src/types/next-auth.d.ts`
   - **매 요청 최신 DB 재검증**: `requireActor`→`assertActor`가 accessState·sessionVersion·role·adminLevel을 DB에서 다시 읽음. 토큰에 sessionVersion이 없거나(기능 이전 발급) 불일치하면 `STALE_SESSION` 401, 중단 계정은 `ACCOUNT_INACTIVE` 403. 클라이언트는 `session-recovery.ts`가 로그아웃 후 로그인 화면으로 보냄

@@ -5,6 +5,13 @@ export type RecoveryAction = "NONE" | "SIGN_OUT_HOME" | "SIGN_OUT_ADMIN";
 /** 보호된 API가 401로 돌려주는 코드. 셋 다 "다시 로그인"이 유일한 복구 수단이다. */
 const SIGNED_OUT_CODES = new Set(["STALE_SESSION", "ACCOUNT_INACTIVE", "UNAUTHENTICATED"]);
 
+// assertActor는 accessState를 sessionVersion보다 먼저 보므로 중단 계정은 세션 세대가
+// 올라가도 401이 아니라 403 ACCOUNT_INACTIVE만 받는다. 이 하나는 403이어도 로그아웃이다.
+function isSignedOut(status: number, code: string): boolean {
+  if (status === 401) return SIGNED_OUT_CODES.has(code);
+  return status === 403 && code === "ACCOUNT_INACTIVE";
+}
+
 /** 로그인 자체가 없는 공개 키오스크. 세션 상태로 화면을 옮기지 않는다. */
 const KIOSK_PREFIXES = ["/check", "/facecheck"];
 
@@ -17,9 +24,8 @@ function errorCode(body: unknown): string | null {
 }
 
 export function sessionRecoveryAction(status: number, body: unknown, pathname: string): RecoveryAction {
-  if (status !== 401) return "NONE";
   const code = errorCode(body);
-  if (code === null || !SIGNED_OUT_CODES.has(code)) return "NONE";
+  if (code === null || !isSignedOut(status, code)) return "NONE";
   if (KIOSK_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
     return "NONE";
   }

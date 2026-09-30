@@ -62,6 +62,15 @@ beforeEach(() => {
   );
 });
 
+describe("Google provider options", () => {
+  it("asks Google for the account chooser so a rejected account is not silently reused", () => {
+    const google = mocks.config!.providers.find(
+      (provider) => typeof provider === "object" && provider.id === "google",
+    ) as { options?: { authorization?: { params?: Record<string, string> } } } | undefined;
+    expect(google?.options?.authorization?.params?.prompt).toBe("select_account");
+  });
+});
+
 describe("Google login identity", () => {
   it("accepts the registered mixed-case address without changing its stored spelling", async () => {
     const before = structuredClone(accounts);

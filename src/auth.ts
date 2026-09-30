@@ -18,7 +18,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     maxAge: 60 * 60 * 24 * 365, // 365 days
   },
   providers: [
-    Google,
+    // prompt가 없으면 Google은 브라우저에 로그인된 계정이 하나일 때 선택 화면 없이 그 계정을
+    // 다시 쓴다. 미등록 계정으로 한 번 거부되면 Google 쿠키를 지우기 전까지 빠져나올 수 없었다.
+    Google({ authorization: { params: { prompt: "select_account" } } }),
     Credentials({
       id: "admin-login",
       name: "Admin",

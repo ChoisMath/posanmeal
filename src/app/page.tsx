@@ -5,8 +5,13 @@ import { Button } from "@/components/ui/button";
 import { BrandMark } from "@/components/BrandMark";
 import { ResetOnQuery } from "@/components/ResetOnQuery";
 import { HelpButton } from "@/components/guide/HelpButton";
+import { loginNoticeFor } from "@/lib/login-notice";
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string | string[] }>;
+}) {
   const session = await auth();
 
   if (session?.user) {
@@ -15,6 +20,8 @@ export default async function HomePage() {
     if (role === "TEACHER") redirect("/teacher");
     if (role === "ADMIN") redirect("/admin");
   }
+
+  const notice = loginNoticeFor((await searchParams).error);
 
   return (
     <div className="min-h-screen bg-warm-subtle flex flex-col">
@@ -39,6 +46,12 @@ export default async function HomePage() {
       {/* Login card — overlaps gradient */}
       <div className="relative -mt-10 px-6 pb-10">
         <div className="max-w-sm mx-auto glass rounded-2xl card-elevated p-6 space-y-5 page-enter">
+          {notice && (
+            <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm break-keep">
+              <p className="font-semibold text-destructive">{notice.title}</p>
+              <p className="mt-1 text-muted-foreground">{notice.detail}</p>
+            </div>
+          )}
           <form
             action={async () => {
               "use server";
