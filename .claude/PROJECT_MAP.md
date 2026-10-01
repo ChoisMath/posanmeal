@@ -2,7 +2,9 @@
 
 > Last full regeneration: 2026-05-02 (revised 2026-06-11: 식사별(MealKind) 공고/신청 구조 대개편 — LUNCH 추가, Meal/MealDate 하위 테이블 4종)
 >
-> 마지막 업데이트: 2026-09-19 (학년도별 명부 Release A — 커밋 `1d9a15e..81a4a81`. 마이그레이션 `20260919000001_add_academic_year_roster`로 User 4컬럼·`MealApplication.academicYear`·새 모델 13개 추가, `src/lib/academic-year/`(행위자 재검증 `requireActor`/`assertActor`, 계정 API, 호환 쓰기 `withCompatUserWrite`, 초기 이전), JWT `sessionVersion`·매 요청 DB 재검증, `/api/admin/users/[id]/{email,access,permissions}`, `/api/users/me` PUT 삭제, 사용자 DELETE 409, 전용 통합 테스트 DB(`tests/integration/`, `scripts/academic-year/`). 설계 `docs/superpowers/specs/2026-09-19-academic-year-roster-design.md`, 계획 `docs/superpowers/plans/2026-09-19-academic-year-roster.md`)
+> 마지막 업데이트: 2026-10-01 (랜딩/로그인 화면 재디자인 — `src/app/page.tsx`를 스크롤 없는 `100dvh` 단일 화면으로 재구성, 새 폴더 `src/components/landing/`(`LandingWord`·`LandingScene`·`GoogleLoginButton`·`landing.module.css`). "관리자 로그인" 링크 제거(`/admin/login` 주소 직접 접속), [초기화]는 `<a href="/?reset=1">` 전체 이동. 학생 안내 `src/app/help/student/content.ts` 로그인 단락의 버튼 이름을 ‘Google Login’으로 수정했고, 안내 영상·가이드 이미지(`demo-video/`)는 옛 화면 그대로(미갱신). §3·4·7·12 참조)
+>
+> 이전 업데이트: 2026-09-19 (학년도별 명부 Release A — 커밋 `1d9a15e..81a4a81`. 마이그레이션 `20260919000001_add_academic_year_roster`로 User 4컬럼·`MealApplication.academicYear`·새 모델 13개 추가, `src/lib/academic-year/`(행위자 재검증 `requireActor`/`assertActor`, 계정 API, 호환 쓰기 `withCompatUserWrite`, 초기 이전), JWT `sessionVersion`·매 요청 DB 재검증, `/api/admin/users/[id]/{email,access,permissions}`, `/api/users/me` PUT 삭제, 사용자 DELETE 409, 전용 통합 테스트 DB(`tests/integration/`, `scripts/academic-year/`). 설계 `docs/superpowers/specs/2026-09-19-academic-year-roster-design.md`, 계획 `docs/superpowers/plans/2026-09-19-academic-year-roster.md`)
 >
 > 이전 업데이트: 2026-09-19 (`/check`·`/facecheck` 공용 `KioskViewport` 추가: 실제 가시 높이와 화면 복귀·회전 대응, 확대 중 재배치 방지. `globals.css`의 `.kiosk-*`로 결과·하단 조작부를 축소하고 로컬 동기화 상세를 별도 행에 배치)
 >
@@ -53,7 +55,7 @@
 src/
 ├── app/
 │   ├── layout.tsx               # Root layout (SwUpdater, AuthProvider)
-│   ├── page.tsx                 # 랜딩 (Google 로그인)
+│   ├── page.tsx                 # 랜딩 (100dvh 단일 화면: CSS 장면·3D 로고 단어·Google Login)
 │   ├── check/page.tsx           # QR 키오스크 (공개) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과, 모드 해석 kiosk-sync.ts·로컬 판정 qr-checkin-local.ts
 │   ├── facecheck/page.tsx       # 얼굴 키오스크 (공개, 온라인·로컬) — KioskViewport 가시 높이·중앙 contain 영상·하단 1행 4색 결과 + 페이지 내 QR 모드
 │   ├── student/page.tsx         # 학생 기본 4탭 (식단, QR, 개인정보, 확인), 공고가 있으면 신청 추가
@@ -66,6 +68,7 @@ src/
 │   │       └── [id]/{edit,stats}/page.tsx
 │   └── api/                     # Route Handlers (§5 참조)
 ├── components/                  # (§7 참조)
+│   ├── landing/                 # 랜딩 전용: LandingWord·LandingScene·GoogleLoginButton·landing.module.css
 │   └── meal/                    # 식사별 공고·신청 UI (meal-ui.ts 테마 포함)
 ├── lib/                         # (§8 참조)
 │   ├── academic-year/           # 학년도 명부 도메인: 행위자 재검증·계정 서비스·호환 쓰기·초기 이전 (§8)
@@ -98,7 +101,7 @@ public/
 
 | 경로 | 파일 | 접근 | 설명 |
 |------|------|------|------|
-| `/` | `src/app/page.tsx` | 공개 | 랜딩, Google 로그인 버튼 |
+| `/` | `src/app/page.tsx` | 공개 | 랜딩(로그인) — 스크롤 없는 `100dvh` 단일 화면. 배경 `LandingScene` 모션그래픽 + 3D 로고 단어 "Meal In Posan"(`LandingWord`), 우측 상단 [학생 사용 안내](`src/components/guide/HelpButton.tsx`, 새 탭)·[초기화](`<a href="/?reset=1">` 전체 이동, §12), 하단 [Google Login](`GoogleLoginButton`, server action `signIn("google")`). 로그인 오류 안내(`loginNoticeFor`)는 버튼 위에 표시. "관리자 로그인" 링크 없음(`/admin/login` 주소로만 접속, 공개 경로는 유지). 세션이 있으면 역할별 리다이렉트 |
 | `/check` | `src/app/check/page.tsx` | 공개 | QR 키오스크 — 모드 해석은 `kiosk-sync.ts`의 `fetchKioskSettings`(5s 타임아웃; 실패 시 `loadSavedKioskSettings` IDB 폴백, 결정 전까지 "모드 확인 중"). `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`(IDB, `qr-checkin-local.ts`), 그 외 `/api/checkin` JWT(`postCheckInWithRetry`). `KioskViewport` 화면의 중앙에는 `object-contain` 영상과 실제 QR 윤곽 overlay를, 하단에는 한 줄 결과를 둔다. 결과는 성공/중복/미신청/오류별 두꺼운 초록/파랑/빨강/주황 테두리. 하단 왼쪽은 로컬 동기화 그룹, 오른쪽 [얼굴로 체크인]은 SW 오프라인 응답을 위한 의도적 전체 이동 `<a href="/facecheck">` |
 | `/facecheck` | `src/app/facecheck/page.tsx` | 공개(키오스크 키 필요; 로컬 모드 동기화는 관리자 로그인) | 안면인식 키오스크 — `KioskViewport` 내 중앙 `object-contain` 영상과 하단 1행 4색 결과를 쓰며, 얼굴 크기·경계·자세 검사와 동일 사용자·날짜·식사의 연속 3회 유효 매칭(`face-stability.ts`) 후 확인창을 연다. 학생은 학번·이름 확인/취소, 교사는 근무/개인/취소를 선택하며 모두 10초 무응답 시 취소한다. 확인 전 매칭은 읽기 전용이고 명시적 확인 후에만 저장한다. 최초 `/facecheck?key=<키>`로 접속하면 localStorage에 저장되어 이후 자동 전송. 백엔드는 `resolveFaceBackends`로 webgpu→webgl 순차 시도(`?backend=webgl\|webgpu\|auto`로 고정, localStorage `facecheck.backend`), 검출 간격은 `nextDetectDelay`(직전 검출ms/3, 30~200ms), 상태바에 `백엔드 · 검출ms` 표시. 결과가 떠 있는 동안에도 스캔은 즉시 재개(같은 사람은 10초 억제 맵). 루프 반복 실패 시 webgpu→webgl 재시도 후 QR 모드. 운영 모드 `local`이면 `runLocalFaceCheckIn`으로 브라우저 매칭·확인 후 IDB 저장. 얼굴↔QR 전환·언마운트 시 세션 세대, busy, 확인 대기, 재개/결과 타이머를 정리하고 요청·감지 호출을 AbortSignal로 취소한다. **QR 모드는 온라인·로컬 모두 페이지 안에서 동작**(`/check`로 이동하지 않음): 하단 바 오른쪽 버튼이 [QR로 체크인]↔[얼굴로 체크인]을 전환하며 `giveUpFace`도 페이지 내 QR 모드로 전환. QR 모드에서 `posanmeal:` QR이거나 로컬 모드면 `runLocalQrCheckIn`, 그 외는 `/api/checkin` JWT(`postCheckInWithRetry`) |
 | `/student` | `src/app/student/page.tsx` | 학생 | 기본 식단/QR/개인정보/확인 4탭, 신청 가능한 공고가 있으면 식단 다음에 신청 탭 추가. 기본 선택은 식단 |
@@ -248,7 +251,11 @@ public/
 | `SwUpdater` | `src/components/SwUpdater.tsx` | Service Worker 등록·갱신 (SKIP_WAITING 트리거) — SW 본체는 `public/sw.js`(`posanmeal-v7`, 캐시 전략은 §12) |
 | `ResetOnQuery` | `src/components/ResetOnQuery.tsx` | ?reset=1 쿼리 시 브라우저 캐시·IDB·SW 전체 초기화 |
 | `KioskViewport` | `src/components/KioskViewport.tsx` | `/check`·`/facecheck` 공용 화면: `innerHeight`·`visualViewport.height`의 유효 최솟값을 `--kiosk-height`에 반영(기본 `100dvh`). resize·pageshow·orientationchange·visibilitychange 시 재측정하며 확대 중에는 높이를 유지. `globals.css`의 `.kiosk-*`가 safe-area, 축소된 1행 결과, 44px 조작 영역과 별도 동기화 상세 행을 담당 |
-| `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 |
+| `BrandMark` | `src/components/BrandMark.tsx` | 로고/브랜드 마크 (랜딩에서는 미사용 — 랜딩 로고는 `LandingWord`) |
+| `LandingWord` | `src/components/landing/LandingWord.tsx` | (client) 랜딩의 3D 로고 단어 "Meal In Posan" — `next/font/google` Fredoka 700, 로고 색 글자를 14겹 `translateZ`로 적층. rAF로 CSS 변수 `--yaw`/`--pitch`만 갱신해 포인터 쪽을 바라봄(React state 미사용). 포인터가 없는 터치 기기는 천천히 좌우로 둘러보고 `prefers-reduced-motion`이면 고정 |
+| `LandingScene` | `src/components/landing/LandingScene.tsx` | (서버 컴포넌트, `aria-hidden`) 랜딩 배경의 순수 CSS 모션그래픽 — 학생이 걸어와 키오스크 앞에 멈춤 → QR 체크인 → 초록 확인 → 키오스크 뒤 문 열림 → 입장, 다음 학생은 얼굴 체크인. 한 막 10초, QR 막/얼굴 막 교대 20초 주기 |
+| `GoogleLoginButton` | `src/components/landing/GoogleLoginButton.tsx` | (client) 랜딩 [Google Login] 3D 눌림 버튼. `useFormStatus`로 전송 중 눌린 상태 유지(부모 `<form>` 안에서 사용) |
+| `landing.module.css` | `src/components/landing/landing.module.css` | 랜딩 전용 CSS 모듈(프로젝트 첫 CSS 모듈, 그 외 스타일은 `globals.css`). 장면 치수는 `--u`(`min(100vw/700, 100dvh/900)`) 배수, 타임라인 keyframes·3D 단어·버튼·`prefers-reduced-motion` 대응 포함 |
 | `PageSkeleton` | `src/components/PageSkeleton.tsx` | 로딩 스켈레톤 |
 | `LocalCheckInsTable` | `src/components/LocalCheckInsTable.tsx` | 관리자 설정 탭 모달 안 미동기 IDB 체크인 표 + `buildUserLabel` helper |
 | `EditableCell` | `src/components/EditableCell.tsx` | 관리자 표 inline 편집 셀 — `EditableTextCell` / `EditableSelectCell` named export, `SaveResult` 타입; blur·Enter 저장, Escape 취소, committingRef 이중 fire 방지, role="button"+tabIndex 접근성 |
@@ -429,6 +436,8 @@ public/
 - `CheckInSource` 필드: QR(스캔), ADMIN_MANUAL(관리자 토글), LOCAL_SYNC(오프라인 업로드) 구분
 - `SwUpdater` + `ResetOnQuery`: PWA 업데이트 시 SW SKIP_WAITING → controllerchange → 페이지 리로드; ?reset=1 시 브라우저 상태 전체 초기화
 - **Service Worker 캐시 전략 (`public/sw.js`, `CACHE_VERSION=posanmeal-v7`)**: install 시 `/check`·`/facecheck`만 프리캐시(인증 페이지는 익명 접속 시 리다이렉트라 오프라인 사본이 될 수 없음). 키오스크 페이지 내비게이션은 **네트워크 우선(5s 타임아웃) → 캐시 폴백 → 503 오프라인 HTML**(캐시 키는 쿼리 없는 pathname, `ignoreVary`) — 온라인이면 배포가 즉시 반영되고 오프라인에서도 페이지가 열림. v6까지의 `/check` 캐시 우선은 배포 후에도 옛 HTML을 영구 서빙해 hydration이 안 되고 "모드 확인 중" 스피너에 갇히는 원인이었음. `/_next/static/`·`/models/`(얼굴 모델 ~10MB, 오프라인 재로딩 후 안면인식에 필요)·아이콘/manifest/`meal.png`는 캐시 우선이며 `response.ok` 응답만 저장. 비키오스크 내비게이션과 `/api/`는 SW가 관여하지 않음. 메시지 `SKIP_WAITING`/`CLEAR_ALL` 지원
+- **랜딩 [초기화]는 `<a href="/?reset=1">` 전체 이동**: `<Link>`의 같은 페이지 soft navigation은 `ResetOnQuery`를 다시 마운트하지 않아 초기화가 실행되지 않는다. `<Link>`로 되돌리지 말 것(`@next/next/no-html-link-for-pages` 예외 주석 포함)
+- **개발 서버에서도 SW가 정적 자원을 고정**: `public/sw.js`가 `/_next/static/`을 cache-first로 잡아 개발 중 CSS(예: `landing.module.css`) 수정이 브라우저에 반영되지 않을 수 있다. SW 해제·캐시 삭제 후 확인
 - `NEIS` 급식 API: 오피스코드 D10, 학교코드 7240189, 1시간 캐시
 - 사진: `UPLOAD_DIR`(Railway Volume `/app/uploads`) 저장 → `/api/uploads/[filename]` 스트리밍 서빙, 파일 없으면 `/uploads/` 정적 폴백. 서명은 DB(`MealRegistration.signature` base64)에 보관
 - **CheckIn unique 마이그레이션 (`20260502120000`)**: `mealKind` NOT NULL + `@@unique([userId,date,mealKind])`. SQL은 반드시 `DROP INDEX IF EXISTS "CheckIn_userId_date_key"` + `CREATE UNIQUE INDEX ...` 형태로 작성 — `DROP CONSTRAINT` 는 init 마이그레이션이 `CREATE UNIQUE INDEX` 로 만든 unique를 인식하지 못해 E42704 로 실패함
