@@ -739,36 +739,14 @@
   }
 }
 
-/* 움직임을 줄인 환경: 체크인이 끝나 문이 열린 한 장면으로 고정한다 */
+/*
+ * 동작 줄이기 설정에서도 장면과 단어 회전은 유지한다. 이 화면의 본문이고, Windows에서
+ * 성능 때문에 '애니메이션 효과'를 꺼 둔 PC도 같은 설정으로 잡혀 화면 전체가 멈춰 보였다.
+ * 화면이 크게 움직이는 등장 연출만 끈다(포인터 없이 혼자 도는 움직임은 LandingWord에서 끈다).
+ */
 @media (prefers-reduced-motion: reduce) {
-  .stage *,
-  .stage *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-  .glow,
-  .spill,
-  .okLayer,
-  .legsStand {
-    opacity: 1;
-  }
-  .legsWalk,
-  .actorFace {
-    opacity: 0;
-  }
-  .actorQr {
-    opacity: 1;
-  }
-  .armQr {
-    transform: rotate(-78deg);
-  }
-  .leafLeft {
-    transform: translateX(-94%);
-  }
-  .leafRight {
-    transform: translateX(94%);
-  }
-  .word {
-    transform: rotateX(6deg) rotateY(-10deg);
+  .wordEnter,
+  .dock {
+    animation: none;
   }
 }

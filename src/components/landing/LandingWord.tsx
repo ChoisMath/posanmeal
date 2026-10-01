@@ -46,7 +46,8 @@ export function LandingWord() {
     const area = areaRef.current;
     const word = wordRef.current;
     if (!area || !word) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // 동작 줄이기 설정이면 포인터를 따라가는 회전만 남기고, 혼자 둘러보는 움직임은 끈다.
+    const canSway = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     let frame = 0;
     let previous = performance.now();
@@ -81,8 +82,9 @@ export function LandingWord() {
       const elapsed = Math.min(now - previous, 100);
       previous = now;
       // 가리키는 곳이 없으면(터치 기기 등) 천천히 좌우로 둘러본다.
-      const targetX = isTracking ? lookX : Math.sin(now / 1900) * 0.55;
-      const targetY = isTracking ? lookY : Math.sin(now / 2700) * 0.3;
+      const sway = canSway ? 1 : 0;
+      const targetX = isTracking ? lookX : Math.sin(now / 1900) * 0.55 * sway;
+      const targetY = isTracking ? lookY : Math.sin(now / 2700) * 0.3 * sway;
       const ease = 1 - Math.exp(-elapsed / FOLLOW_MS);
       yaw += (targetX * MAX_YAW - yaw) * ease;
       pitch += (-targetY * MAX_PITCH - pitch) * ease;
